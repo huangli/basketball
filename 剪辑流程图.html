@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>半截篮 · 进球集锦流水线</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@900&display=swap');
   :root {
     --bg: #faf5ee;
     --surface: #ffffff;
@@ -13,6 +14,7 @@
     --orange-soft: #c75b16;
     --text: #2c2115;
     --dim: #96836b;
+    --font-display: "Noto Sans SC", "Microsoft YaHei", sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -22,82 +24,94 @@
     line-height: 1.55;
     padding: 1.5rem 1rem;
   }
-  .poster { max-width: 28rem; margin: 0 auto; }
+  .poster { max-width: 30rem; margin: 0 auto; }
 
   header { text-align: center; padding: 1rem 0 1.5rem; }
-  .ball { width: 3.25rem; height: 3.25rem; margin: 0 auto 0.625rem; }
-  h1 { font-size: 1.375rem; letter-spacing: 0.03em; }
+  .logo {
+    width: 7rem; height: 7rem; margin: 0 auto 0.75rem;
+    border-radius: 50%; overflow: hidden;
+    box-shadow: 0 2px 8px rgba(44, 33, 21, 0.15);
+  }
+  .logo img {
+    width: 100%; height: 100%; object-fit: cover;
+    transform: scale(1.22);
+  }
+  h1 {
+    font-family: var(--font-display); font-weight: 900;
+    font-size: 1.875rem; letter-spacing: 0.08em;
+  }
   h1 span { color: var(--orange); }
-  .slogan { color: var(--dim); font-size: 0.8rem; margin-top: 0.25rem; }
+  .slogan { color: var(--dim); font-size: 0.95rem; margin-top: 0.25rem; }
 
   .steps { display: flex; flex-direction: column; }
   .step { display: flex; gap: 0.875rem; position: relative; padding-bottom: 1.25rem; }
   .step:last-child { padding-bottom: 0; }
   .step::before {
-    content: ""; position: absolute; left: 1.0625rem; top: 2.25rem; bottom: 0;
+    content: ""; position: absolute; left: 1.1875rem; top: 2.5rem; bottom: 0;
     width: 2px; background: var(--line);
   }
   .step:last-child::before { display: none; }
   .num {
-    flex: none; width: 2.25rem; height: 2.25rem; border-radius: 50%;
+    flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%;
     background: var(--surface); border: 2px solid var(--orange);
-    color: var(--orange); font-weight: 700;
+    color: var(--orange); font-family: var(--font-display); font-weight: 900; font-size: 1.25rem;
     display: flex; align-items: center; justify-content: center;
     position: relative; z-index: 1;
   }
   .card {
     flex: 1; background: var(--surface); border: 1px solid var(--line);
-    border-radius: 0.5rem; padding: 0.625rem 0.875rem;
+    border-radius: 0.5rem; padding: 0.75rem 1rem;
   }
-  .card h2 { font-size: 0.925rem; display: inline; }
-  .card p { display: inline; font-size: 0.8rem; color: var(--dim); }
+  .card h2 {
+    font-family: var(--font-display); font-weight: 900;
+    font-size: 1.125rem; letter-spacing: 0.05em; display: inline;
+  }
+  .card p { display: inline; font-size: 0.9375rem; color: var(--dim); }
   .card p::before { content: "　"; }
   .card p strong { color: var(--orange-soft); font-weight: 600; }
 
   .outputs { margin-top: 1.5rem; }
   .outputs h2 {
-    font-size: 0.75rem; color: var(--dim); letter-spacing: 0.25em;
+    font-size: 0.875rem; color: var(--dim); letter-spacing: 0.25em;
     text-align: center; margin-bottom: 0.625rem;
   }
   .out-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.625rem; }
   .out {
     background: var(--surface); border: 1px solid var(--orange);
-    border-radius: 0.5rem; padding: 0.75rem 0.5rem; text-align: center;
+    border-radius: 0.5rem; padding: 0.875rem 0.5rem; text-align: center;
   }
-  .out .kind { font-size: 0.7rem; color: var(--orange-soft); letter-spacing: 0.1em; }
-  .out .name { font-size: 0.875rem; font-weight: 700; margin-top: 0.125rem; }
+  .out .kind { font-size: 0.8125rem; color: var(--orange-soft); letter-spacing: 0.1em; }
+  .out .name {
+    font-family: var(--font-display); font-weight: 900;
+    font-size: 1.0625rem; letter-spacing: 0.03em; margin-top: 0.125rem;
+  }
 
   .specs {
     margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center;
   }
   .chip {
-    font-size: 0.7rem; color: var(--dim);
-    border: 1px solid var(--line); border-radius: 1rem; padding: 0.15rem 0.65rem;
+    font-size: 0.8125rem; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 0.2rem 0.7rem;
     background: var(--surface);
   }
   .chip strong { color: var(--orange-soft); font-weight: 600; }
 
   footer {
-    margin-top: 1.5rem; text-align: center; font-size: 0.75rem; color: var(--dim);
+    margin-top: 1.5rem; text-align: center; font-size: 0.875rem; color: var(--dim);
     border-top: 1px solid var(--line); padding-top: 0.875rem;
   }
-  footer .vision { color: var(--orange); font-weight: 700; letter-spacing: 0.2em; margin-top: 0.25rem; }
+  footer .vision {
+    color: var(--orange); font-family: var(--font-display); font-weight: 900;
+    font-size: 1rem; letter-spacing: 0.25em; margin-top: 0.375rem;
+  }
 </style>
 </head>
 <body>
 <div class="poster">
 
   <header>
-    <svg class="ball" viewBox="0 0 64 64" aria-hidden="true">
-      <circle cx="32" cy="32" r="30" fill="#e8722a"/>
-      <g stroke="#2c2115" stroke-width="2.5" fill="none">
-        <circle cx="32" cy="32" r="30"/>
-        <path d="M32 2 V62 M2 32 H62"/>
-        <path d="M10 10 C 22 22, 22 42, 10 54"/>
-        <path d="M54 10 C 42 22, 42 42, 54 54"/>
-      </g>
-    </svg>
-    <h1>半截篮 <span>·</span> 进球集锦流水线</h1>
+    <div class="logo"><img src="resource/logo.png" alt="半截篮队标"></div>
+    <h1>进球集锦流水线</h1>
     <p class="slogan">全程录像 → AI 找进球 → 人手一份集锦</p>
   </header>
 
@@ -107,7 +121,7 @@
       <div class="num">1</div>
       <div class="card">
         <h2>录像</h2>
-        <p>大疆全场录像，随时加新场次</p>
+        <p>全场录像，随时加新场次</p>
       </div>
     </div>
 
