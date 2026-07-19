@@ -13,7 +13,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "热身投篮，球向远框"
+      "note": "热身投篮，球向远框 | 存疑待高清复看: 3.0s 白衣高弧度投篮远筐，过网不可辨",
+      "zoom_anchors": [
+        3.0
+      ]
     },
     {
       "file": "DJI_20250419185047_0006_D.MP4",
@@ -26,8 +29,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "半场进攻投篮，球在篮筐附近"
+      "status": "rejected",
+      "note": "半场进攻投篮，球在篮筐附近 | rejected: 5.6s黑衣21号打铁、7.6s白衣弹筐而出、10.4s出手结果出窗"
     },
     {
       "file": "DJI_20250419185047_0006_D.MP4",
@@ -41,35 +44,38 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "球在篮筐上方空中"
+      "note": "球在篮筐上方空中 | 存疑待高清复看: 11.2s 白衣(绿边短裤护膝)出手疑似空心入网",
+      "zoom_anchors": [
+        11.2
+      ]
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
       "session": "20250419",
       "window_start": 0.0,
       "window_end": 8.0,
-      "anchor_time": null,
-      "clip_start": null,
-      "clip_end": null,
-      "slowmo": null,
+      "anchor_time": 4.5,
+      "clip_start": 0.5,
+      "clip_end": 6.5,
+      "slowmo": false,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "开场连续攻筐/篮下混战"
+      "status": "confirmed",
+      "note": "开场连续攻筐/篮下混战 | 白衣(绿边短裤护膝)右侧突破扣篮/上篮压入筐，确认"
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
       "session": "20250419",
       "window_start": 7.5,
       "window_end": 17.5,
-      "anchor_time": null,
-      "clip_start": null,
-      "clip_end": null,
-      "slowmo": null,
+      "anchor_time": 12.6,
+      "clip_start": 8.6,
+      "clip_end": 14.6,
+      "slowmo": false,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "篮下聚集+快攻上篮"
+      "status": "confirmed",
+      "note": "篮下聚集+快攻上篮 | 黑衣21号左翼跳投穿网，确认"
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
@@ -82,8 +88,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "黑衣上篮动作"
+      "status": "rejected",
+      "note": "黑衣上篮动作 | rejected: 开局打铁，之后全程传导无有效出手"
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
@@ -96,8 +102,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "白00突破上篮+白衣投篮"
+      "status": "rejected",
+      "note": "白00突破上篮+白衣投篮 | rejected: 全程运球传球热身，无出手"
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
@@ -111,7 +117,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "篮下出手/球在空中"
+      "note": "篮下出手/球在空中 | 存疑待高清复看: 30.5s 黑衣篮下连续抢板补篮，过网不可辨",
+      "zoom_anchors": [
+        30.5
+      ]
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
@@ -125,7 +134,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "篮下混战疑似补篮"
+      "note": "篮下混战疑似补篮 | 存疑待高清复看: 40.2s 深色背心跳投偏出后队友补篮疑似补进",
+      "zoom_anchors": [
+        40.2
+      ]
     },
     {
       "file": "DJI_20250419185204_0008_D.MP4",
@@ -139,7 +151,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "左翼投篮+白蓝球员突破"
+      "note": "左翼投篮+白蓝球员突破 | 存疑待高清复看: 1.4s 深色背心绿短裤接球跳投疑似命中",
+      "zoom_anchors": [
+        1.4
+      ]
     },
     {
       "file": "DJI_20250419185204_0008_D.MP4",
@@ -153,7 +168,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "白衫绿短裤左筐上篮"
+      "note": "白衫绿短裤左筐上篮 | 存疑待高清复看: 12.2s 白衣突破上篮，过网瞬间被篮架遮挡",
+      "zoom_anchors": [
+        12.2
+      ]
     },
     {
       "file": "DJI_20250419185204_0008_D.MP4",
@@ -167,7 +185,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "白队右侧投篮出手"
+      "note": "白队右侧投篮出手 | 存疑待高清复看: 25.7s 白衣00号右侧跳投，倾向命中",
+      "zoom_anchors": [
+        25.7
+      ]
     },
     {
       "file": "DJI_20250419185252_0009_D.MP4",
@@ -180,8 +201,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "右侧投篮出手+突破"
+      "status": "rejected",
+      "note": "右侧投篮出手+突破 | rejected: 全程传导球，无出手"
     },
     {
       "file": "DJI_20250419185252_0009_D.MP4",
@@ -194,8 +215,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "黑衣突破+篮下抢球投篮"
+      "status": "rejected",
+      "note": "黑衣突破+篮下抢球投篮 | rejected: 单打分球，无出手"
     },
     {
       "file": "DJI_20250419185252_0009_D.MP4",
@@ -208,8 +229,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "白衣近筐投篮"
+      "status": "rejected",
+      "note": "白衣近筐投篮 | rejected: 组织传导，无出手"
     },
     {
       "file": "DJI_20250419185252_0009_D.MP4",
@@ -223,7 +244,11 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "左筐球在空中"
+      "note": "左筐球在空中 | 存疑待高清复看: 25.1s 黑衣21号突破上篮/扣篮; 28.2s 黑衣背心中距离，球出画",
+      "zoom_anchors": [
+        25.1,
+        28.2
+      ]
     },
     {
       "file": "DJI_20250419185341_0010_D.MP4",
@@ -237,7 +262,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "篮下出手/抢篮板"
+      "note": "篮下出手/抢篮板 | 存疑待高清复看: 8.7s 远端篮下多人争抢，疑似上篮/补篮",
+      "zoom_anchors": [
+        8.7
+      ]
     },
     {
       "file": "DJI_20250419185341_0010_D.MP4",
@@ -250,8 +278,8 @@
       "slowmo": null,
       "player_label": null,
       "team_label": null,
-      "status": "candidate",
-      "note": "白00投篮出手"
+      "status": "rejected",
+      "note": "白00投篮出手 | rejected: 白衣00号跳投打铁弹出"
     },
     {
       "file": "DJI_20250419185341_0010_D.MP4",
@@ -265,7 +293,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "黑衣突破上篮"
+      "note": "黑衣突破上篮 | 存疑待高清复看: 34.9s 白衣弧顶出手，结果不可见",
+      "zoom_anchors": [
+        34.9
+      ]
     },
     {
       "file": "DJI_20250419185341_0010_D.MP4",
@@ -279,7 +310,10 @@
       "player_label": null,
       "team_label": null,
       "status": "candidate",
-      "note": "白衣投篮球在空中"
+      "note": "白衣投篮球在空中 | 存疑待高清复看: 39.1s 白衣00号右翼急停跳投，去向不明",
+      "zoom_anchors": [
+        39.1
+      ]
     },
     {
       "file": "DJI_20250419185341_0010_D.MP4",
