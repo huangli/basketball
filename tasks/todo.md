@@ -4,16 +4,16 @@
 > **落盘纪律**：所有目检/判定任务，每判定一条立即写 goals.json，保证任意时刻中断可续。
 > **候选期扩展字段**（SPEC schema 之外，plan 已声明）：`window_start`/`window_end`。
 
-## Task 0.1: 全量扫描与文件清单
+## Task 0.1: 全量扫描与文件清单 ✅ 已完成（2026-07-19，commit 见 git log）
 
 **描述：** 递归扫描 `0_raw_videos\*.MP4/*.LRF`，同名配对（容忍单边缺失），逐 MP4 用 ffprobe 记录 width/height/avg_frame_rate/pix_fmt/duration，写 `work\file_inventory.json`（以文件名为主键），头部写编码器决策（本次探测无 NVIDIA 卡 → `encoder: libx264`；后续会话重探）。
 
 **验收标准：**
-- [ ] inventory 条目数 = 当次扫描 MP4 数，每条含 fps/pix_fmt/duration
-- [ ] LRF 缺失的 MP4 列出清单（后续用原片低清抽帧代替粗扫）
-- [ ] inventory 头部含 `encoder` 字段
+- [x] inventory 条目数 = 当次扫描 MP4 数（115），每条含 fps/pix_fmt/duration
+- [x] LRF 缺失的 MP4 列出清单（本次 0 个缺失）
+- [x] inventory 头部含 `encoder` 字段（libx264）
 
-**验证：** python `json.load` 解析通过；抽查 3 个文件与手动 ffprobe 一致
+**验证：** `python scripts\verify_inventory.py` 全部通过（9 项）；实现 `scripts\build_inventory.py`（8 线程并行 ffprobe）
 
 **依赖：** 无 | **规模：** S
 
