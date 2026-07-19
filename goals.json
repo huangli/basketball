@@ -74,8 +74,8 @@
       "slowmo": false,
       "player_label": null,
       "team_label": null,
-      "status": "confirmed",
-      "note": "篮下聚集+快攻上篮 | 黑衣21号左翼跳投穿网，确认"
+      "status": "rejected",
+      "note": "篮下聚集+快攻上篮 | 黑衣21号左翼跳投穿网，确认 | rejected: 用户看样片否决：非进球（子代理误报）"
     },
     {
       "file": "DJI_20250419185121_0007_D.MP4",
@@ -150,8 +150,8 @@
       "slowmo": false,
       "player_label": null,
       "team_label": null,
-      "status": "confirmed",
-      "note": "左翼投篮+白蓝球员突破 | 存疑待高清复看: 1.4s 深色背心绿短裤接球跳投疑似命中 | 深色背心绿短裤跳投，球砸记分牌弹回坠入网中（幸运球），高清确认"
+      "status": "rejected",
+      "note": "左翼投篮+白蓝球员突破 | 存疑待高清复看: 1.4s 深色背心绿短裤接球跳投疑似命中 | 深色背心绿短裤跳投，球砸记分牌弹回坠入网中（幸运球），高清确认 | rejected: 用户看样片否决：非进球（子代理高清复看幻觉）"
     },
     {
       "file": "DJI_20250419185204_0008_D.MP4",
