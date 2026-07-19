@@ -1,4 +1,5 @@
 # 存疑锚点高清复看抽帧：1920x1440 单帧，锚点 ±0.6s @10fps（幂等）
+import argparse
 import json
 import subprocess
 import sys
@@ -12,16 +13,15 @@ RAW = ROOT / "0_raw_videos"
 FRAMES = ROOT / "work" / "frames"
 GOALS = ROOT / "goals.json"
 INV = ROOT / "work" / "file_inventory.json"
-SPAN = 0.6
 FPS = 10
 
 
-def gen(job):
+def gen(job, before, after):
     g, a, duration = job
     stem = Path(g["file"]).stem
     d = FRAMES / stem
     prefix = f"zoom_{g['window_start']}_{a}_"
-    start, end = max(0.0, a - SPAN), min(duration, a + SPAN)
+    start, end = max(0.0, a - before), min(duration, a + after)
     want = round((end - start) * FPS)
     if d.exists() and len(list(d.glob(f"{prefix}*.jpg"))) >= want - 1:
         return f"{stem}|{a}", "skip", ""
@@ -37,14 +37,21 @@ def gen(job):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--before", type=float, default=0.6)
+    ap.add_argument("--after", type=float, default=0.6)
+    ap.add_argument("--only", type=str, default="", help="只处理这些 file|anchor，逗号分隔")
+    args = ap.parse_args()
     inv = json.loads(INV.read_text(encoding="utf-8"))["files"]
     gj = json.loads(GOALS.read_text(encoding="utf-8"))
+    only = set(filter(None, args.only.split(",")))
     jobs = [(g, a, inv[g["file"]]["duration"])
             for g in gj["goals"] if g.get("zoom_anchors") and g["file"] in inv
-            for a in g["zoom_anchors"]]
+            for a in g["zoom_anchors"]
+            if not only or f"{g['file']}|{a}" in only]
     results = {"skip": 0, "ok": 0, "error": []}
     with ThreadPoolExecutor(max_workers=3) as ex:
-        for key, status, err in ex.map(gen, jobs):
+        for key, status, err in ex.map(lambda j: gen(j, args.before, args.after), jobs):
             if status == "error":
                 results["error"].append(f"{key}: {err}")
             else:
