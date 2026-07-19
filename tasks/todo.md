@@ -33,7 +33,7 @@
 
 ---
 
-## Task 0.2b: 场次确认门禁【G0】
+## Task 0.2b: 场次确认门禁【G0】✅ 已完成（2026-07-19，用户拍板：a/b 合并）
 
 **描述：** 把场次清单（ID/时间段/文件数/拆分建议）交用户确认、改名或声明对手名；结果回写 `work\sessions.json`。**变更时四处同步**（SPEC §9）：sessions.json、goals.json 既有记录 session、roster.json 场次 key、`output\`/`work\roster\` 对应目录名。G0 只门禁阶段 2 花名册及以后，阶段 1 目检按草案先行。
 

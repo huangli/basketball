@@ -46,22 +46,26 @@ for s in sessions:
     check(f"场次 {s['id']} 起止时间与文件一致",
           s["start"] == min(ts).isoformat() and s["end"] == max(ts).isoformat())
 
-# 同一场次内相邻文件间隔必须 <= 阈值；不同场次（同日期）边界间隔必须 > 阈值
+# 同一场次内相邻文件间隔必须 <= 阈值（draft 状态强制；confirmed 状态为用户拍板，跳过）
+# 不同场次（同日期）边界间隔必须 > 阈值（同理仅 draft 强制）
 th = ses.get("split_threshold_hours", 2)
+is_draft = ses.get("status") == "draft"
 for s in sessions:
     ts = sorted(ftime(f) for f in s["files"])
     gaps = [(ts[i + 1] - ts[i]).total_seconds() / 3600 for i in range(len(ts) - 1)]
-    check(f"场次 {s['id']} 内无超 {th}h 间隔", all(g <= th for g in gaps),
-          f"最大 {max(gaps, default=0):.2f}h")
+    if is_draft:
+        check(f"场次 {s['id']} 内无超 {th}h 间隔", all(g <= th for g in gaps),
+              f"最大 {max(gaps, default=0):.2f}h")
 
 by_date = {}
 for s in sessions:
     by_date.setdefault(s["id"][:8], []).append(s)
-for date, group in by_date.items():
-    group = sorted(group, key=lambda x: x["start"])
-    for a, b in zip(group, group[1:]):
-        gap = (datetime.fromisoformat(b["start"]) - datetime.fromisoformat(a["end"])).total_seconds() / 3600
-        check(f"{date} 场次边界 {a['id']}→{b['id']} 间隔 > {th}h", gap > th, f"{gap:.2f}h")
+if is_draft:
+    for date, group in by_date.items():
+        group = sorted(group, key=lambda x: x["start"])
+        for a, b in zip(group, group[1:]):
+            gap = (datetime.fromisoformat(b["start"]) - datetime.fromisoformat(a["end"])).total_seconds() / 3600
+            check(f"{date} 场次边界 {a['id']}→{b['id']} 间隔 > {th}h", gap > th, f"{gap:.2f}h")
 
 check("suggestions 字段存在（可为空列表）", isinstance(ses.get("suggestions"), list))
 check("status 为 draft 或 confirmed", ses.get("status") in ("draft", "confirmed"), ses.get("status"))
