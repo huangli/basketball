@@ -61,7 +61,7 @@
 
 ---
 
-## Task 1.2.x: 目检子批锁候选（每个子批一个任务）🔄 进行中（5/12：子批1-5 完成，116 候选；下次从子批6（0051-0060）继续，清单在 work\view_batches.json）
+## Task 1.2.x: 目检子批锁候选（每个子批一个任务）✅ 完成（12/12，306 候选/95 文件；子批6-12 由子代理执行）
 
 **描述：** 子批 ≤10 个文件或 ≤150 张 tile（子批清单按文件名序从 sessions.json 文件全集切分）。逐张查看 tile（Read 工具），锁定「球接近篮筐疑似入网」±5s 时间窗。**看不清的窗口当场闭环**：立即对该窗口用原片高清缩样（scale≥1920:1440）抽帧复看，复看完才决定记 candidate 或放弃。每条判定后立即写 goals.json v2：`file`、`session`（按 sessions.json 草案派生）、`window_start/window_end`、`status=candidate`。
 
