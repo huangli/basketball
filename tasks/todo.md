@@ -19,7 +19,7 @@
 
 ---
 
-## Task 0.2a: 场次清单草案与派生规则
+## Task 0.2a: 场次清单草案与派生规则 ✅ 已完成（2026-07-19）
 
 **描述：** 按文件名 `DJI_YYYYMMDDHHMMSS` 分组：先按日期分，同日内相邻文件间隔 >2h 处建议拆分 `YYYYMMDD-a/-b`。产出**草案**落盘 `work\sessions.json`：每场含 session_id/时间范围/文件清单 + 派生规则（文件名 → session 的映射逻辑）。
 
