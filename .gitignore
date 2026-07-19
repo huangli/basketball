@@ -1,0 +1,19 @@
+# 原始素材与视频成品（不入库）
+*.MP4
+*.mp4
+*.LRF
+*.lrf
+*.mov
+*.MOV
+*.mkv
+*.avi
+
+# 中间产物（可再生成）
+work/
+
+# 系统垃圾
+Thumbs.db
+Desktop.ini
+
+# 工具配置
+.opencode/

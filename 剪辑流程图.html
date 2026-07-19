@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>半截篮 · 进球集锦流水线</title>
+<style>
+  :root {
+    --bg: #faf5ee;
+    --surface: #ffffff;
+    --line: #e9ddcc;
+    --orange: #e8722a;
+    --orange-soft: #c75b16;
+    --text: #2c2115;
+    --dim: #96836b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    line-height: 1.55;
+    padding: 1.5rem 1rem;
+  }
+  .poster { max-width: 28rem; margin: 0 auto; }
+
+  header { text-align: center; padding: 1rem 0 1.5rem; }
+  .ball { width: 3.25rem; height: 3.25rem; margin: 0 auto 0.625rem; }
+  h1 { font-size: 1.375rem; letter-spacing: 0.03em; }
+  h1 span { color: var(--orange); }
+  .slogan { color: var(--dim); font-size: 0.8rem; margin-top: 0.25rem; }
+
+  .steps { display: flex; flex-direction: column; }
+  .step { display: flex; gap: 0.875rem; position: relative; padding-bottom: 1.25rem; }
+  .step:last-child { padding-bottom: 0; }
+  .step::before {
+    content: ""; position: absolute; left: 1.0625rem; top: 2.25rem; bottom: 0;
+    width: 2px; background: var(--line);
+  }
+  .step:last-child::before { display: none; }
+  .num {
+    flex: none; width: 2.25rem; height: 2.25rem; border-radius: 50%;
+    background: var(--surface); border: 2px solid var(--orange);
+    color: var(--orange); font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; z-index: 1;
+  }
+  .card {
+    flex: 1; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 0.5rem; padding: 0.625rem 0.875rem;
+  }
+  .card h2 { font-size: 0.925rem; display: inline; }
+  .card p { display: inline; font-size: 0.8rem; color: var(--dim); }
+  .card p::before { content: "　"; }
+  .card p strong { color: var(--orange-soft); font-weight: 600; }
+
+  .outputs { margin-top: 1.5rem; }
+  .outputs h2 {
+    font-size: 0.75rem; color: var(--dim); letter-spacing: 0.25em;
+    text-align: center; margin-bottom: 0.625rem;
+  }
+  .out-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.625rem; }
+  .out {
+    background: var(--surface); border: 1px solid var(--orange);
+    border-radius: 0.5rem; padding: 0.75rem 0.5rem; text-align: center;
+  }
+  .out .kind { font-size: 0.7rem; color: var(--orange-soft); letter-spacing: 0.1em; }
+  .out .name { font-size: 0.875rem; font-weight: 700; margin-top: 0.125rem; }
+
+  .specs {
+    margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center;
+  }
+  .chip {
+    font-size: 0.7rem; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 0.15rem 0.65rem;
+    background: var(--surface);
+  }
+  .chip strong { color: var(--orange-soft); font-weight: 600; }
+
+  footer {
+    margin-top: 1.5rem; text-align: center; font-size: 0.75rem; color: var(--dim);
+    border-top: 1px solid var(--line); padding-top: 0.875rem;
+  }
+  footer .vision { color: var(--orange); font-weight: 700; letter-spacing: 0.2em; margin-top: 0.25rem; }
+</style>
+</head>
+<body>
+<div class="poster">
+
+  <header>
+    <svg class="ball" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="32" r="30" fill="#e8722a"/>
+      <g stroke="#2c2115" stroke-width="2.5" fill="none">
+        <circle cx="32" cy="32" r="30"/>
+        <path d="M32 2 V62 M2 32 H62"/>
+        <path d="M10 10 C 22 22, 22 42, 10 54"/>
+        <path d="M54 10 C 42 22, 42 42, 54 54"/>
+      </g>
+    </svg>
+    <h1>半截篮 <span>·</span> 进球集锦流水线</h1>
+    <p class="slogan">全程录像 → AI 找进球 → 人手一份集锦</p>
+  </header>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="num">1</div>
+      <div class="card">
+        <h2>录像</h2>
+        <p>大疆全场录像，随时加新场次</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">2</div>
+      <div class="card">
+        <h2>AI 找进球</h2>
+        <p>两道确认，锁定入网瞬间 <strong>±0.1 秒</strong></p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">3</div>
+      <div class="card">
+        <h2>认人</h2>
+        <p>标签花名册（如 <strong>红队-7号</strong>），群里确认后开剪</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">4</div>
+      <div class="card">
+        <h2>剪辑</h2>
+        <p>入网前 4 秒 + 后 2 秒，入网后<strong>自动慢放</strong></p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num">5</div>
+      <div class="card">
+        <h2>交付</h2>
+        <p>按场次合成，校验后发出</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="outputs">
+    <h2>每 场 你 能 拿 到</h2>
+    <div class="out-grid">
+      <div class="out">
+        <p class="kind">队伍集锦</p>
+        <p class="name">队伍_红队_进球集锦</p>
+      </div>
+      <div class="out">
+        <p class="kind">个人合集</p>
+        <p class="name">个人_红队-7号_进球合集</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="specs">
+    <span class="chip"><strong>1440×1080</strong> 4:3</span>
+    <span class="chip"><strong>50fps</strong></span>
+    <span class="chip">片段 <strong>6s</strong> / 慢放 <strong>8s</strong></span>
+  </div>
+
+  <footer>
+    <p>新场次报一声对手名字即可开工</p>
+    <p class="vision">半 截 篮 · 玩 到 60 岁</p>
+  </footer>
+
+</div>
+</body>
+</html>
