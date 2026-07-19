@@ -47,7 +47,7 @@
 
 ---
 
-## Task 1.1: 补全全部视频 tile 接触表
+## Task 1.1: 补全全部视频 tile 接触表 ✅ 已完成（2026-07-19，408 张 tile / 115 视频）
 
 **描述：** 按 SPEC §4.2 命令对全部 LRF 生成 2fps、5×4、320×240 单元 tile 到 `work\frames\<basename>\tile_%04d.jpg`，幂等跳过已有非空目录；LRF 缺失的 MP4 退回原片低清抽帧。
 
