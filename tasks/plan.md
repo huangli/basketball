@@ -1,96 +1,72 @@
-# 实施计划：篮球进球视频剪辑流水线（v2，对齐 SPEC v2）
+# 实施计划：篮筐 ROI 检测 + 技术统计（v3.1，试点 50 文件）
 
 ## 概述
 
-从 `0_raw_videos\`（MP4 + LRF，数量以当次扫描为准，素材流动增删）检测「球入网」进球时刻，按 SPEC v2 剪辑（前4s+后2s、1440×1080/50fps、100fps 素材入网后 2s 半速慢放成片 8s），**按场次隔离**输出：每场次每队一个集锦 + 每人一个合集，均落 `output\<场次>\`。检测 = 方案 A（ffmpeg 抽帧 + agent 目检），不压缩 token。
+按设计文档 `docs/superpowers/specs/2026-07-20-hoop-roi-detection-design.md`（v3.1，已过 spec-reviewer 审查修订）重建检测阶段：每文件标定篮筐（`work/hoops.json`）→ 原片 crop 2fps 粗扫 → 候选窗口 10fps crop 精判（confirmed/attempt/rejected/uncertain 四选一）→ **uncertain 用户定夺门禁** → 全画投篮者帧 → 花名册（G1 门禁）→ 标注 points/assist → 技术统计.csv。试点 = 文件名序前 50 个 MP4（含 ground truth 0005~0010），验收达标后推全量 115。**attempt（出手未中）是一等事件**：不进成片，但是命中率/出手数的数据源。抢断、正负值不做（用户已排除）。
 
 ## 架构决策
 
-- **纯 ffmpeg + 目检**；Python 仅读写 JSON。编码器决策存 `work\file_inventory.json` 头部（本次探测：无 NVIDIA 卡 → libx264），下游任务一律引用该决策，不硬编码
-- **场次（session）为一等公民**：goals.json v2 每条带 `session`；roster.json v2 按场次 key 隔离、`confirmed` 按场次独立置门；输出 `output\<场次>\`
-- **场次两级确认**：0.2a 先计算场次清单与派生规则并落盘 `work\sessions.json` 草案（阶段 1 目检据此预填 session）；0.2b 是用户确认门禁 G0，只门禁 2.4 花名册及以后（精抽定帧 2.1/2.2 不依赖场次终表，可先行）。G0 若改名/拆分，须同步五处：sessions.json、goals.json 既有记录 session、roster.json 场次 key 及其 players 的 rep_frame 路径、`output\`/`work\roster\` 对应目录名（SPEC §9）
-- **状态机**：`candidate → confirmed → clipped → done`，分支 `rejected` / `removed`，终态记录保留不删
-- **两级检测**：LRF 2fps tile 接触表锁候选（±5s 窗）→ 原片 10fps 精抽定帧（±0.1s）
-- **concat 列表一律纯文件名**，列表文件与片段同放 `work\clips\`
-- **候选期扩展字段**（SPEC schema 之外，本计划声明）：candidate 阶段允许 `window_start`/`window_end`；confirmed 后这些字段可保留，player_label/team_label 在花名册确认前一律显式为 `null`
+- **一切看图均在原片篮筐 crop**（near S=1500 / far S=900）；tile/拼图一律 ≤~2000px（标定 cell 480×360=×8 倍率，唯一口径，meta.json 落盘防漂移）
+- **tile 滤镜丢尾防线**：所有拼图输入补齐 12 的倍数；精判窗 t±2.7s=54 帧整除 + `-frames:v 6` 强制恰 6 张（win_end clamp 到文件时长，win_start 文件名 round 0.1s）
+- **唯一落盘路径**：AI 子批只产批级 JSON，主控串行运行落盘脚本合并，禁止并行直接写 goals.json；同 file+hoop 候选 |Δt|<3s 合并防多窗一球双计，统计前 anchor<2s 报警复核
+- 旧 goals.json 归档 `work/goals_v2_archive.json`；新 goals.json 为 v3（v2 字段保留 + `result`/`points`/`assist_label`/`hoop_id`/`source`/`note`）
+- **投篮者帧 1600×1200×3**（anchor-3/-2/-1），一帧三用：认人 / 判 1·2·3 分 / 判助攻；快攻长传盲区为已知口径下限，报告 assist null 占比
+- **花名册覆盖出手者 + 可辨识传球者**（否则助攻无处可记）
+- **音频峰值只兜底进球召回**（峰值 ±5s 无任何记录 → 对全部未 dropped hoop 补精判，`source=audio`），不单独产生记录
+- AI 目检子批执行（粗扫 ≤10 文件/批、精判 ≤50 候选/批），子代理并行（仅目检与产 JSON），429 限流则串行重试
+- 阶段 3~5（剪辑/合成/验证）规格不动；编码器取 `work/file_inventory.json` 头部决策（本次 libx264）；试点不执行阶段 3 剪辑
 
 ## 依赖图
 
 ```
-0.1 扫描+inventory → 0.2a 场次清单草案(sessions.json) ──┐
-    │                                                    │
-    ├── 接触表生成（幂等）→ 目检锁候选（子批，预填 session）   │ 0.2b 用户确认场次【G0】
-    │       │（看不清的窗口当场用原片高清缩样复看后定夺）      │（只门禁 2.4 花名册及以后；
-    │       └── goals.json candidate                       │  改名/拆分→五处同步）
-    │               └── 原片精抽定帧 → confirmed/rejected
-    │                       └── 抽投篮者帧 → 按场次归并花名册 ◄─┘
-    │                               └──【G1：用户按场次确认 roster】
-    │                                       └── 该场次片段剪辑 → clipped
-    │                                               └── 该场次分组 concat → output\<场次>\
-    │                                                       └── 成品验证
+T1 试点初始化（归档+50清单）
+└→ T2 标定帧脚本 → T3 AI标定 hoops.json【含抽验复标】
+    ├→ T4 粗扫脚本(+落盘脚本扩展) → T5 AI粗扫候选（5子批）→ T7 精判脚本(+判定落盘脚本) → T8 AI精判（分批）
+    │                                                                                        └→ T8.5 uncertain 用户定夺【门禁】
+    └→ T6 音频峰值（与 T4/T5 并行）→ T9 音频兜底补判（T8 后）─────────────────────────────┐
+T8.5 + T9 ─→ T10 投篮者帧 → T11 花名册【G1】→ T12 标注 → T14 统计+报告
+T13 召回金标准（T8 后，与 T9~T12 并行；gold 用户确认后生效）→ T14
 ```
 
-G1 按场次独立：先确认的场次先进入阶段 3，不等其他场次。
+T14 内 SPEC.md/AGENTS.md 更新后必须派 spec-reviewer 子代理审查（AGENTS.md 强制）。
 
-## 任务清单
+## 任务清单（详见 tasks/todo.md）
 
-### 阶段 0：扫描与场次
-
-- [ ] Task 0.1：全量扫描 + `work\file_inventory.json`（MP4/LRF 配对、逐文件 fps/位深/时长、编码器决策）
-- [ ] Task 0.2a：计算场次清单（日期分组 + >2h 间隔拆分建议）与派生规则，落盘 `work\sessions.json` 草案
-- [ ] Task 0.2b：场次清单交用户确认/改名【门禁 G0】；变更时四处同步
-
-### 阶段 1：接触表与候选检测（子批 ≤10 文件或 ≤150 张 tile）
-
-- [ ] Task 1.1：补全全部视频 2fps 5×4 tile 接触表（幂等跳过已有）
-- [ ] Task 1.2.x：逐子批目检锁候选 → goals.json candidate（每条判定后立即落盘，可中断续做）
-
-### 检查点 1：候选全量
-
-- [ ] 全部 tile 已目检；goals.json 候选字段完整（file/session/window_start/window_end）；向用户通报候选量级
-
-### 阶段 2：精确定帧与花名册（按场次组织）
-
-- [ ] Task 2.1：全部候选窗口原片 10fps 精抽拼 tile（文件名含 win_start+候选估值防碰撞）
-- [ ] Task 2.2：精抽目检定 anchor_time ±0.1s、slowmo 判定（50/100 以外帧率报警交用户）→ confirmed/rejected
-- [ ] Task 2.3：每 confirmed 进球抽投篮者 3 帧 → `work\roster\raw\`
-- [ ] Task 2.4：按场次归并人物/队伍 → 代表帧 + roster_sheet.png + roster.json（confirmed=false）
-
-### 检查点 2：用户确认门禁 G1（硬性，按场次）
-
-- [ ] 用户确认某场次花名册 → 该场次 confirmed=true 并回填 goals.json 标签
-
-### 阶段 3：片段剪辑（按场次切片，各场次独立解锁）
-
-- [ ] Task 3.x：每个已确认场次一个任务：剪辑该场次全部进球（50fps 单段 / 100fps 两段慢放），编码器取 inventory 决策
-
-### 检查点 3：片段校验
-
-- [ ] 批量 ffprobe 参数达标；时长 6s（slowmo 8s）±0.2s，片源不足按实际时长并记录；抽 5% 目检
-
-### 阶段 4：分组合成（按场次）
-
-- [ ] Task 4.1：各场次按 team_label 分组 concat → `output\<场次>\队伍_XX_进球集锦.mp4`
-- [ ] Task 4.2：各场次按 player_label 分组 concat → `output\<场次>\个人_XX_进球合集.mp4`
-
-### 阶段 5：验证与交付
-
-- [ ] Task 5.1：全部成品 ffprobe 校验 + 首中尾 3 帧拼图目检
-- [ ] Task 5.2：校验无 clipped 残留（状态迁移只在 4.x 做）+ 交付报告（场次/队伍/人数/进球数/时长）
+| # | 任务 | 规模 |
+|---|------|------|
+| T1 | 试点初始化：归档旧 goals.json、生成 `work/pilot_files.json` | S |
+| T2 | `build_hoop_calib.py`：标定帧 + sheet（补 12 倍数 + meta.json） | S |
+| T3 | AI 标定 `work/hoops.json` + 抽验复标 | M |
+| T4 | `build_roi_scan.py` + 扩展 `goals_append.py`（v3 字段、串行合并、去重） | S |
+| T5 | AI 粗扫锁候选（5 子批，子代理产 JSON，主控串行落盘） | M |
+| T6 | `build_audio_peaks.py`：音频峰值 + 阈值标定（0007+1~2 对照） | S |
+| T7 | `build_roi_fine.py`（三模式）+ 新建 `goals_judge.py` | S |
+| T8 | AI 精判四选一（分批，子代理） | L |
+| T8.5 | 【门禁】uncertain 全部经用户定夺改判 | S |
+| T9 | 音频兜底补判（`build_audio_recheck.py` + 复用 T7/T8） | S |
+| T10 | `build_shooter_frames.py`：投篮者帧 1600×1200 | S |
+| T11 | 花名册归并（含传球者）→【G1 用户确认】→ 回填 | M |
+| T12 | AI 标注 `points` / `assist_label` | M |
+| T13 | 出手召回金标准（2 个长文件，gold 用户确认） | M |
+| T14 | `build_stats.py` + 试点报告 + SPEC/AGENTS 更新 | M |
 
 ## 风险与对策
 
-| 风险 | 影响 | 对策 |
-|---|---|---|
-| 场次拆分误判（>2h 间隔不一定是两场） | 中 | G0 由用户拍板；改名/归并按四处同步规则执行 |
-| LRF 球太小漏检 | 高 | 目检阶段当场用原片高清缩样（≥1920×1440）复看后定夺 |
-| 误判入网 | 中 | 阶段 2.2 精抽二次确认 |
-| 人脸模糊归并错 | 中 | 服装为主，存疑标 `待定X` 交用户定夺 |
-| 会话中断 | 中 | 每条判定立即落盘 goals.json，任意点可续 |
-| 素材增删 | 低 | 每会话重扫，SPEC §9 增量规则 |
-| concat 路径出错（Windows 反斜杠/相对路径） | 低 | 列表一律纯文件名，与片段同目录 |
-| 片尾进球窗口超文件时长 | 低 | 按实际时长出片，交付报告标注 |
+（检测层风险沿用设计文档 §5，此处为执行层补充）
+
+| 风险 | 对策 |
+|---|---|
+| 子代理 429 限流 | 串行重试、缩小子批；已有批级 JSON 落盘可续 |
+| 并行写 goals.json 竞态 | 唯一落盘路径（主控串行合并），子代理禁写 |
+| 标定倍率用错（×6/×8 漂移） | 唯一口径 480×360 ×8 + meta.json 落盘 + verify 反推抽查 |
+| tile 丢尾吞尾部内容 | 拼图输入补 12 倍数；精判 `-frames:v 6` 强制 |
+| 标定误差（图内 ±15px ≈ 原片 ±120px） | T3 抽验门禁：筐心在 crop 内且距边 ≥10%S，不符重标 |
+| 峰值不知球进在哪端筐 | T9 对全部未 dropped hoop 补窗，AI 看哪端有球，按展开计数对账 |
+| 召回金标准 AI 自证 | gold 清单（附 tile 索引）用户全量确认后才生效 |
+| 试点文件边界（anchor<3s、win 超文件时长） | clamp + 按实际张数出片并列清单 |
 
 ## 待确认问题
 
-- G0：场次清单待用户确认或改名 —— Task 0.2a 产出后即提出（确认后本条由主 agent 标记已决）
+- 门禁 1（T8.5）：uncertain 清单定夺
+- 门禁 2（T11/G1）：试点场次 20250419 花名册确认
+- 门禁 3（T13）：召回 gold 清单确认
