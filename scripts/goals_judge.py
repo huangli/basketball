@@ -3,7 +3,8 @@
 # 同窗口多出手: window_start+0.1 偏移追加新记录 note=multi_shot
 # 内置 schema 校验: slowmo 与 inventory avg_frame_rate 一致、attempt 无 clip 字段
 # 仅主控串行调用。用法: python scripts/goals_judge.py <verdicts.json> | --selftest
-# verdicts.json: [{"file","window_start","hoop_id","verdict","anchor_time"?,"note"?,"review"?}]
+# verdicts.json: [{"file","window_start","hoop_id","verdict","anchor_time"?,"note"?,"review"?,"multi_shot"?}]
+#   multi_shot=true: 同窗口第 2+ 次出手——以 base(ws) 为模板克隆生成 ws+0.1 新记录（note 自动加 multi_shot），再按 verdict 落字段
 import json
 import sys
 import tempfile
@@ -57,6 +58,19 @@ def judge(verdicts, gj_path=None):
             errors.append(f"{file}@{ws}_{hid}: 找不到 candidate 记录")
             bad += 1
             continue
+        if v.get("multi_shot"):
+            # 同窗口第 2+ 次出手：克隆 base 生成 ws+0.1 新记录（幂等：已存在则更新之）
+            new_ws = round(ws + 0.1, 1)
+            clone = _find(goals, file, new_ws, hid)
+            if clone is None:
+                clone = dict(rec)
+                clone["window_start"] = new_ws
+                goals.append(clone)
+            for k in ("anchor_time", "result", "clip_start", "clip_end",
+                      "slowmo", "review_frame"):
+                clone.pop(k, None)
+            clone["note"] = (clone.get("note", "") + " | multi_shot").strip(" |")
+            rec = clone
         if verdict == "confirmed":
             anchor = v["anchor_time"]
             rec.update(status="confirmed", result="made", anchor_time=anchor,
@@ -122,6 +136,8 @@ def selftest():
         {"file": "D.MP4", "window_start": 4.0, "hoop_id": "near",
          "verdict": "uncertain", "review": "work/frames/D/review.jpg"},
         {"file": "A.MP4", "window_start": 1.0, "hoop_id": "near",
+         "verdict": "attempt", "anchor_time": 5.2, "multi_shot": True},  # 同窗口补篮
+        {"file": "A.MP4", "window_start": 1.0, "hoop_id": "near",
          "verdict": "bogus"},  # 非法 → 拒
     ]
     rc = judge(verdicts, gj_path=tmp)
@@ -132,6 +148,10 @@ def selftest():
         by[("B.MP4", 2.0)]["status"] == "attempt" and by[("B.MP4", 2.0)].get("clip_start") is None,
         by[("C.MP4", 3.0)]["status"] == "rejected",
         by[("D.MP4", 4.0)]["status"] == "uncertain" and "review" in by[("D.MP4", 4.0)]["review_frame"],
+        by[("A.MP4", 1.1)]["status"] == "attempt" and by[("A.MP4", 1.1)]["result"] == "miss",
+        "multi_shot" in by[("A.MP4", 1.1)].get("note", ""),
+        by[("A.MP4", 1.0)]["anchor_time"] == 4.5,  # base 记录不受 multi_shot 影响
+        len(gj["goals"]) == 5,
         rc == 1,  # 非法输入导致退出码 1
     ]
     ok = all(checks)
