@@ -66,6 +66,24 @@ CELL = {
 }
 MULT = 8
 
+# far（本场远端筐，红端）：25% 帧内可定位的前向落地筐，坐标同为格内 ×8，crop=900
+# 判定依据：与 near 分居画面两侧、透明亚克力篮板+红垫立柱、比 near 小、0027 前向 zoom 见白队于其下；
+# 红-near 文件的蓝端多在机位后方出画，仅 0033 在 25% 帧可见（蓝筐带球员）
+FAR = {
+    "DJI_20250419184740_0005_D": (110, 138),   # 左侧落地筐，本方球员立于其下，与红 near 隔中场圈相望
+    "DJI_20250419185747_0012_D": (85, 140),
+    "DJI_20250419190832_0027_D": (55, 155),    # 前向落地筐+红网，两白衣在其下（zoom 确认）
+    "DJI_20250419190901_0028_D": (60, 151),
+    "DJI_20250419191335_0033_D": (208, 155),   # 蓝端（near 为红端），25% 帧蓝筐下有本方球员
+    "DJI_20250419191636_0037_D": (97, 178),
+    "DJI_20250419192002_0041_D": (60, 188),
+    "DJI_20250419192045_0042_D": (58, 152),
+    "DJI_20250419192328_0045_D": (60, 146),
+    "DJI_20250419192353_0046_D": (57, 137),
+    "DJI_20250419192426_0047_D": (55, 174),
+    "DJI_20250419192632_0050_D": (61, 148),
+}
+
 
 def main():
     pilot = json.loads(PILOT.read_text(encoding="utf-8"))["files"]
@@ -78,7 +96,11 @@ def main():
         else:
             x, y = cell[0] * MULT, cell[1] * MULT
             crop = cell[2] if len(cell) > 2 else 1500
-            out[name] = {"hoops": [{"id": "near", "x": x, "y": y, "crop": crop}]}
+            hoops = [{"id": "near", "x": x, "y": y, "crop": crop}]
+            if stem in FAR:
+                fx, fy = FAR[stem]
+                hoops.append({"id": "far", "x": fx * MULT, "y": fy * MULT, "crop": 900})
+            out[name] = {"hoops": hoops}
     OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     n_hoops = sum(len(v["hoops"]) for v in out.values())
     n_empty = sum(1 for v in out.values() if not v["hoops"])
