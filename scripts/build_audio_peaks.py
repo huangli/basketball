@@ -1,151 +1,127 @@
-# Task 6: 音频峰值——ebur128 解析逐秒响度，标定阈值，产 work/audio_peaks.json
-# ebur128 每 0.1s 输出: t / M(momentary loudness LUFS) / FTPK(逐块 true peak dBFS) / TPK(累积)
-# 欢呼是持续能量 → 主指标用 M（FTPK 易被单次拍手/撞击触发假阳，作备查）。
-# 用法:
-#   python scripts/build_audio_peaks.py probe <file>          # 打印该文件逐秒 M/FTPK 分布，供标定阈值
-#   python scripts/build_audio_peaks.py run --threshold <dB>   # 全量按 M 阈值筛峰、3s 合并取峰尖，产 json
-import argparse
+# 音频峰值检测（变体B）：找出欢呼时刻 → 指引用户只看峰值附近的接触表
+import array
 import json
-import re
+import math
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "0_raw_videos"
-PILOT = ROOT / "work" / "pilot_files.json"
 INV = ROOT / "work" / "file_inventory.json"
-OUT = ROOT / "work" / "audio_peaks.json"
+HOOPS = ROOT / "work" / "hoops.json"
+OUT = ROOT / "work" / "review"
+SAMPLE_RATE = 8000
+WINDOW = 0.5
+MERGE_DIST = 3.0
 
-ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-RE_T = re.compile(r"t:\s*([0-9.]+)")
-RE_M = re.compile(r"M:\s*(-?[0-9.]+)\s+S:")
-RE_FTPK = re.compile(r"FTPK:\s*(-?[0-9.]+)\s")
-MERGE_GAP = 3.0  # 相邻峰 <3s 合并
-
-
-def parse_ebur128(path):
-    """跑 ebur128，返回 [(t, M, ftpk)] 每 0.1s 一条。M/ftpk 静音记 -120.0。"""
-    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
-           "-af", "ebur128=peak=true", "-f", "null", "-"]
-    r = subprocess.run(cmd, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
-    rows = []
-    for line in r.stderr.splitlines():
-        line = ANSI.sub("", line)
-        if "Parsed_ebur128" not in line or "Summary" in line:
-            continue
-        mt = RE_T.search(line)
-        mm = RE_M.search(line)
-        if not (mt and mm):
-            continue
-        t = float(mt.group(1))
-        m = float(mm.group(1))
-        mf = RE_FTPK.search(line)
-        ftpk = float(mf.group(1)) if mf else -120.0
-        rows.append((t, m, ftpk))
-    return rows
+PILOT = [
+    "DJI_20250419184740_0005_D.MP4",
+    "DJI_20250419185047_0006_D.MP4",
+    "DJI_20250419185121_0007_D.MP4",
+    "DJI_20250419185204_0008_D.MP4",
+    "DJI_20250419185252_0009_D.MP4",
+    "DJI_20250419185341_0010_D.MP4",
+    "DJI_20250419185729_0011_D.MP4",
+    "DJI_20250419185747_0012_D.MP4",
+    "DJI_20250419185805_0013_D.MP4",
+    "DJI_20250419185825_0014_D.MP4",
+]
 
 
-def per_second(rows):
-    """按 1s 桶聚合。返回 {sec:(max_M, max_FTPK, t_at_maxM)}。"""
-    buckets = {}
-    for t, m, ftpk in rows:
-        sec = int(t)
-        cur = buckets.get(sec)
-        if cur is None or m > cur[0]:
-            buckets[sec] = (m, ftpk if cur is None else max(ftpk, cur[1]), t)
+def short_name(name):
+    return name.split("_")[2]
+
+
+def extract_pcm(name):
+    tmp = OUT / ("_tmp_" + short_name(name) + ".raw")
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+           "-i", str(RAW / name), "-vn", "-ac", "1",
+           "-ar", str(SAMPLE_RATE), "-f", "s16le", str(tmp)]
+    subprocess.run(cmd, check=True)
+    data = array.array("h")
+    sz = tmp.stat().st_size // 2
+    with open(tmp, "rb") as f:
+        data.fromfile(f, sz)
+    tmp.unlink()
+    return data
+
+
+def find_peaks(data, duration):
+    win = int(SAMPLE_RATE * WINDOW)
+    n_win = len(data) // win
+    if n_win == 0:
+        return []
+    db = []
+    for i in range(n_win):
+        chunk = data[i * win:(i + 1) * win]
+        s = sum(int(x) * int(x) for x in chunk)
+        rms = math.sqrt(s / win)
+        db.append(20 * math.log10(rms / 32768 + 1e-10))
+    mean_db = sum(db) / len(db)
+    std_db = math.sqrt(sum((d - mean_db) ** 2 for d in db) / len(db)) if db else 0
+    threshold = mean_db + 1.5 * std_db
+    hits = [(i * WINDOW, db[i]) for i in range(n_win) if db[i] > threshold]
+    clusters = []
+    for t, d in hits:
+        if clusters and t - clusters[-1][-1][0] < MERGE_DIST:
+            clusters[-1].append((t, d))
         else:
-            buckets[sec] = (cur[0], max(ftpk, cur[1]), cur[2])
-    return buckets
-
-
-def detect_peaks(buckets, threshold):
-    """按 M 阈值筛秒，<MERGE_GAP 相邻合并，每组取 M 最大的 t 为峰尖。返回 [t,...]。"""
-    peak_secs = sorted(s for s, (m, _f, _t) in buckets.items() if m >= threshold)
-    out = []
-    group = []
-    for s in peak_secs:
-        if group and s - group[-1] > MERGE_GAP:
-            out.append(_peak_tip(group, buckets))
-            group = []
-        group.append(s)
-    if group:
-        out.append(_peak_tip(group, buckets))
-    return out
-
-
-def _peak_tip(group, buckets):
-    best = max(group, key=lambda s: buckets[s][0])
-    return round(buckets[best][2], 1)
-
-
-def cmd_probe(args):
-    name = args.file
-    if not name.endswith(".MP4"):
-        name = name + ".MP4"
-    path = RAW / name
-    if not path.exists():
-        print(f"文件不存在: {path}")
-        return 1
-    rows = parse_ebur128(path)
-    buckets = per_second(rows)
-    print(f"# {name}  逐秒 M(momentary loudness LUFS) / FTPK(true peak dBFS)")
-    print(f"{'sec':>4} {'M':>8} {'FTPK':>8}")
-    max_m = max((m for m, _f, _t in buckets.values()), default=-120.0)
-    for sec in sorted(buckets):
-        m, ftpk, _t = buckets[sec]
-        mark = "  <== 目标窗(0007@4.5)" if name.startswith("DJI_20250419185121_0007") and 2.5 <= sec <= 6.5 else ""
-        print(f"{sec:>4} {m:>8.1f} {ftpk:>8.1f}{mark}")
-    print(f"\n全段 max M = {max_m:.1f} LUFS")
-    return 0
-
-
-def scan_one(name):
-    path = RAW / name
-    if not path.exists():
-        return name, []
-    rows = parse_ebur128(path)
-    buckets = per_second(rows)
-    return name, detect_peaks(buckets, args_threshold_holder["thr"])
-
-
-args_threshold_holder = {"thr": -23.0}
-
-
-def cmd_run(args):
-    args_threshold_holder["thr"] = args.threshold
-    pilot = json.loads(PILOT.read_text(encoding="utf-8"))["files"]
-    files = {name: [] for name in pilot}
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        for name, peaks in ex.map(scan_one, pilot):
-            files[name] = peaks
-    doc = {"metric": "M_momentary_loudness_LUFS", "threshold": args.threshold,
-           "merge_gap_s": MERGE_GAP,
-           "calibration": "0007@4.5s 已知进球应有峰（见 probe 输出）",
-           "files": files}
-    OUT.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
-    total = sum(len(v) for v in files.values())
-    nonzero = sum(1 for v in files.values() if v)
-    print(f"threshold={args.threshold} 文件数={len(files)} 有峰文件={nonzero} 峰总数={total}")
-    print(f"0007 峰: {files.get('DJI_20250419185121_0007_D.MP4')}")
-    return 0
+            clusters.append([(t, d)])
+    peaks = [max(c, key=lambda x: x[1])[0] for c in clusters]
+    return peaks
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    p_probe = sub.add_parser("probe")
-    p_probe.add_argument("file")
-    p_run = sub.add_parser("run")
-    p_run.add_argument("--threshold", type=float, required=True)
-    args = ap.parse_args()
-    if args.cmd == "probe":
-        return cmd_probe(args)
-    return cmd_run(args)
+    OUT.mkdir(parents=True, exist_ok=True)
+    inv = json.loads(INV.read_text(encoding="utf-8"))["files"]
+    hoops = json.loads(HOOPS.read_text(encoding="utf-8"))
+    result = {}
+    for name in PILOT:
+        if name not in inv:
+            continue
+        sn = short_name(name)
+        dur = float(inv[name]["duration"])
+        data = extract_pcm(name)
+        peaks = find_peaks(data, dur)
+        hoop_ids = [h["id"] for h in hoops.get(name, {}).get("hoops", [])
+                    if not h.get("dropped")]
+        sheets = sorted(set(int(t // 6) + 1 for t in peaks))
+        result[sn] = {
+            "file": name, "duration": dur, "peaks": peaks,
+            "hoop_ids": hoop_ids,
+            "check_sheets": sheets,
+        }
+    jpath = OUT / "audio_peaks.json"
+    jpath.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    guide = []
+    total_peaks = 0
+    total_sheets = 0
+    for sn in sorted(result):
+        r = result[sn]
+        total_peaks += len(r["peaks"])
+        total_sheets += len(r["check_sheets"])
+        peak_str = ", ".join(str(t) + "s" for t in r["peaks"]) or "(none)"
+        sheet_str = ", ".join(str(s) for s in r["check_sheets"]) or "(none)"
+        hoops_str = "/".join(r["hoop_ids"])
+        guide.append(sn + " | peaks: " + peak_str + " | check sheets: " + sheet_str +
+                     " | hoops: " + hoops_str)
+    gpath = OUT / "peak_guide.txt"
+    gpath.write_text(
+        "AUDIO PEAK GUIDE (variant B)\n" +
+        "Each sheet covers 6s. Sheet N covers t=" + str(0) + ".." + str(6) +
+        "*(N)\n" +
+        "=" * 50 + "\n" +
+        "\n".join(guide) + "\n" +
+        "=" * 50 + "\n" +
+        "Total peaks: " + str(total_peaks) + "  Total sheets to check: " +
+        str(total_sheets) + "\n", encoding="utf-8")
+    print("files=" + str(len(result)) + " peaks=" + str(total_peaks) +
+          " sheets_to_check=" + str(total_sheets))
+    print("Guide: " + str(gpath))
 
 
 if __name__ == "__main__":
