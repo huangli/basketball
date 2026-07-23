@@ -17,3 +17,7 @@ Desktop.ini
 
 # 工具配置
 .opencode/
+.codewhale/
+
+# 模型权重（二进制，AGENTS.md 记录下载方式）
+*.pt

@@ -1,0 +1,48 @@
+[in#0 @ 000001c5f2550ac0] stream 0, timescale not set
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '0_raw_videos\DJI_20250419185121_0007_D.MP4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2mp41
+    creation_time   : 2025-04-19T10:51:21.000000Z
+    encoder         : DJI OsmoAction5 Pro
+    timecode        : 03:50:44:46
+  Duration: 00:00:40.85, start: 0.000000, bitrate: 69909 kb/s
+  Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv, bt709), 3840x2880, 69447 kb/s, 50 fps, 50 tbr, 50k tbn (default)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : VideoHandler
+      timecode        : 03:50:44:46
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 317 kb/s (default)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : SoundHandler
+  Stream #0:2[0x3](und): Data: none (djmd / 0x646D6A64), 53 kb/s
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : DJI meta
+  Stream #0:3[0x4](und): Data: none (dbgi / 0x69676264), 40 kb/s
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : DJI dbgi
+  Stream #0:4[0x7](und): Data: none (tmcd / 0x64636D74)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : TimeCodeHandler
+      timecode        : 03:50:44:46
+  Stream #0:5[0x0]: Video: mjpeg (Baseline), yuvj420p(pc, bt470bg/unknown/unknown), 960x720 [SAR 1:1 DAR 4:3], 90k tbr, 90k tbn (attached pic)
+Stream mapping:
+  Stream #0:0 -> #0:0 (hevc (native) -> wrapped_avframe (native))
+Press [q] to stop, [?] for help
+[Parsed_lutyuv_3 @ 000001c5f4b8c580] [Eval @ 00000042be5fea70] Undefined constant or missing '(' in 'v'
+[Parsed_lutyuv_3 @ 000001c5f4b8c580] Error when parsing the expression 'v' for the component 0 and color 0.
+[Parsed_lutyuv_3 @ 000001c5f4b8c580] Failed to configure input pad on Parsed_lutyuv_3
+[vf#0:0 @ 000001c5f4698440] Error reinitializing filters!
+[vf#0:0 @ 000001c5f4698440] Task finished with error code: -22 (Invalid argument)
+[vf#0:0 @ 000001c5f4698440] Terminating thread with return code -22 (Invalid argument)
+[vost#0:0/wrapped_avframe @ 000001c5f2631700] [enc:wrapped_avframe @ 000001c5f25eb480] Could not open encoder before EOF
+[vost#0:0/wrapped_avframe @ 000001c5f2631700] Task finished with error code: -22 (Invalid argument)
+[vost#0:0/wrapped_avframe @ 000001c5f2631700] Terminating thread with return code -22 (Invalid argument)
+[out#0/null @ 000001c5f25fc840] Nothing was written into output file, because at least one of its streams received no packets.
+frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.38    
+Conversion failed!

@@ -1,0 +1,1535 @@
+[in#0 @ 000001a351f8f4c0] stream 0, timescale not set
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '0_raw_videos\DJI_20250419185121_0007_D.MP4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2mp41
+    creation_time   : 2025-04-19T10:51:21.000000Z
+    encoder         : DJI OsmoAction5 Pro
+    timecode        : 03:50:44:46
+  Duration: 00:00:40.85, start: 0.000000, bitrate: 69909 kb/s
+  Stream #0:0[0x1](und): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv, bt709), 3840x2880, 69447 kb/s, 50 fps, 50 tbr, 50k tbn (default)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : VideoHandler
+      timecode        : 03:50:44:46
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 317 kb/s (default)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : SoundHandler
+  Stream #0:2[0x3](und): Data: none (djmd / 0x646D6A64), 53 kb/s
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : DJI meta
+  Stream #0:3[0x4](und): Data: none (dbgi / 0x69676264), 40 kb/s
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : DJI dbgi
+  Stream #0:4[0x7](und): Data: none (tmcd / 0x64636D74)
+    Metadata:
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : TimeCodeHandler
+      timecode        : 03:50:44:46
+  Stream #0:5[0x0]: Video: mjpeg (Baseline), yuvj420p(pc, bt470bg/unknown/unknown), 960x720 [SAR 1:1 DAR 4:3], 90k tbr, 90k tbn (attached pic)
+Stream mapping:
+  Stream #0:1 -> #0:0 (aac (native) -> pcm_s16le (native))
+Press [q] to stop, [?] for help
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:0    pts:0       pts_time:0
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.384365
+Output #0, null, to 'pipe:':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2mp41
+    timecode        : 03:50:44:46
+    encoder         : Lavf62.12.102
+  Stream #0:0(und): Audio: pcm_s16le, 48000 Hz, stereo, s16, 1536 kb/s (default)
+    Metadata:
+      encoder         : Lavc62.28.102 pcm_s16le
+      creation_time   : 2025-04-19T10:51:21.000000Z
+      handler_name    : SoundHandler
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:1    pts:1024    pts_time:0.0213333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.560916
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:2    pts:2048    pts_time:0.0426667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.836701
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:3    pts:3072    pts_time:0.064
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.656192
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:4    pts:4096    pts_time:0.0853333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.829153
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:5    pts:5120    pts_time:0.106667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.376413
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:6    pts:6144    pts_time:0.128
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.438564
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:7    pts:7168    pts_time:0.149333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.622481
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:8    pts:8192    pts_time:0.170667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.685521
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:9    pts:9216    pts_time:0.192
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.203350
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:10   pts:10240   pts_time:0.213333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.850366
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:11   pts:11264   pts_time:0.234667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.573883
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:12   pts:12288   pts_time:0.256
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.493071
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:13   pts:13312   pts_time:0.277333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.287091
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:14   pts:14336   pts_time:0.298667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.471585
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:15   pts:15360   pts_time:0.32
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.422497
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:16   pts:16384   pts_time:0.341333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.002297
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:17   pts:17408   pts_time:0.362667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.583321
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:18   pts:18432   pts_time:0.384
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.960444
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:19   pts:19456   pts_time:0.405333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.206128
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:20   pts:20480   pts_time:0.426667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.282184
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:21   pts:21504   pts_time:0.448
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.423079
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:22   pts:22528   pts_time:0.469333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.186338
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:23   pts:23552   pts_time:0.490667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.886234
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:24   pts:24576   pts_time:0.512
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.774513
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:25   pts:25600   pts_time:0.533333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.095040
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:26   pts:26624   pts_time:0.554667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-11.467641
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:27   pts:27648   pts_time:0.576
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.600392
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:28   pts:28672   pts_time:0.597333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.877050
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:29   pts:29696   pts_time:0.618667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.575404
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:30   pts:30720   pts_time:0.64
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.876218
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:31   pts:31744   pts_time:0.661333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.592498
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:32   pts:32768   pts_time:0.682667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.742082
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:33   pts:33792   pts_time:0.704
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.697641
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:34   pts:34816   pts_time:0.725333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.172610
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:35   pts:35840   pts_time:0.746667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.344618
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:36   pts:36864   pts_time:0.768
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.378773
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:37   pts:37888   pts_time:0.789333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.300296
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:38   pts:38912   pts_time:0.810667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.494925
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:39   pts:39936   pts_time:0.832
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.370618
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:40   pts:40960   pts_time:0.853333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.400057
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:41   pts:41984   pts_time:0.874667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.959868
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:42   pts:43008   pts_time:0.896
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.180568
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:43   pts:44032   pts_time:0.917333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.321526
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:44   pts:45056   pts_time:0.938667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.212536
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:45   pts:46080   pts_time:0.96
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.599848
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:46   pts:47104   pts_time:0.981333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.828482
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:47   pts:48128   pts_time:1.002667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.991691
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:48   pts:49152   pts_time:1.024
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.676084
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:49   pts:50176   pts_time:1.045333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.652975
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:50   pts:51200   pts_time:1.066667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.261993
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:51   pts:52224   pts_time:1.088
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-11.798494
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:52   pts:53248   pts_time:1.109333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.033115
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:53   pts:54272   pts_time:1.130667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.257960
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:54   pts:55296   pts_time:1.152
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.652258
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:55   pts:56320   pts_time:1.173333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.900693
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:56   pts:57344   pts_time:1.194667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.355979
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:57   pts:58368   pts_time:1.216
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.276066
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:58   pts:59392   pts_time:1.237333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.421848
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:59   pts:60416   pts_time:1.258667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.190475
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:60   pts:61440   pts_time:1.28
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.440357
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:61   pts:62464   pts_time:1.301333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.676194
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:62   pts:63488   pts_time:1.322667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.754973
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:63   pts:64512   pts_time:1.344
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.350511
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:64   pts:65536   pts_time:1.365333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.646108
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:65   pts:66560   pts_time:1.386667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.284298
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:66   pts:67584   pts_time:1.408
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.196810
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:67   pts:68608   pts_time:1.429333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.622310
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:68   pts:69632   pts_time:1.450667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.955303
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:69   pts:70656   pts_time:1.472
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.599590
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:70   pts:71680   pts_time:1.493333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.974845
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:71   pts:72704   pts_time:1.514667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.135210
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:72   pts:73728   pts_time:1.536
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.241012
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:73   pts:74752   pts_time:1.557333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.177610
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:74   pts:75776   pts_time:1.578667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.168812
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:75   pts:76800   pts_time:1.6
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.973015
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:76   pts:77824   pts_time:1.621333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.078798
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:77   pts:78848   pts_time:1.642667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.813776
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:78   pts:79872   pts_time:1.664
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.410882
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:79   pts:80896   pts_time:1.685333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.403962
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:80   pts:81920   pts_time:1.706667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.224298
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:81   pts:82944   pts_time:1.728
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.710075
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:82   pts:83968   pts_time:1.749333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.464095
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:83   pts:84992   pts_time:1.770667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.227824
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:84   pts:86016   pts_time:1.792
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.454019
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:85   pts:87040   pts_time:1.813333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.454588
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:86   pts:88064   pts_time:1.834667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.279646
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:87   pts:89088   pts_time:1.856
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.130757
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:88   pts:90112   pts_time:1.877333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.649798
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:89   pts:91136   pts_time:1.898667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.599422
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:90   pts:92160   pts_time:1.92
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.294396
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:91   pts:93184   pts_time:1.941333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.638269
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:92   pts:94208   pts_time:1.962667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.126286
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:93   pts:95232   pts_time:1.984
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.495604
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:94   pts:96256   pts_time:2.005333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.737636
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:95   pts:97280   pts_time:2.026667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.383727
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:96   pts:98304   pts_time:2.048
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.258540
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:97   pts:99328   pts_time:2.069333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.341472
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:98   pts:100352  pts_time:2.090667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.812881
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:99   pts:101376  pts_time:2.112
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.358021
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:100  pts:102400  pts_time:2.133333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.037280
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:101  pts:103424  pts_time:2.154667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.277076
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:102  pts:104448  pts_time:2.176
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.991328
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:103  pts:105472  pts_time:2.197333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.100441
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:104  pts:106496  pts_time:2.218667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.674823
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:105  pts:107520  pts_time:2.24
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.496683
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:106  pts:108544  pts_time:2.261333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.314300
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:107  pts:109568  pts_time:2.282667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.676337
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:108  pts:110592  pts_time:2.304
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-14.647945
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:109  pts:111616  pts_time:2.325333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.009812
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:110  pts:112640  pts_time:2.346667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.494389
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:111  pts:113664  pts_time:2.368
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.565679
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:112  pts:114688  pts_time:2.389333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.649829
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:113  pts:115712  pts_time:2.410667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.761069
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:114  pts:116736  pts_time:2.432
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.335689
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:115  pts:117760  pts_time:2.453333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.387442
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:116  pts:118784  pts_time:2.474667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.530867
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:117  pts:119808  pts_time:2.496
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.061861
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:118  pts:120832  pts_time:2.517333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.232285
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:119  pts:121856  pts_time:2.538667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.138458
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:120  pts:122880  pts_time:2.56
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.080411
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:121  pts:123904  pts_time:2.581333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.707939
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:122  pts:124928  pts_time:2.602667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.033336
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:123  pts:125952  pts_time:2.624
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.035751
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:124  pts:126976  pts_time:2.645333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.574402
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:125  pts:128000  pts_time:2.666667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.615241
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:126  pts:129024  pts_time:2.688
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.861084
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:127  pts:130048  pts_time:2.709333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.514400
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:128  pts:131072  pts_time:2.730667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.081939
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:129  pts:132096  pts_time:2.752
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.895065
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:130  pts:133120  pts_time:2.773333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.409352
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:131  pts:134144  pts_time:2.794667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.712189
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:132  pts:135168  pts_time:2.816
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.725533
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:133  pts:136192  pts_time:2.837333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.537384
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:134  pts:137216  pts_time:2.858667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.901890
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:135  pts:138240  pts_time:2.88
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.989868
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:136  pts:139264  pts_time:2.901333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.172029
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:137  pts:140288  pts_time:2.922667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.557285
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:138  pts:141312  pts_time:2.944
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.000467
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:139  pts:142336  pts_time:2.965333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.831327
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:140  pts:143360  pts_time:2.986667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.710186
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:141  pts:144384  pts_time:3.008
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.798253
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:142  pts:145408  pts_time:3.029333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.768278
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:143  pts:146432  pts_time:3.050667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.960286
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:144  pts:147456  pts_time:3.072
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.445642
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:145  pts:148480  pts_time:3.093333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.901671
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:146  pts:149504  pts_time:3.114667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.887738
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:147  pts:150528  pts_time:3.136
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.661343
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:148  pts:151552  pts_time:3.157333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.904713
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:149  pts:152576  pts_time:3.178667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.290841
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:150  pts:153600  pts_time:3.2
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.111098
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:151  pts:154624  pts_time:3.221333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.071379
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:152  pts:155648  pts_time:3.242667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.480212
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:153  pts:156672  pts_time:3.264
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.347431
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:154  pts:157696  pts_time:3.285333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.911293
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:155  pts:158720  pts_time:3.306667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.984651
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:156  pts:159744  pts_time:3.328
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.748956
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:157  pts:160768  pts_time:3.349333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.508432
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:158  pts:161792  pts_time:3.370667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.088582
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:159  pts:162816  pts_time:3.392
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.080860
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:160  pts:163840  pts_time:3.413333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.740112
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:161  pts:164864  pts_time:3.434667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.558264
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:162  pts:165888  pts_time:3.456
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.969144
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:163  pts:166912  pts_time:3.477333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.936223
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:164  pts:167936  pts_time:3.498667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.980440
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:165  pts:168960  pts_time:3.52
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.565875
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:166  pts:169984  pts_time:3.541333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.498909
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:167  pts:171008  pts_time:3.562667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.747559
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:168  pts:172032  pts_time:3.584
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.520993
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:169  pts:173056  pts_time:3.605333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.436466
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:170  pts:174080  pts_time:3.626667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.266170
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:171  pts:175104  pts_time:3.648
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.939715
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:172  pts:176128  pts_time:3.669333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.086598
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:173  pts:177152  pts_time:3.690667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.143150
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:174  pts:178176  pts_time:3.712
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.201043
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:175  pts:179200  pts_time:3.733333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.001279
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:176  pts:180224  pts_time:3.754667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.025987
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:177  pts:181248  pts_time:3.776
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.783529
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:178  pts:182272  pts_time:3.797333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.110162
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:179  pts:183296  pts_time:3.818667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.427968
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:180  pts:184320  pts_time:3.84
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.507215
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:181  pts:185344  pts_time:3.861333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.820830
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:182  pts:186368  pts_time:3.882667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.352684
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:183  pts:187392  pts_time:3.904
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.815006
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:184  pts:188416  pts_time:3.925333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.298045
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:185  pts:189440  pts_time:3.946667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.652952
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:186  pts:190464  pts_time:3.968
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.540715
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:187  pts:191488  pts_time:3.989333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.173851
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:188  pts:192512  pts_time:4.010667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.288999
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:189  pts:193536  pts_time:4.032
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.748117
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:190  pts:194560  pts_time:4.053333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.022150
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:191  pts:195584  pts_time:4.074667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.093106
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:192  pts:196608  pts_time:4.096
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.798981
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:193  pts:197632  pts_time:4.117333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.159841
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:194  pts:198656  pts_time:4.138667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.714971
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:195  pts:199680  pts_time:4.16
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.499022
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:196  pts:200704  pts_time:4.181333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.083063
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:197  pts:201728  pts_time:4.202667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.648344
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:198  pts:202752  pts_time:4.224
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.824107
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:199  pts:203776  pts_time:4.245333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.550007
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:200  pts:204800  pts_time:4.266667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.070608
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:201  pts:205824  pts_time:4.288
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.242510
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:202  pts:206848  pts_time:4.309333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.756041
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:203  pts:207872  pts_time:4.330667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.198876
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:204  pts:208896  pts_time:4.352
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.919178
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:205  pts:209920  pts_time:4.373333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.688154
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:206  pts:210944  pts_time:4.394667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.458640
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:207  pts:211968  pts_time:4.416
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.006608
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:208  pts:212992  pts_time:4.437333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.392965
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:209  pts:214016  pts_time:4.458667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.259587
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:210  pts:215040  pts_time:4.48
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.234996
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:211  pts:216064  pts_time:4.501333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.838428
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:212  pts:217088  pts_time:4.522667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.459807
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:213  pts:218112  pts_time:4.544
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.389297
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:214  pts:219136  pts_time:4.565333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.198514
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:215  pts:220160  pts_time:4.586667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.768514
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:216  pts:221184  pts_time:4.608
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.096688
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:217  pts:222208  pts_time:4.629333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.304535
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:218  pts:223232  pts_time:4.650667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.140435
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:219  pts:224256  pts_time:4.672
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.773648
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:220  pts:225280  pts_time:4.693333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.819431
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:221  pts:226304  pts_time:4.714667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.859337
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:222  pts:227328  pts_time:4.736
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.946522
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:223  pts:228352  pts_time:4.757333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.662182
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:224  pts:229376  pts_time:4.778667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.771193
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:225  pts:230400  pts_time:4.8
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.789904
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:226  pts:231424  pts_time:4.821333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.013581
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:227  pts:232448  pts_time:4.842667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.604498
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:228  pts:233472  pts_time:4.864
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.710994
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:229  pts:234496  pts_time:4.885333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.733427
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:230  pts:235520  pts_time:4.906667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.943407
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:231  pts:236544  pts_time:4.928
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.881941
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:232  pts:237568  pts_time:4.949333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.044370
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:233  pts:238592  pts_time:4.970667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.489454
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:234  pts:239616  pts_time:4.992
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.236034
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:235  pts:240640  pts_time:5.013333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.909039
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:236  pts:241664  pts_time:5.034667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.340362
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:237  pts:242688  pts_time:5.056
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.518325
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:238  pts:243712  pts_time:5.077333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.199107
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:239  pts:244736  pts_time:5.098667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.934148
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:240  pts:245760  pts_time:5.12
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.696994
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:241  pts:246784  pts_time:5.141333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.147825
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:242  pts:247808  pts_time:5.162667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.839613
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:243  pts:248832  pts_time:5.184
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.721489
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:244  pts:249856  pts_time:5.205333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.007274
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:245  pts:250880  pts_time:5.226667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.867033
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:246  pts:251904  pts_time:5.248
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.325777
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:247  pts:252928  pts_time:5.269333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.651782
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:248  pts:253952  pts_time:5.290667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.776619
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:249  pts:254976  pts_time:5.312
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.592275
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:250  pts:256000  pts_time:5.333333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.931688
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:251  pts:257024  pts_time:5.354667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.836632
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:252  pts:258048  pts_time:5.376
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.332158
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:253  pts:259072  pts_time:5.397333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.271831
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:254  pts:260096  pts_time:5.418667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.237476
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:255  pts:261120  pts_time:5.44
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.834400
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:256  pts:262144  pts_time:5.461333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.728897
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:257  pts:263168  pts_time:5.482667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.442273
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:258  pts:264192  pts_time:5.504
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.502604
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:259  pts:265216  pts_time:5.525333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.453227
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:260  pts:266240  pts_time:5.546667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.405947
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:261  pts:267264  pts_time:5.568
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.828467
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:262  pts:268288  pts_time:5.589333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.439397
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:263  pts:269312  pts_time:5.610667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.866946
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:264  pts:270336  pts_time:5.632
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.075492
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:265  pts:271360  pts_time:5.653333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.190602
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:266  pts:272384  pts_time:5.674667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.802381
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:267  pts:273408  pts_time:5.696
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.803406
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:268  pts:274432  pts_time:5.717333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.943210
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:269  pts:275456  pts_time:5.738667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.896888
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:270  pts:276480  pts_time:5.76
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.316132
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:271  pts:277504  pts_time:5.781333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.223837
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:272  pts:278528  pts_time:5.802667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.565510
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:273  pts:279552  pts_time:5.824
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.211535
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:274  pts:280576  pts_time:5.845333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.048000
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:275  pts:281600  pts_time:5.866667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.389775
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:276  pts:282624  pts_time:5.888
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.742554
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:277  pts:283648  pts_time:5.909333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.060542
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:278  pts:284672  pts_time:5.930667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.808991
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:279  pts:285696  pts_time:5.952
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.700809
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:280  pts:286720  pts_time:5.973333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.650219
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:281  pts:287744  pts_time:5.994667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.716472
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:282  pts:288768  pts_time:6.016
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.798923
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:283  pts:289792  pts_time:6.037333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.498972
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:284  pts:290816  pts_time:6.058667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.801217
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:285  pts:291840  pts_time:6.08
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.860936
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:286  pts:292864  pts_time:6.101333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.165801
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:287  pts:293888  pts_time:6.122667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.790961
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:288  pts:294912  pts_time:6.144
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.151296
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:289  pts:295936  pts_time:6.165333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.917915
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:290  pts:296960  pts_time:6.186667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.732544
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:291  pts:297984  pts_time:6.208
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.967993
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:292  pts:299008  pts_time:6.229333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.568672
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:293  pts:300032  pts_time:6.250667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.231496
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:294  pts:301056  pts_time:6.272
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.902897
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:295  pts:302080  pts_time:6.293333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.454454
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:296  pts:303104  pts_time:6.314667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.979355
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:297  pts:304128  pts_time:6.336
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.072175
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:298  pts:305152  pts_time:6.357333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.956031
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:299  pts:306176  pts_time:6.378667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.744609
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:300  pts:307200  pts_time:6.4
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.450092
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:301  pts:308224  pts_time:6.421333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.297369
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:302  pts:309248  pts_time:6.442667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.949276
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:303  pts:310272  pts_time:6.464
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.986291
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:304  pts:311296  pts_time:6.485333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.933324
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:305  pts:312320  pts_time:6.506667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.861800
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:306  pts:313344  pts_time:6.528
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.556853
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:307  pts:314368  pts_time:6.549333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.668320
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:308  pts:315392  pts_time:6.570667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.423075
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:309  pts:316416  pts_time:6.592
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.780585
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:310  pts:317440  pts_time:6.613333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.494317
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:311  pts:318464  pts_time:6.634667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.289114
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:312  pts:319488  pts_time:6.656
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.853784
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:313  pts:320512  pts_time:6.677333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.041810
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:314  pts:321536  pts_time:6.698667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.772403
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:315  pts:322560  pts_time:6.72
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.458731
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:316  pts:323584  pts_time:6.741333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.566332
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:317  pts:324608  pts_time:6.762667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.398362
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:318  pts:325632  pts_time:6.784
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.388152
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:319  pts:326656  pts_time:6.805333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.931849
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:320  pts:327680  pts_time:6.826667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.582142
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:321  pts:328704  pts_time:6.848
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.192311
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:322  pts:329728  pts_time:6.869333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.989807
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:323  pts:330752  pts_time:6.890667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.894606
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:324  pts:331776  pts_time:6.912
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.486237
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:325  pts:332800  pts_time:6.933333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.952553
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:326  pts:333824  pts_time:6.954667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.795020
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:327  pts:334848  pts_time:6.976
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.856062
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:328  pts:335872  pts_time:6.997333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.867012
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:329  pts:336896  pts_time:7.018667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.707769
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:330  pts:337920  pts_time:7.04
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.387163
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:331  pts:338944  pts_time:7.061333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.106343
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:332  pts:339968  pts_time:7.082667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.572316
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:333  pts:340992  pts_time:7.104
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.117201
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:334  pts:342016  pts_time:7.125333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.745536
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:335  pts:343040  pts_time:7.146667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.022322
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:336  pts:344064  pts_time:7.168
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.158550
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:337  pts:345088  pts_time:7.189333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.394183
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:338  pts:346112  pts_time:7.210667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.447419
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:339  pts:347136  pts_time:7.232
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.067993
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:340  pts:348160  pts_time:7.253333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.642234
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:341  pts:349184  pts_time:7.274667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.388483
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:342  pts:350208  pts_time:7.296
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.917364
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:343  pts:351232  pts_time:7.317333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.468837
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:344  pts:352256  pts_time:7.338667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.693238
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:345  pts:353280  pts_time:7.36
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.411926
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:346  pts:354304  pts_time:7.381333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.168666
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:347  pts:355328  pts_time:7.402667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.751481
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:348  pts:356352  pts_time:7.424
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.105592
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:349  pts:357376  pts_time:7.445333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.528673
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:350  pts:358400  pts_time:7.466667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.177659
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:351  pts:359424  pts_time:7.488
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.684024
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:352  pts:360448  pts_time:7.509333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.991749
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:353  pts:361472  pts_time:7.530667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.202012
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:354  pts:362496  pts_time:7.552
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.740200
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:355  pts:363520  pts_time:7.573333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.895306
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:356  pts:364544  pts_time:7.594667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.480097
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:357  pts:365568  pts_time:7.616
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.893798
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:358  pts:366592  pts_time:7.637333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.444380
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:359  pts:367616  pts_time:7.658667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.287798
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:360  pts:368640  pts_time:7.68
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.076107
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:361  pts:369664  pts_time:7.701333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.199767
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:362  pts:370688  pts_time:7.722667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.528593
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:363  pts:371712  pts_time:7.744
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.265651
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:364  pts:372736  pts_time:7.765333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.549303
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:365  pts:373760  pts_time:7.786667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.673591
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:366  pts:374784  pts_time:7.808
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.732829
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:367  pts:375808  pts_time:7.829333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.964812
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:368  pts:376832  pts_time:7.850667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.636197
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:369  pts:377856  pts_time:7.872
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.442139
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:370  pts:378880  pts_time:7.893333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.915700
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:371  pts:379904  pts_time:7.914667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.535395
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:372  pts:380928  pts_time:7.936
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.833066
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:373  pts:381952  pts_time:7.957333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.248550
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:374  pts:382976  pts_time:7.978667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.767355
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:375  pts:384000  pts_time:8
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.600832
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:376  pts:385024  pts_time:8.021333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.512776
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:377  pts:386048  pts_time:8.042667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.758995
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:378  pts:387072  pts_time:8.064
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.285486
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:379  pts:388096  pts_time:8.085333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.288911
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:380  pts:389120  pts_time:8.106667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.420148
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:381  pts:390144  pts_time:8.128
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.500718
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:382  pts:391168  pts_time:8.149333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.944943
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:383  pts:392192  pts_time:8.170667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.128310
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:384  pts:393216  pts_time:8.192
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.831576
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:385  pts:394240  pts_time:8.213333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.790137
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:386  pts:395264  pts_time:8.234667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.436604
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:387  pts:396288  pts_time:8.256
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.023835
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:388  pts:397312  pts_time:8.277333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.234577
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:389  pts:398336  pts_time:8.298667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.395396
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:390  pts:399360  pts_time:8.32
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.259332
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:391  pts:400384  pts_time:8.341333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.408601
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:392  pts:401408  pts_time:8.362667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.220864
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:393  pts:402432  pts_time:8.384
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.013440
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:394  pts:403456  pts_time:8.405333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.816662
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:395  pts:404480  pts_time:8.426667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.250538
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:396  pts:405504  pts_time:8.448
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.008320
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:397  pts:406528  pts_time:8.469333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.477972
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:398  pts:407552  pts_time:8.490667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.243232
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:399  pts:408576  pts_time:8.512
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.120279
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:400  pts:409600  pts_time:8.533333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.690450
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:401  pts:410624  pts_time:8.554667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.013269
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:402  pts:411648  pts_time:8.576
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.112066
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:403  pts:412672  pts_time:8.597333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.722397
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:404  pts:413696  pts_time:8.618667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.097879
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:405  pts:414720  pts_time:8.64
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.263292
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:406  pts:415744  pts_time:8.661333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.981844
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:407  pts:416768  pts_time:8.682667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.822595
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:408  pts:417792  pts_time:8.704
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.770938
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:409  pts:418816  pts_time:8.725333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.679643
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:410  pts:419840  pts_time:8.746667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.597753
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:411  pts:420864  pts_time:8.768
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.893193
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:412  pts:421888  pts_time:8.789333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.056056
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:413  pts:422912  pts_time:8.810667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.743617
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:414  pts:423936  pts_time:8.832
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.347240
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:415  pts:424960  pts_time:8.853333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.482430
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:416  pts:425984  pts_time:8.874667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.881674
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:417  pts:427008  pts_time:8.896
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.449317
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:418  pts:428032  pts_time:8.917333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.023460
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:419  pts:429056  pts_time:8.938667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.255196
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:420  pts:430080  pts_time:8.96
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.106768
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:421  pts:431104  pts_time:8.981333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.825080
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:422  pts:432128  pts_time:9.002667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.569585
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:423  pts:433152  pts_time:9.024
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.582214
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:424  pts:434176  pts_time:9.045333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.548641
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:425  pts:435200  pts_time:9.066667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.091281
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:426  pts:436224  pts_time:9.088
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.585697
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:427  pts:437248  pts_time:9.109333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.767364
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:428  pts:438272  pts_time:9.130667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.870868
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:429  pts:439296  pts_time:9.152
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.711250
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:430  pts:440320  pts_time:9.173333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.707799
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:431  pts:441344  pts_time:9.194667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.645029
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:432  pts:442368  pts_time:9.216
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.615052
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:433  pts:443392  pts_time:9.237333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.299433
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:434  pts:444416  pts_time:9.258667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.181085
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:435  pts:445440  pts_time:9.28
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.222310
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:436  pts:446464  pts_time:9.301333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.563251
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:437  pts:447488  pts_time:9.322667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.317328
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:438  pts:448512  pts_time:9.344
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.324834
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:439  pts:449536  pts_time:9.365333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.552937
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:440  pts:450560  pts_time:9.386667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.964293
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:441  pts:451584  pts_time:9.408
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.223234
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:442  pts:452608  pts_time:9.429333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.402599
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:443  pts:453632  pts_time:9.450667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.804454
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:444  pts:454656  pts_time:9.472
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.955425
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:445  pts:455680  pts_time:9.493333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.854721
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:446  pts:456704  pts_time:9.514667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.318711
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:447  pts:457728  pts_time:9.536
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.301457
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:448  pts:458752  pts_time:9.557333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.813557
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:449  pts:459776  pts_time:9.578667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.514642
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:450  pts:460800  pts_time:9.6
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.395423
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:451  pts:461824  pts_time:9.621333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.799853
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:452  pts:462848  pts_time:9.642667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.904018
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:453  pts:463872  pts_time:9.664
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.252046
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:454  pts:464896  pts_time:9.685333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.990528
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:455  pts:465920  pts_time:9.706667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.821471
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:456  pts:466944  pts_time:9.728
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.316112
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:457  pts:467968  pts_time:9.749333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.333068
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:458  pts:468992  pts_time:9.770667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.694005
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:459  pts:470016  pts_time:9.792
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.943434
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:460  pts:471040  pts_time:9.813333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.292072
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:461  pts:472064  pts_time:9.834667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.430322
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:462  pts:473088  pts_time:9.856
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.780794
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:463  pts:474112  pts_time:9.877333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.714012
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:464  pts:475136  pts_time:9.898667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.883613
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:465  pts:476160  pts_time:9.92
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.110185
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:466  pts:477184  pts_time:9.941333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.114811
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:467  pts:478208  pts_time:9.962667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.218931
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:468  pts:479232  pts_time:9.984
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.454495
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:469  pts:480256  pts_time:10.005333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.734888
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:470  pts:481280  pts_time:10.026667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.813049
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:471  pts:482304  pts_time:10.048
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.943611
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:472  pts:483328  pts_time:10.069333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.984049
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:473  pts:484352  pts_time:10.090667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.375494
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:474  pts:485376  pts_time:10.112
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.616007
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:475  pts:486400  pts_time:10.133333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.694927
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:476  pts:487424  pts_time:10.154667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.282915
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:477  pts:488448  pts_time:10.176
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.056088
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:478  pts:489472  pts_time:10.197333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.791669
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:479  pts:490496  pts_time:10.218667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.242602
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:480  pts:491520  pts_time:10.24
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.224309
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:481  pts:492544  pts_time:10.261333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.327084
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:482  pts:493568  pts_time:10.282667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.511552
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:483  pts:494592  pts_time:10.304
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.572437
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:484  pts:495616  pts_time:10.325333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.411708
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:485  pts:496640  pts_time:10.346667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.722200
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:486  pts:497664  pts_time:10.368
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.453906
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:487  pts:498688  pts_time:10.389333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.228961
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:488  pts:499712  pts_time:10.410667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.182687
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:489  pts:500736  pts_time:10.432
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.464040
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:490  pts:501760  pts_time:10.453333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.309365
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:491  pts:502784  pts_time:10.474667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.400762
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:492  pts:503808  pts_time:10.496
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-37.098384
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:493  pts:504832  pts_time:10.517333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.155505
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:494  pts:505856  pts_time:10.538667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.628215
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:495  pts:506880  pts_time:10.56
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.127645
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:496  pts:507904  pts_time:10.581333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.596605
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:497  pts:508928  pts_time:10.602667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.723961
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:498  pts:509952  pts_time:10.624
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.470443
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:499  pts:510976  pts_time:10.645333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.196934
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:500  pts:512000  pts_time:10.666667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.259872
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:501  pts:513024  pts_time:10.688
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.916177
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:502  pts:514048  pts_time:10.709333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.458496
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:503  pts:515072  pts_time:10.730667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.615713
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:504  pts:516096  pts_time:10.752
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.880406
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:505  pts:517120  pts_time:10.773333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.001311
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:506  pts:518144  pts_time:10.794667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.712400
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:507  pts:519168  pts_time:10.816
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.522821
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:508  pts:520192  pts_time:10.837333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.948459
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:509  pts:521216  pts_time:10.858667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.661331
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:510  pts:522240  pts_time:10.88
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.076932
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:511  pts:523264  pts_time:10.901333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.582426
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:512  pts:524288  pts_time:10.922667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.895454
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:513  pts:525312  pts_time:10.944
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.324892
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:514  pts:526336  pts_time:10.965333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.945161
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:515  pts:527360  pts_time:10.986667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.475017
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:516  pts:528384  pts_time:11.008
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.144768
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:517  pts:529408  pts_time:11.029333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.061109
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:518  pts:530432  pts_time:11.050667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.452531
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:519  pts:531456  pts_time:11.072
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.373444
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:520  pts:532480  pts_time:11.093333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.571576
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:521  pts:533504  pts_time:11.114667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.840740
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:522  pts:534528  pts_time:11.136
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.478189
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:523  pts:535552  pts_time:11.157333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.790180
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:524  pts:536576  pts_time:11.178667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.316747
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:525  pts:537600  pts_time:11.2
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.279862
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:526  pts:538624  pts_time:11.221333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-11.835047
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:527  pts:539648  pts_time:11.242667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.091708
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:528  pts:540672  pts_time:11.264
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.794349
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:529  pts:541696  pts_time:11.285333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.313890
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:530  pts:542720  pts_time:11.306667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.134864
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:531  pts:543744  pts_time:11.328
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.414113
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:532  pts:544768  pts_time:11.349333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.095713
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:533  pts:545792  pts_time:11.370667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.190662
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:534  pts:546816  pts_time:11.392
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.719073
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:535  pts:547840  pts_time:11.413333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.362406
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:536  pts:548864  pts_time:11.434667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.900667
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:537  pts:549888  pts_time:11.456
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.025195
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:538  pts:550912  pts_time:11.477333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.482743
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:539  pts:551936  pts_time:11.498667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.488322
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:540  pts:552960  pts_time:11.52
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.679480
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:541  pts:553984  pts_time:11.541333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.327571
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:542  pts:555008  pts_time:11.562667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.782942
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:543  pts:556032  pts_time:11.584
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.225844
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:544  pts:557056  pts_time:11.605333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.655865
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:545  pts:558080  pts_time:11.626667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.014852
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:546  pts:559104  pts_time:11.648
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.073916
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:547  pts:560128  pts_time:11.669333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.455009
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:548  pts:561152  pts_time:11.690667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.848258
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:549  pts:562176  pts_time:11.712
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.600111
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:550  pts:563200  pts_time:11.733333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.318753
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:551  pts:564224  pts_time:11.754667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.339382
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:552  pts:565248  pts_time:11.776
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.736137
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:553  pts:566272  pts_time:11.797333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.606912
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:554  pts:567296  pts_time:11.818667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.523530
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:555  pts:568320  pts_time:11.84
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.138918
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:556  pts:569344  pts_time:11.861333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.454273
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:557  pts:570368  pts_time:11.882667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.408733
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:558  pts:571392  pts_time:11.904
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.386424
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:559  pts:572416  pts_time:11.925333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.997755
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:560  pts:573440  pts_time:11.946667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.422923
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:561  pts:574464  pts_time:11.968
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.997222
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:562  pts:575488  pts_time:11.989333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.919499
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:563  pts:576512  pts_time:12.010667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.264074
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:564  pts:577536  pts_time:12.032
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.710672
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:565  pts:578560  pts_time:12.053333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.117597
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:566  pts:579584  pts_time:12.074667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.164189
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:567  pts:580608  pts_time:12.096
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.847603
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:568  pts:581632  pts_time:12.117333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.857242
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:569  pts:582656  pts_time:12.138667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.077564
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:570  pts:583680  pts_time:12.16
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.553366
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:571  pts:584704  pts_time:12.181333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.771581
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:572  pts:585728  pts_time:12.202667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.518915
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:573  pts:586752  pts_time:12.224
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.578690
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:574  pts:587776  pts_time:12.245333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.955639
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:575  pts:588800  pts_time:12.266667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.709026
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:576  pts:589824  pts_time:12.288
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.578016
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:577  pts:590848  pts_time:12.309333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.344814
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:578  pts:591872  pts_time:12.330667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.702228
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:579  pts:592896  pts_time:12.352
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.842328
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:580  pts:593920  pts_time:12.373333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.081555
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:581  pts:594944  pts_time:12.394667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.686897
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:582  pts:595968  pts_time:12.416
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.527829
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:583  pts:596992  pts_time:12.437333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.814152
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:584  pts:598016  pts_time:12.458667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.842861
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:585  pts:599040  pts_time:12.48
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.640464
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:586  pts:600064  pts_time:12.501333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.567281
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:587  pts:601088  pts_time:12.522667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.467273
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:588  pts:602112  pts_time:12.544
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.682434
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:589  pts:603136  pts_time:12.565333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.904755
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:590  pts:604160  pts_time:12.586667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.541181
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:591  pts:605184  pts_time:12.608
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.647531
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:592  pts:606208  pts_time:12.629333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.409820
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:593  pts:607232  pts_time:12.650667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.847197
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:594  pts:608256  pts_time:12.672
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.027512
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:595  pts:609280  pts_time:12.693333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-38.352171
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:596  pts:610304  pts_time:12.714667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.234046
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:597  pts:611328  pts_time:12.736
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.032695
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:598  pts:612352  pts_time:12.757333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.891494
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:599  pts:613376  pts_time:12.778667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.717227
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:600  pts:614400  pts_time:12.8
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.374957
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:601  pts:615424  pts_time:12.821333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.641083
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:602  pts:616448  pts_time:12.842667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.085406
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:603  pts:617472  pts_time:12.864
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.383730
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:604  pts:618496  pts_time:12.885333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.355044
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:605  pts:619520  pts_time:12.906667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.956511
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:606  pts:620544  pts_time:12.928
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-37.662070
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:607  pts:621568  pts_time:12.949333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.697959
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:608  pts:622592  pts_time:12.970667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.645331
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:609  pts:623616  pts_time:12.992
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.579893
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:610  pts:624640  pts_time:13.013333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.292803
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:611  pts:625664  pts_time:13.034667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.277825
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:612  pts:626688  pts_time:13.056
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.735032
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:613  pts:627712  pts_time:13.077333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.863936
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:614  pts:628736  pts_time:13.098667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.506272
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:615  pts:629760  pts_time:13.12
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.863756
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:616  pts:630784  pts_time:13.141333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.848589
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:617  pts:631808  pts_time:13.162667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.276385
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:618  pts:632832  pts_time:13.184
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.141343
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:619  pts:633856  pts_time:13.205333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.926740
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:620  pts:634880  pts_time:13.226667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.721563
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:621  pts:635904  pts_time:13.248
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.887159
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:622  pts:636928  pts_time:13.269333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-37.255570
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:623  pts:637952  pts_time:13.290667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-36.981885
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:624  pts:638976  pts_time:13.312
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-34.389013
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:625  pts:640000  pts_time:13.333333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.993957
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:626  pts:641024  pts_time:13.354667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.811018
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:627  pts:642048  pts_time:13.376
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.225344
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:628  pts:643072  pts_time:13.397333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.302069
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:629  pts:644096  pts_time:13.418667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.362075
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:630  pts:645120  pts_time:13.44
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.244385
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:631  pts:646144  pts_time:13.461333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.127429
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:632  pts:647168  pts_time:13.482667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.032492
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:633  pts:648192  pts_time:13.504
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.203410
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:634  pts:649216  pts_time:13.525333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-33.912976
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:635  pts:650240  pts_time:13.546667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-35.660707
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:636  pts:651264  pts_time:13.568
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.625309
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:637  pts:652288  pts_time:13.589333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.221820
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:638  pts:653312  pts_time:13.610667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.958252
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:639  pts:654336  pts_time:13.632
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.977955
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:640  pts:655360  pts_time:13.653333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.539565
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:641  pts:656384  pts_time:13.674667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.818506
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:642  pts:657408  pts_time:13.696
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.403181
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:643  pts:658432  pts_time:13.717333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.487190
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:644  pts:659456  pts_time:13.738667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.954645
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:645  pts:660480  pts_time:13.76
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.111890
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:646  pts:661504  pts_time:13.781333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.254334
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:647  pts:662528  pts_time:13.802667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.759243
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:648  pts:663552  pts_time:13.824
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.134038
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:649  pts:664576  pts_time:13.845333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.616849
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:650  pts:665600  pts_time:13.866667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.943607
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:651  pts:666624  pts_time:13.888
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.906373
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:652  pts:667648  pts_time:13.909333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.781638
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:653  pts:668672  pts_time:13.930667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.958928
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:654  pts:669696  pts_time:13.952
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.059706
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:655  pts:670720  pts_time:13.973333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.199155
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:656  pts:671744  pts_time:13.994667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.901745
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:657  pts:672768  pts_time:14.016
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.747919
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:658  pts:673792  pts_time:14.037333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.652983
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:659  pts:674816  pts_time:14.058667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.134753
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:660  pts:675840  pts_time:14.08
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.912981
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:661  pts:676864  pts_time:14.101333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.552074
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:662  pts:677888  pts_time:14.122667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.447125
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:663  pts:678912  pts_time:14.144
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.388776
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:664  pts:679936  pts_time:14.165333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.899438
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:665  pts:680960  pts_time:14.186667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.716555
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:666  pts:681984  pts_time:14.208
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.829525
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:667  pts:683008  pts_time:14.229333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.895497
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:668  pts:684032  pts_time:14.250667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.890529
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:669  pts:685056  pts_time:14.272
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.079828
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:670  pts:686080  pts_time:14.293333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-26.789731
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:671  pts:687104  pts_time:14.314667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.904931
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:672  pts:688128  pts_time:14.336
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-27.102160
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:673  pts:689152  pts_time:14.357333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.822361
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:674  pts:690176  pts_time:14.378667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.966557
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:675  pts:691200  pts_time:14.4
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-32.338582
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:676  pts:692224  pts_time:14.421333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.876221
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:677  pts:693248  pts_time:14.442667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.440053
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:678  pts:694272  pts_time:14.464
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-30.960725
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:679  pts:695296  pts_time:14.485333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-31.930385
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:680  pts:696320  pts_time:14.506667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-29.168088
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:681  pts:697344  pts_time:14.528
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.372704
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:682  pts:698368  pts_time:14.549333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.100270
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:683  pts:699392  pts_time:14.570667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-28.579325
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:684  pts:700416  pts_time:14.592
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-11.671360
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:685  pts:701440  pts_time:14.613333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.906617
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:686  pts:702464  pts_time:14.634667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.059703
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:687  pts:703488  pts_time:14.656
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.216901
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:688  pts:704512  pts_time:14.677333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.935138
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:689  pts:705536  pts_time:14.698667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-17.498921
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:690  pts:706560  pts_time:14.72
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-22.144920
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:691  pts:707584  pts_time:14.741333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-15.157040
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:692  pts:708608  pts_time:14.762667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.371789
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:693  pts:709632  pts_time:14.784
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-20.240918
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:694  pts:710656  pts_time:14.805333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.963705
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:695  pts:711680  pts_time:14.826667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-25.947222
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:696  pts:712704  pts_time:14.848
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-16.895989
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:697  pts:713728  pts_time:14.869333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-21.551169
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:698  pts:714752  pts_time:14.890667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-19.901563
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:699  pts:715776  pts_time:14.912
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.100711
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:700  pts:716800  pts_time:14.933333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.629032
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:701  pts:717824  pts_time:14.954667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-18.669916
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:702  pts:718848  pts_time:14.976
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.143483
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:703  pts:719872  pts_time:14.997333
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-23.778667
+[Parsed_ametadata_1 @ 000001a35204dec0] frame:704  pts:720896  pts_time:15.018667
+[Parsed_ametadata_1 @ 000001a35204dec0] lavfi.astats.Overall.RMS_level=-24.112669
+[Parsed_astats_0 @ 000001a35204c340] Channel: 1
+[Parsed_astats_0 @ 000001a35204c340] DC offset: -0.002247
+[Parsed_astats_0 @ 000001a35204c340] Min level: -0.179944
+[Parsed_astats_0 @ 000001a35204c340] Max level: 0.118201
+[Parsed_astats_0 @ 000001a35204c340] Min difference: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Max difference: 0.014421
+[Parsed_astats_0 @ 000001a35204c340] Mean difference: 0.003379
+[Parsed_astats_0 @ 000001a35204c340] RMS difference: 0.004272
+[Parsed_astats_0 @ 000001a35204c340] Peak level dB: -14.897256
+[Parsed_astats_0 @ 000001a35204c340] RMS level dB: -24.119148
+[Parsed_astats_0 @ 000001a35204c340] RMS peak dB: -24.119148
+[Parsed_astats_0 @ 000001a35204c340] RMS through dB: -24.119148
+[Parsed_astats_0 @ 000001a35204c340] Crest factor: 2.891310
+[Parsed_astats_0 @ 000001a35204c340] Flat factor: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Peak count: 2
+[Parsed_astats_0 @ 000001a35204c340] Abs Peak count: 1
+[Parsed_astats_0 @ 000001a35204c340] Noise floor dB: nan
+[Parsed_astats_0 @ 000001a35204c340] Noise floor count: 0
+[Parsed_astats_0 @ 000001a35204c340] Entropy: 0.699159
+[Parsed_astats_0 @ 000001a35204c340] Bit depth: 29/32/32/32
+[Parsed_astats_0 @ 000001a35204c340] Dynamic range: 81.425322
+[Parsed_astats_0 @ 000001a35204c340] Zero crossings: 33
+[Parsed_astats_0 @ 000001a35204c340] Zero crossings rate: 0.032227
+[Parsed_astats_0 @ 000001a35204c340] Number of NaNs: 0
+[Parsed_astats_0 @ 000001a35204c340] Number of Infs: 0
+[Parsed_astats_0 @ 000001a35204c340] Number of denormals: 0
+[Parsed_astats_0 @ 000001a35204c340] Channel: 2
+[Parsed_astats_0 @ 000001a35204c340] DC offset: -0.001868
+[Parsed_astats_0 @ 000001a35204c340] Min level: -0.175274
+[Parsed_astats_0 @ 000001a35204c340] Max level: 0.120225
+[Parsed_astats_0 @ 000001a35204c340] Min difference: 0.000007
+[Parsed_astats_0 @ 000001a35204c340] Max difference: 0.014847
+[Parsed_astats_0 @ 000001a35204c340] Mean difference: 0.003238
+[Parsed_astats_0 @ 000001a35204c340] RMS difference: 0.004059
+[Parsed_astats_0 @ 000001a35204c340] Peak level dB: -15.125647
+[Parsed_astats_0 @ 000001a35204c340] RMS level dB: -24.106199
+[Parsed_astats_0 @ 000001a35204c340] RMS peak dB: -24.106199
+[Parsed_astats_0 @ 000001a35204c340] RMS through dB: -24.106199
+[Parsed_astats_0 @ 000001a35204c340] Crest factor: 2.812080
+[Parsed_astats_0 @ 000001a35204c340] Flat factor: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Peak count: 2
+[Parsed_astats_0 @ 000001a35204c340] Abs Peak count: 1
+[Parsed_astats_0 @ 000001a35204c340] Noise floor dB: nan
+[Parsed_astats_0 @ 000001a35204c340] Noise floor count: 0
+[Parsed_astats_0 @ 000001a35204c340] Entropy: 0.696915
+[Parsed_astats_0 @ 000001a35204c340] Bit depth: 29/32/32/32
+[Parsed_astats_0 @ 000001a35204c340] Dynamic range: 70.578307
+[Parsed_astats_0 @ 000001a35204c340] Zero crossings: 31
+[Parsed_astats_0 @ 000001a35204c340] Zero crossings rate: 0.030273
+[Parsed_astats_0 @ 000001a35204c340] Number of NaNs: 0
+[Parsed_astats_0 @ 000001a35204c340] Number of Infs: 0
+[Parsed_astats_0 @ 000001a35204c340] Number of denormals: 0
+[Parsed_astats_0 @ 000001a35204c340] Overall
+[Parsed_astats_0 @ 000001a35204c340] DC offset: -0.002247
+[Parsed_astats_0 @ 000001a35204c340] Min level: -0.179944
+[Parsed_astats_0 @ 000001a35204c340] Max level: 0.120225
+[Parsed_astats_0 @ 000001a35204c340] Min difference: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Max difference: 0.014847
+[Parsed_astats_0 @ 000001a35204c340] Mean difference: 0.003309
+[Parsed_astats_0 @ 000001a35204c340] RMS difference: 0.004167
+[Parsed_astats_0 @ 000001a35204c340] Peak level dB: -14.897256
+[Parsed_astats_0 @ 000001a35204c340] RMS level dB: -24.112669
+[Parsed_astats_0 @ 000001a35204c340] RMS peak dB: -24.106199
+[Parsed_astats_0 @ 000001a35204c340] RMS through dB: -24.119148
+[Parsed_astats_0 @ 000001a35204c340] Flat factor: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Peak count: 2.000000
+[Parsed_astats_0 @ 000001a35204c340] Abs Peak count: 1.000000
+[Parsed_astats_0 @ 000001a35204c340] Noise floor dB: nan
+[Parsed_astats_0 @ 000001a35204c340] Noise floor count: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Entropy: 0.698037
+[Parsed_astats_0 @ 000001a35204c340] Bit depth: 29/32/32/32
+[Parsed_astats_0 @ 000001a35204c340] Number of samples: 1024
+[Parsed_astats_0 @ 000001a35204c340] Number of NaNs: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Number of Infs: 0.000000
+[Parsed_astats_0 @ 000001a35204c340] Number of denormals: 0.000000
+[out#0/null @ 000001a35204d440] video:0KiB audio:2812KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+size=N/A time=00:00:15.00 bitrate=N/A speed=72.4x elapsed=0:00:00.20    

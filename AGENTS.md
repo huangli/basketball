@@ -15,12 +15,15 @@
 ## 环境（已验证）
 
 - `ffmpeg` / `ffprobe` 8.1.2（gyan.dev 完整版）在 PATH 中，含 NVENC/x264，直接可用
-- Python 3.14.3 已装，但**无** OpenCV/moviepy/PyAV；视频处理一律用 ffmpeg 命令行，不要装新库除非用户同意
+- Python 3.14.3 已装；**已装 ultralytics 8.4.104 + torch 2.13.0 (CPU) + opencv 5.0.0 + numpy 2.4.3 + pillow 12.3**（pip 清华镜像源）；无 moviepy/PyAV
+- **硬件**：AMD Ryzen AI 9 HX 370 + Radeon 890M 核显（**无独立 N 卡**，nvidia-smi 不存在），32GB 内存；YOLO CPU 推理约 2.5s/帧（1920×1440 @ imgsz1280）
+- **模型**：`basketball_yolo11.pt`（HuggingFace Lumos-88 篮球检测，5.29MB）+ `yolov8n.pt`（COCO 通用，交叉验证 person 用），在工作目录根
+- 网络：用户已配代理（rule 模式），GitHub/HuggingFace 可直连；pip 用清华镜像源
 - Shell 是 Windows PowerShell 7+
 
 ## 素材关键事实（已验证）
 
-- `.LRF` 实为 MP4 容器（H.264 960×720@25fps），可改后缀或直接被 ffmpeg 读取 → 用它抽帧扫描进球，比读原片快得多
+- `.LRF` 实为 MP4 容器（H.264 960×720@25fps），可被 ffmpeg 直接读取；但 **LRF 960×720 分辨率不足以支撑 YOLO 球检测（球仅 3-5px，已实测验证）**，v4 检测全程用原片 1920×1440 降采样；LRF 仅用于全段概览接触表（快速预览找漏检）
 - 原片统一 HEVC 3840×2880（4:3）+ AAC 48kHz，但**帧率 50/100fps、位深 8/10-bit 混存**——处理每个文件前必须 ffprobe 确认，不要假设一致
 - 文件名即拍摄时间：`DJI_YYYYMMDDHHMMSS_序号_D.MP4`，序号有跳号（0001–0136 中缺 0072–0083 等）
 - 大疆文件还带 data 流（遥测）和 MJPEG 缩略图流，转码时用 `-map 0:v:0 -map 0:a:0` 显式选流，避免混入
@@ -38,8 +41,9 @@
 
 ## 工作流约定
 
-- 中间产物放 `work\`（frames / clips / roster），成品放 `output\`
+- 中间产物放 `work\`（v4：frames / detect / track / candidates / review / clips / roster），成品放 `output\`
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
-- **文档自审（强制）**：创建或修改 `SPEC.md`、`AGENTS.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
-- 进球检测流程：LRF 2fps 抽帧 → 拼 5×4 接触表 → 人工看图锁候选 → 原片 10fps 精抽定帧
+- **文档自审（强制）**：创建或修改 `docs/` 下 spec 文档、`AGENTS.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
+- 进球检测流程（v4，详见 `docs/superpowers/specs/2026-07-23-yolo-ball-trajectory-detection.md`，**试点中**）：原片全画面 5fps 降采样 → YOLO 篮球模型检测球（conf=0.04）→ 假阳性过滤（size/双模型交叉验证）→ 球轨迹聚类 → 入网点判定（静止点+conf 谷底+恢复）→ 候选+全段概览接触表 → 立哥人工确认（≤10 分钟/场）→ goals.json
 - 不删除/不修改任何原始 MP4/LRF 文件
+- v2/v3 旧方案已归档到 `archive\`（v2=LRF+目检/95%误报，v3=筐ROI+K3 AI/烧¥100+）；当前活跃方案为 v4（YOLO 球轨迹），设计文档在 `docs/superpowers/specs/`；原始整体规格归档在 `docs/SPEC_2026-07-19.md`
