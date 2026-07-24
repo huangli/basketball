@@ -1,0 +1,8 @@
+# 仅承载 pytest 配置（lint/format 由独立的 ruff.toml 管理）
+
+[tool.pytest.ini_options]
+# 把 scripts/ 加入导入路径，使 `from geom import Box` 可用
+pythonpath = ["scripts"]
+testpaths = ["tests"]
+# 断言更友好、输出简洁
+addopts = "-ra -q"

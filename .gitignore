@@ -21,3 +21,10 @@ Desktop.ini
 
 # 模型权重（二进制，AGENTS.md 记录下载方式）
 *.pt
+
+# Python 缓存与工具缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/

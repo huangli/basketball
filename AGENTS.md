@@ -39,11 +39,19 @@
 - 按**场次**组织：场次默认 = 文件名日期（YYYYMMDD），同一天多场按时间间隔拆分；用户可明确声明新场次（ID 用 `YYYYMMDD_对手名`），声明优先；roster 按场次隔离、各自需用户确认，跨场次不合并
 - 成品分两类、按场次分目录：`output\<场次>\队伍_XX_进球集锦.mp4` 和 `output\<场次>\个人_XX_进球合集.mp4`，片段按拍摄时间排序，同参数 concat 直接重封装不重编码
 
+## 代码规范（强制，勿再询问）
+
+- **所有 `scripts/` 下的 Python 代码必须遵守根目录 `rules.md`**（鲁棒优先 ＞ 性能 ＞ 简洁）。
+- `rules.md` 关键约束摘要：PEP8 + 4 空格 + 一行一语句（禁 `;` 串）；函数强制类型注解 + Google 风格 docstring；魔法数字提为常量；外部 IO（ffprobe/ffmpeg/JSON）必须带超时 + 有限重试；禁吞异常、禁裸 `print`（用 `logging` + `run_id`）；脚本入口必须 `if __name__ == "__main__":` 守卫。
+- **lint/format/test**：Ruff 为唯一权威（无配置则默认规则），格式化用 `ruff format`，检查用 `ruff check`，测试用 `pytest`。提交前跑 `ruff format scripts tests && ruff check --fix scripts tests && pytest -q`（`--fix` 后须复核 diff；落地时需在 `ruff.toml`/`pyproject.toml` 启用 `ANN` 以强制类型注解）。
+- `archive/` 下已冻结代码不受 `rules.md` 约束，不要回头改。
+- 立哥反馈"代码质量太差"（如 `scripts/batch_detect_v2.py`：无类型/无 docstring/`;`串语句/魔法数字/无异常保护/用 print），新增或重构脚本时务必对照 `rules.md` 附录 A 的反例清单自查。
+
 ## 工作流约定
 
 - 中间产物放 `work\`（v4：frames / detect / track / candidates / review / clips / roster），成品放 `output\`
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
-- **文档自审（强制）**：创建或修改 `docs/` 下 spec 文档、`AGENTS.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
+- **文档自审（强制）**：创建或修改 `docs/` 下 spec 文档、`AGENTS.md`、`rules.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
 - 进球检测流程（v4，详见 `docs/superpowers/specs/2026-07-23-yolo-ball-trajectory-detection.md`，**试点中**）：原片全画面 5fps 降采样 → YOLO 篮球模型检测球（conf=0.04）→ 假阳性过滤（size/双模型交叉验证）→ 球轨迹聚类 → 入网点判定（静止点+conf 谷底+恢复）→ 候选+全段概览接触表 → 立哥人工确认（≤10 分钟/场）→ goals.json
 - 不删除/不修改任何原始 MP4/LRF 文件
 - v2/v3 旧方案已归档到 `archive\`（v2=LRF+目检/95%误报，v3=筐ROI+K3 AI/烧¥100+）；当前活跃方案为 v4（YOLO 球轨迹），设计文档在 `docs/superpowers/specs/`；原始整体规格归档在 `docs/SPEC_2026-07-19.md`
