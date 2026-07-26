@@ -13,16 +13,6 @@ extend-exclude = [
     ".codewale",
     ".opencode",
     ".git",
-    # —— 技术债 ——
-    # v2/v4 早期快速验证代码，未达 rules.md 标准；lint 与 format 均跳过。
-    # 重构达标后从本列表移除，即自动恢复全规则检查与格式化。
-    "scripts/batch_detect.py",
-    "scripts/batch_detect_v2.py",
-    "scripts/count_person.py",
-    "scripts/detect_test.py",
-    "scripts/track_ball.py",
-    "scripts/gen_candidates_sheet.py",
-    "scripts/gen_review_videos.py",
 ]
 
 [lint]

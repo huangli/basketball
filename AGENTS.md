@@ -9,49 +9,53 @@
 这不是代码仓库，而是一个篮球视频剪辑工作区。任务：检测进球（球入网）→ 按队伍和个人分别合成集锦。
 
 **素材是流动的**：会不断加入新视频、删除旧视频。因此——
-- 不要硬编码文件清单/数量，每次会话先重新扫描 `0_raw_videos\`（递归）
+- 不要硬编码文件清单/数量，每次会话先重新扫描素材目录（递归）
 - `goals.json` / `roster.json` 以文件名为主键，处理前检查文件是否仍存在，容忍缺失
 
 ## 环境（已验证）
 
 - `ffmpeg` / `ffprobe` 8.1.2（gyan.dev 完整版）在 PATH 中，含 NVENC/x264，直接可用
-- Python 3.14.3 已装；**已装 ultralytics 8.4.104 + torch 2.13.0 (CPU) + opencv 5.0.0 + numpy 2.4.3 + pillow 12.3**（pip 清华镜像源）；无 moviepy/PyAV
-- **硬件**：AMD Ryzen AI 9 HX 370 + Radeon 890M 核显（**无独立 N 卡**，nvidia-smi 不存在），32GB 内存；YOLO CPU 推理约 2.5s/帧（1920×1440 @ imgsz1280）
-- **模型**：`basketball_yolo11.pt`（HuggingFace Lumos-88 篮球检测，5.29MB）+ `yolov8n.pt`（COCO 通用，交叉验证 person 用），在工作目录根
-- 网络：用户已配代理（rule 模式），GitHub/HuggingFace 可直连；pip 用清华镜像源
-- Shell 是 Windows PowerShell 7+
+- Python 3.14.3 已装；已装 ultralytics 8.4.104 + torch 2.13.0 (CPU) + opencv 5.0.0 + numpy 2.4.3 + pillow 12.3 + open_clip_torch 3.3.0 + scikit-learn 1.9.0 + transformers + timm 1.0.28 + httpx（pip 清华镜像源）
+- **硬件**：AMD Ryzen AI 9 HX 370 + Radeon 890M 核显（**无独立 N 卡**），32GB 内存；YOLO CPU 推理约 1.1s/帧（1920 宽 @ imgsz1280，双模型）
+- **模型**：`models/` 目录下 `abdullahtarek_ball.pt`（球检测主力）+ `yolov8n.pt`（人物，持球排除用）；`basketball_yolo11.pt`（Lumos-88，已证假阳性爆炸）、`446f6e6e79_yolo11m.pt`（已证不可用）留档
+- 网络：代理在 `127.0.0.1:7897`（Clash）；pip 用清华镜像；HF 下载需 `HTTPS_PROXY=http://127.0.0.1:7897`
+- Shell 是 Windows PowerShell 7+；本机 Kimi Code CLI（Kimi Code 托管订阅，凭证 `~/.kimi-code/credentials/kimi-code.json`，**token 有效期仅 900s**，脚本每次调用前重读）
+- **VLM**：Kimi K3（经 Kimi Code 订阅 `api.kimi.com/coding/v1`，支持图片输入）用于候选精筛；用法与坑见方案文档 §2/§3.5/§5
 
 ## 素材关键事实（已验证）
 
-- `.LRF` 实为 MP4 容器（H.264 960×720@25fps），可被 ffmpeg 直接读取；但 **LRF 960×720 分辨率不足以支撑 YOLO 球检测（球仅 3-5px，已实测验证）**，v4 检测全程用原片 1920×1440 降采样；LRF 仅用于全段概览接触表（快速预览找漏检）
-- 原片统一 HEVC 3840×2880（4:3）+ AAC 48kHz，但**帧率 50/100fps、位深 8/10-bit 混存**——处理每个文件前必须 ffprobe 确认，不要假设一致
-- 文件名即拍摄时间：`DJI_YYYYMMDDHHMMSS_序号_D.MP4`，序号有跳号（0001–0136 中缺 0072–0083 等）
-- 大疆文件还带 data 流（遥测）和 MJPEG 缩略图流，转码时用 `-map 0:v:0 -map 0:a:0` 显式选流，避免混入
-- MP4 与 LRF 通常同名配对，但因素材增删需每次重新配对，不要假设一一对应
+- **当前真实素材**：`20260722地平线/2026 年 7月22 日 地平线/`（300 文件 / 71 分钟，dji_mimo 命名）；**HEVC 3840×2160 (16:9)、10-bit、59.94fps**——与旧测试素材（4:3 8-bit 50fps）不同，处理前必须 ffprobe 确认，脚本尺寸参数需按场次注入
+- 旧测试素材（20250419，114 文件 4:3 8-bit 50fps）已归档到 `archive/0_raw_videos_test/`，仅作回归用
+- 文件名即拍摄时间；大疆文件还带 data 流和缩略图流，转码用 `-map 0:v:0 -map 0:a:0` 显式选流
+- 不删除/不修改任何原始视频文件；素材目录的增删由立哥自己操作
 
 ## 已和用户确认的剪辑规格（勿再询问）
 
 - 进球锚点 = 球入网瞬间；片段窗口 = 前 4 秒 + 后 2 秒
 - 输出 1080p（1440×1080，保持 4:3）、50fps、H.264 + AAC
-- 100fps 素材：入网前常速（降 50fps），入网后 2 秒做半速慢放（100→50fps），两段拼接
-- 编码器：先探测 GPU（`ffmpeg -hwaccels` / nvidia-smi），有 N 卡用 h264_nvenc，否则 x264
+- 100fps 素材：入网前常速（降 50fps），入网后 2 秒做半速慢放（100→50fps），两段拼接；其他帧率不慢放
 - 命名用标签不用真名：`红队-7号`、`黑T恤-A` 风格；花名册生成后需给用户确认
 - 按**场次**组织：场次默认 = 文件名日期（YYYYMMDD），同一天多场按时间间隔拆分；用户可明确声明新场次（ID 用 `YYYYMMDD_对手名`），声明优先；roster 按场次隔离、各自需用户确认，跨场次不合并
 - 成品分两类、按场次分目录：`output\<场次>\队伍_XX_进球集锦.mp4` 和 `output\<场次>\个人_XX_进球合集.mp4`，片段按拍摄时间排序，同参数 concat 直接重封装不重编码
+- 审核视频 2 倍速（立哥实测可稳判，声音保留）
 
 ## 代码规范（强制，勿再询问）
 
 - **所有 `scripts/` 下的 Python 代码必须遵守根目录 `rules.md`**（鲁棒优先 ＞ 性能 ＞ 简洁）。
-- `rules.md` 关键约束摘要：PEP8 + 4 空格 + 一行一语句（禁 `;` 串）；函数强制类型注解 + Google 风格 docstring；魔法数字提为常量；外部 IO（ffprobe/ffmpeg/JSON）必须带超时 + 有限重试；禁吞异常、禁裸 `print`（用 `logging` + `run_id`）；脚本入口必须 `if __name__ == "__main__":` 守卫。
-- **lint/format/test**：Ruff 为唯一权威（无配置则默认规则），格式化用 `ruff format`，检查用 `ruff check`，测试用 `pytest`。提交前跑 `ruff format scripts tests && ruff check --fix scripts tests && pytest -q`（`--fix` 后须复核 diff；落地时需在 `ruff.toml`/`pyproject.toml` 启用 `ANN` 以强制类型注解）。
+- **lint/format/test**：Ruff 为唯一权威（`ruff.toml`），格式化 `ruff format`，检查 `ruff check`，测试 `pytest`。提交前跑 `ruff format scripts tests && ruff check --fix scripts tests && pytest -q`（`--fix` 后须复核 diff）。
 - `archive/` 下已冻结代码不受 `rules.md` 约束，不要回头改。
-- 立哥反馈"代码质量太差"（如 `scripts/batch_detect_v2.py`：无类型/无 docstring/`;`串语句/魔法数字/无异常保护/用 print），新增或重构脚本时务必对照 `rules.md` 附录 A 的反例清单自查。
 
 ## 工作流约定
 
-- 中间产物放 `work\`（v4：frames / detect / track / candidates / review / clips / roster），成品放 `output\`
+- **当前方案文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配、生产计划，先读它再动手）
+- 中间产物放 `work\`（frames / detect / review / label / pilot），成品放 `output\<场次>\`
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
+- **检测流水线**（详见方案文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 双轨精筛（A 纯人工 / B K3 VLM 双尺度任一YES，按 token 预算切换）→ 事件合并 → 2x 审核视频 → 立哥标注 → goals.json → build_highlight.py 合成
 - **文档自审（强制）**：创建或修改 `docs/` 下 spec 文档、`AGENTS.md`、`rules.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
-- 进球检测流程（v4，详见 `docs/superpowers/specs/2026-07-23-yolo-ball-trajectory-detection.md`，**试点中**）：原片全画面 5fps 降采样 → YOLO 篮球模型检测球（conf=0.04）→ 假阳性过滤（size/双模型交叉验证）→ 球轨迹聚类 → 入网点判定（静止点+conf 谷底+恢复）→ 候选+全段概览接触表 → 立哥人工确认（≤10 分钟/场）→ goals.json
-- 不删除/不修改任何原始 MP4/LRF 文件
-- v2/v3 旧方案已归档到 `archive\`（v2=LRF+目检/95%误报，v3=筐ROI+K3 AI/烧¥100+）；当前活跃方案为 v4（YOLO 球轨迹），设计文档在 `docs/superpowers/specs/`；原始整体规格归档在 `docs/SPEC_2026-07-19.md`
+- 进球归属：个人合集需标进球者；立哥人工标注（当前），照片库自动认人（待立哥供照）
+
+## 当前状态（2026-07-26）
+
+- 检测方案已端到端验证：召回 4/4（视频核实），VLM 精筛进球级 3/4 稳定、负样本 8/80 留存，首版个人合集已产出（`output/20250419/`）
+- 试点文档与数据：`work/pilot/`（candidates.json / goals.json / 审核视频）；验证集：`work/label/`；`roster.json` 尚未生成（待花名册确认）
+- 全量推进**暂缓**（新旧素材都暂缓），等立哥指令；球员照片库待立哥新增

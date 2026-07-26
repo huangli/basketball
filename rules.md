@@ -20,11 +20,13 @@
 
 ### "容忍缺失" ≠ "静默容错"（0.2 输入校验的细则）
 
-`AGENTS.md` 说"容忍缺失"，指**素材增删属业务可预期**——缺文件记 `WARNING` 并跳过即可。但以下情形**必须显式失败**，不可静默跳过：
+`AGENTS.md` 说"容忍缺失"，指**素材增删属业务可预期**——缺文件记 `WARNING` 并跳过即可。但以下情形**必须显式失败或可观测（非零退出）**，不可静默跳过：
 
 - `goals.json`/`roster.json` 存在但 **schema 损坏**（字段缺失/类型错误）→ 抛 `SchemaError`
 - ffprobe 返回**非预期编码**（如非 H.265/HEVC 的原片）→ 抛 `UnsupportedMediaError`
-- JSON 主键指向的文件**已不存在**，但被某条 `goal` 引用 → 抛 `DanglingReferenceError`（除非该 goal 已标记 `removed`；`removed` 状态沿用 v4 spec，勿自造状态）
+- JSON 主键指向的文件**已不存在**，但被某条 `goal` 引用 → 分两类：
+  - 检测/标注等**数据流水线** → 抛 `DanglingReferenceError`（除非该 goal 已标记 `removed`；`removed` 状态定义见 SPEC_2026-07-19 §9，勿自造状态）
+  - 合集合成等**产出型脚本** → 逐条 `ERROR` 记录缺失并跳过，其余片段照常产出，但**进程退出码非零**（可观测、不静默，也不浪费已有产出）
 
 判断口径：**自然删减可跳过，数据损坏必须停。**
 
