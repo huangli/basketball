@@ -11,12 +11,12 @@
     python scripts/vlm_judge_events.py --evaluate     # 只评估不调 API
     python scripts/vlm_judge_events.py --renormalize  # 离线重放降级规则（不调 API）
 
-- 判定规则沿用 test_vlm_filter.PROMPT 原文，仅帧数表述改为四帧；
+- 判定规则沿用 vlm_filter.PROMPT 原文，仅帧数表述改为四帧；
 - 缓存键 = 事件 key（"fid#eN"），协议指纹（MODEL|IMG_SIZE|PROMPT|offsets|half|
   "event-v1" 的 sha1 前 12 位）变更即整包作废重来；JUDGED 终态不重判，ERR 下轮重试；
 - 分批：--rounds 限本轮新调用数（OAuth token 仅 900s，轮间由 CLI 活动刷新）；
-- 凭证复用本机 Kimi Code 托管订阅，每次调用前重读（见 test_vlm_filter.load_token）；
-- 召回护栏：裸 YES/NO 一律降级 UNCLEAR（见 test_vlm_filter.normalize_verdict）；
+- 凭证复用本机 Kimi Code 托管订阅，每次调用前重读（见 vlm_filter.load_token）；
+- 召回护栏：裸 YES/NO 一律降级 UNCLEAR（见 vlm_filter.normalize_verdict）；
   无筐轨迹回退帧中心裁剪的事件，其 NO 同样降级 UNCLEAR（裁剪里可能没有筐，
   规则1"看不到筐判 NO"此时不是证据而是我们的取景失败）；
   --renormalize 对已缓存判定离线重放上述两条规则（用存储的 raw，不调 API）。
@@ -39,7 +39,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_label_sheet as gls
-import test_vlm_filter as tvf
+import vlm_filter as tvf
 from errors import SchemaError
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json
 
@@ -64,13 +64,13 @@ PENDING: str = "PENDING"  # 缓存未命中（尚未判定），评估单列
 EVENT_REQUIRED_FIELDS: tuple[str, ...] = ("key", "fid", "src_file", "anchor_t0")
 GOAL_REQUIRED_FIELDS: tuple[str, ...] = ("file", "anchor_time", "status")
 
-# 判定规则与 test_vlm_filter.PROMPT 逐字一致，仅帧数表述三帧→四帧（约隔0.5~1秒）
+# 判定规则与 vlm_filter.PROMPT 逐字一致，仅帧数表述三帧→四帧（约隔0.5~1秒）
 PROMPT: str = tvf.PROMPT.replace(
     "这三张图是同一位置相隔约1秒的连续三帧（室内篮球场）。",
     "这四张图是同一位置相隔约0.5~1秒的连续四帧（室内篮球场）。",
 )
 if PROMPT == tvf.PROMPT:
-    raise SchemaError("PROMPT 帧数表述替换未生效：test_vlm_filter.PROMPT 原文已变更，需同步本模块")
+    raise SchemaError("PROMPT 帧数表述替换未生效：vlm_filter.PROMPT 原文已变更，需同步本模块")
 
 
 def protocol_fp(model: str) -> str:

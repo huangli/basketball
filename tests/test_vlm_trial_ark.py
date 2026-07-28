@@ -122,7 +122,7 @@ def test_parse_response_yes_with_evidence_kept() -> None:
 
 
 def test_parse_response_bare_yes_downgrades() -> None:
-    # Arrange：裸 YES（raw <15 字符，沿用 test_vlm_filter 降级规则）
+    # Arrange：裸 YES（raw <15 字符，沿用 vlm_filter 降级规则）
     data = {"choices": [{"message": {"content": "YES"}}]}
     # Act / Assert
     assert parse_response("k1", _MODEL, data, 1.0, "").verdict == "UNCLEAR"

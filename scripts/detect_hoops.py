@@ -6,8 +6,8 @@
 为 VLM 输入裁剪与审核视频裁剪提供"筐在哪"（hoops.json）。
 
 输入：candidates.json（fid/label/t0/dur/ac/cx/cy）
-输出：hoops.json（schema 见下，下游 test_vlm_filter / gen_review_clips 共用此契约）
-依赖：models/abdullahtarek_ball.pt（Hoop 类 id=2）、test_abdullahtarek_mot（帧路径/parse_sec）、
+输出：hoops.json（schema 见下，下游 vlm_filter / gen_review_clips 共用此契约）
+依赖：models/abdullahtarek_ball.pt（Hoop 类 id=2）、mot_candidates（帧路径/parse_sec）、
     gen_review_clips.cluster_candidates（事件聚类）、pipe_common
 典型调用：
     python scripts/detect_hoops.py --candidates work/20260722/candidates.json \
@@ -37,7 +37,7 @@ from typing import Any
 from ultralytics import YOLO
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_abdullahtarek_mot as mot
+import mot_candidates as mot
 from errors import BasketballPipelineError, SchemaError
 from gen_review_clips import cluster_candidates
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json

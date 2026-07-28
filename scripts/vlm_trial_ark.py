@@ -5,7 +5,7 @@
 输出：work/20260722/p1_slowmo/ark_results.json（_meta 记录模型/prompt 版本/fps/model_errors，
       results 逐片段 verdict/raw/usage/latency；每片段原子落盘，断点续跑幂等）。
 依赖：httpx；环境变量 ARK_API_KEY（只经环境变量传入，禁止写入任何文件/日志）；
-      test_vlm_filter 的 parse_answer / normalize_verdict（三值协议与裸判定降级规则）。
+      vlm_filter 的 parse_answer / normalize_verdict（三值协议与裸判定降级规则）。
 典型调用：
     export ARK_API_KEY=<key>
     python scripts/vlm_trial_ark.py             # 串行判定全部未判片段并打印混淆统计
@@ -29,7 +29,7 @@ import httpx
 
 from errors import BasketballPipelineError, ExternalApiError, ModelUnavailableError, SchemaError
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json
-from test_vlm_filter import normalize_verdict, parse_answer
+from vlm_filter import normalize_verdict, parse_answer
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ def parse_response(
 ) -> ClipResult:
     """把 200 响应体转为 ClipResult（三值解析 + 裸判定降级 + usage 归一）。
 
-    裸 YES/NO（raw 全文 <15 字符）经 test_vlm_filter.normalize_verdict 降级 UNCLEAR。
+    裸 YES/NO（raw 全文 <15 字符）经 vlm_filter.normalize_verdict 降级 UNCLEAR。
 
     Args:
         key: 片段键。

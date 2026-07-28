@@ -70,7 +70,7 @@ def coverage(inner: Box, outer: Box) -> float:
 
     与对称的 IoU 不同，覆盖率刻画"小框是否落在大框内"：球框面积远小于
     人框时 IoU 上限极低（实测持球 IoU ≈0.007），覆盖率仍可接近 1.0，
-    持球排除判据须用它（见 test_abdullahtarek_mot.HELD_COVERAGE）。
+    持球排除判据须用它（见 mot_candidates.HELD_COVERAGE）。
 
     Args:
         inner: 内框（被覆盖方，如球框）。

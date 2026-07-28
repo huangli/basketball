@@ -30,8 +30,8 @@
  ⑥ goals.json → 合成  build_highlight.py 按规格切片、concat
 ```
 
-脚本与产物对应：`test_abdullahtarek_mot.py`(②③) → `pilot_candidates.py`(候选清单) →
-`test_vlm_filter.py`(④B) → `gen_review_clips.py`(⑤) → 人工标注 →
+脚本与产物对应：`mot_candidates.py`(②③) → `pilot_candidates.py`(候选清单) →
+`vlm_filter.py`(④B) → `gen_review_clips.py`(⑤) → 人工标注 →
 `build_highlight.py`(⑥)。模型在 `models/`，缓存在 `work/detect/`。
 
 ## 3. 关键设计决策（都是实测换来的）

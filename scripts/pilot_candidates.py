@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """试点候选生成：由检测缓存产出 candidates.json（供 VLM 精筛与审核视频）。
 
-复用 test_abdullahtarek_mot 的 MOT/静止段/断轨重连/合并逻辑，
+复用 mot_candidates 的 MOT/静止段/断轨重连/合并逻辑，
 对指定的文件 ID 列表生成统一候选文件（默认 work/pilot/candidates.json，
 --out 可改；新场次建议 work/<场次>/candidates.json）。
 
@@ -17,7 +17,7 @@ from glob import glob
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_abdullahtarek_mot as mot
+import mot_candidates as mot
 from pipe_common import atomic_write_json, configure_logging, new_run_id
 
 logger = logging.getLogger(__name__)

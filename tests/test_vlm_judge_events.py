@@ -2,7 +2,7 @@
 
 覆盖：真值对齐（匹配/2.0s 边界/负例计数/未匹配）、评估聚合（合成缓存→分布与
 两种策略估算、token 汇总、正例判 NO 清单）、协议指纹变更整包作废、
-裸 YES 降级沿用 test_vlm_filter.normalize_verdict。
+裸 YES 降级沿用 vlm_filter.normalize_verdict。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-import test_vlm_filter as tvf
+import vlm_filter as tvf
 import vlm_judge_events as vje
 
 
@@ -128,7 +128,7 @@ def test_cache_roundtrip_and_protocol_invalidation(tmp_path: pathlib.Path) -> No
 
 
 def test_bare_yes_downgrade_reused() -> None:
-    # Arrange：事件级判定沿用 test_vlm_filter 的裸 YES 降级规则
+    # Arrange：事件级判定沿用 vlm_filter 的裸 YES 降级规则
     res = {"answer": "YES", "usage": None, "raw": "YES"}
     # Act / Assert
     assert tvf.normalize_verdict(res)["answer"] == "UNCLEAR"

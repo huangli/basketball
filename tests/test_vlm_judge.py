@@ -1,15 +1,14 @@
-"""test_vlm_filter 三值判定相关单元测试（不跑真 VLM 调用）。
+"""vlm_filter 三值判定相关单元测试（不跑真 VLM 调用）。
 
 覆盖：parse_answer 三值解析（含 NOT CLEAR 陷阱）、find_event 事件归属、
-hoop_centers 逐帧筐位选取。文件故意不叫 test_vlm_filter.py，
-避免与被测脚本模块名冲突。
+hoop_centers 逐帧筐位选取。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from test_vlm_filter import find_event, hoop_centers, normalize_verdict, parse_answer
+from vlm_filter import find_event, hoop_centers, normalize_verdict, parse_answer
 
 
 def test_parse_answer_exact_last_line_yes() -> None:

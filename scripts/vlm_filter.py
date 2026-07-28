@@ -8,7 +8,7 @@
   无筐检出/无 hoops 文件回退球锚点裁剪（WARNING 计数）。
 
 用法:
-    python scripts/test_vlm_filter.py [--candidates PATH] [--cache PATH] [--limit N]
+    python scripts/vlm_filter.py [--candidates PATH] [--cache PATH] [--limit N]
                                       [--model NAME] [--hoops PATH] [--halves "420 630"]
 
 - 模型：默认 k3；--model 可切其他视觉模型（如 k2.6），协议指纹含 MODEL，

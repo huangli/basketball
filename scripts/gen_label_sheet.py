@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """生成候选标注图卡（供立哥人工标注 进球/非进球）。
 
-复用 test_abdullahtarek_mot 的检测缓存与候选逻辑，对每个候选截取
+复用 mot_candidates 的检测缓存与候选逻辑，对每个候选截取
 t0-0.4 / t0 / t0+0.4 三帧、以候选点为中心裁 560x560，纵向拼成一张图卡；
 按文件拼 5 列大 sheet，编号与 candidates.json 一一对应。
 
@@ -18,7 +18,7 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import test_abdullahtarek_mot as mot
+import mot_candidates as mot
 from pipe_common import atomic_write_json, configure_logging, new_run_id
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def collect_file_candidates(fid: str) -> list[dict[str, Any]]:
     frames = sorted(glob(mot.FRAMES_PATTERN.format(fid)))
     cached = mot.load_detection_cache(fid, len(frames))
     if cached is None:
-        logger.warning("%s: 无检测缓存，先运行 test_abdullahtarek_mot.py", fid)
+        logger.warning("%s: 无检测缓存，先运行 mot_candidates.py", fid)
         return []
     all_balls, all_persons = cached
     tracks = mot.run_mot(all_balls)

@@ -4,7 +4,7 @@
 输入：原片目录（递归扫描 .mp4/.MP4），fid = 原片主名（dji_mimo_* 文件名即拍摄时间，
     按文件名排序即时间顺序）。
 输出：work/frames/<fid>/f_00001.jpg ...（帧序号 1 起，sec=(idx-1)/5，
-    与 test_abdullahtarek_mot.parse_sec 的约定一致）。
+    与 mot_candidates.parse_sec 的约定一致）。
 依赖：scripts/errors.py、scripts/pipe_common.py。
 典型调用：python scripts/extract_frames.py "20260722地平线/2026 年 7月22 日 地平线" --limit 50
 
@@ -25,7 +25,7 @@ from pipe_common import configure_logging, new_run_id, run_ffmpeg
 logger = logging.getLogger(__name__)
 
 FRAMES_ROOT: str = "work/frames"
-SAMPLE_FPS: float = 5.0  # 必须与 test_abdullahtarek_mot.SAMPLE_FPS 一致
+SAMPLE_FPS: float = 5.0  # 必须与 mot_candidates.SAMPLE_FPS 一致
 IMG_WIDTH: int = 1920  # 帧宽（高按原片宽高比自适应：16:9->1080、4:3->1440）
 JPG_QUALITY: int = 3  # ffmpeg -q:v（2~5 对检测足够）
 FFPROBE_TIMEOUT_SEC: int = 30  # rules.md §4：ffprobe 单文件 30s
