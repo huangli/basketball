@@ -27,3 +27,11 @@ class DanglingReferenceError(BasketballPipelineError):
 
 class MediaTimeoutError(BasketballPipelineError):
     """ffprobe / ffmpeg 子进程超时且重试耗尽。"""
+
+
+class ExternalApiError(BasketballPipelineError):
+    """外部 API 凭证级/全局失败（如 401 认证失败、候选模型全部不可用），换参重试无意义。"""
+
+
+class ModelUnavailableError(BasketballPipelineError):
+    """方舟模型 ID 不可用（NotFound/未开通/Shutdown/无权限），应切换下一个候选模型。"""

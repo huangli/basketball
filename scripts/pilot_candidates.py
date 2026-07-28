@@ -2,7 +2,12 @@
 """试点候选生成：由检测缓存产出 candidates.json（供 VLM 精筛与审核视频）。
 
 复用 test_abdullahtarek_mot 的 MOT/静止段/断轨重连/合并逻辑，
-对指定的文件 ID 列表生成统一候选文件 work/pilot/candidates.json。
+对指定的文件 ID 列表生成统一候选文件（默认 work/pilot/candidates.json，
+--out 可改；新场次建议 work/<场次>/candidates.json）。
+
+用法:
+    python scripts/pilot_candidates.py 0007 0014
+    python scripts/pilot_candidates.py --out work/20260722/candidates.json <fid...>
 """
 
 import logging
@@ -58,8 +63,20 @@ def main() -> None:
     """主入口：对试点文件生成 candidates.json。"""
     run_id: str = new_run_id()
     configure_logging(run_id)
-    fids: list[str] = sys.argv[1:] if len(sys.argv) > 1 else PILOT_FIDS
-    os.makedirs(os.path.dirname(OUT_JSON), exist_ok=True)
+    fids: list[str] = []
+    out_json: str = OUT_JSON
+    args: list[str] = sys.argv[1:]
+    i: int = 0
+    while i < len(args):
+        if args[i] == "--out" and i + 1 < len(args):
+            out_json = args[i + 1]
+            i += 2
+        else:
+            fids.append(args[i])
+            i += 1
+    if not fids:
+        fids = PILOT_FIDS
+    os.makedirs(os.path.dirname(out_json), exist_ok=True)
     all_records: list[dict[str, Any]] = []
     for fid in fids:
         cands = collect_file_candidates(fid)
@@ -70,11 +87,11 @@ def main() -> None:
             all_records.append(record)
         logger.info("  %s: %d 候选", fid, len(cands))
     try:
-        atomic_write_json(OUT_JSON, all_records, what="candidates.json")
+        atomic_write_json(out_json, all_records, what="candidates.json")
     except OSError as exc:
-        logger.error("写入 %s 失败: %s", OUT_JSON, exc)
+        logger.error("写入 %s 失败: %s", out_json, exc)
         sys.exit(1)
-    logger.info("共 %d 候选 -> %s", len(all_records), OUT_JSON)
+    logger.info("共 %d 候选 -> %s", len(all_records), out_json)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """个人进球合集合成（按剪辑规格）。
 
-按 goals.json 中的记录切片：窗口 [anchor-4s, anchor+2s]，输出
-1440x1080（保持 4:3）、50fps、H.264+AAC；100fps 素材入网后 2 秒
-半速慢放（slowmo=true 时两段拼接）。同参数 concat 直接重封装。
-产物：output/<场次>/个人_<标签>_进球合集.mp4。
+按 goals.json 中的记录切片：窗口 [anchor-4s, anchor+2s]，50fps、H.264+AAC；
+输出尺寸按场次素材比例注入（--out，默认 1440x1080 对应 4:3 素材，
+16:9 素材用 1920x1080），缩放保持宽高比、不足处黑边补齐不压扁；
+100fps 素材入网后 2 秒半速慢放（slowmo=true 时两段拼接）。
+同参数 concat 直接重封装。产物：output/<场次>/个人_<标签>_进球合集.mp4。
 
 输入：--goals 指定的 goals.json（status=confirmed 记录；schema 损坏抛 SchemaError）
 输出：output/<场次>/个人_<标签>_进球合集.mp4
 依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）
 用法:
     python scripts/build_highlight.py --goals work/pilot/goals.json --scorer 大斌
+    python scripts/build_highlight.py --goals work/20260722/goals.json \
+        --rawdir "20260722地平线/2026 年 7月22 日 地平线" --out 1920x1080
 """
 
 import contextlib
@@ -25,7 +28,7 @@ from pipe_common import configure_logging, new_run_id, read_json, run_ffmpeg
 
 logger = logging.getLogger(__name__)
 
-RAW_DIR: str = "archive/0_raw_videos_test"  # 测试素材已归档；新场次用 --goals 内文件名对应目录
+RAW_DIR: str = "archive/0_raw_videos_test"  # 默认原片目录（旧测试素材）；新场次用 --rawdir 注入
 OUT_ROOT: str = "output"
 OUT_W: int = 1440
 OUT_H: int = 1080
@@ -35,12 +38,25 @@ PRESET: str = "medium"
 CLIP_BEFORE_SEC: float = 4.0
 CLIP_AFTER_SEC: float = 2.0
 
+
 # 画面滤镜：缩放保持宽高比（force_original_aspect_ratio=decrease），不足处黑边补齐，
-# 防 16:9 新素材被压扁；输出尺寸仍按 4:3 老素材写死，场次尺寸参数化是后续待办
-SCALE_PAD_FILTER: str = (
-    f"scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=decrease,"
-    f"pad={OUT_W}:{OUT_H}:(ow-iw)/2:(oh-ih)/2"
-)
+# 防 16:9 新素材被压扁；输出尺寸由 --out 按场次素材比例注入
+def scale_pad_filter(out_w: int, out_h: int) -> str:
+    """生成 scale+pad 滤镜串：等比缩放进 out_w×out_h 画布，黑边补齐居中。
+
+    Args:
+        out_w: 输出宽（像素）。
+        out_h: 输出高（像素）。
+
+    Returns:
+        ffmpeg -vf 用的滤镜串。
+    """
+    return (
+        f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,"
+        f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2"
+    )
+
+
 # goals.json status 合法值（SPEC_2026-07-19 §status 流转定义）；仅 confirmed 进合成
 KNOWN_STATUSES: frozenset[str] = frozenset(
     {"candidate", "confirmed", "clipped", "done", "rejected", "removed", "uncertain"}
@@ -49,14 +65,18 @@ KNOWN_STATUSES: frozenset[str] = frozenset(
 SILENT_AUDIO_SRC: str = "anullsrc=channel_layout=stereo:sample_rate=48000"
 
 
-def parse_argv() -> tuple[str, str]:
+def parse_argv() -> tuple[str, str, str, int, int]:
     """解析命令行参数。
 
     Returns:
-        (goals.json 路径, scorer 标签；空串表示全部)。
+        (goals.json 路径, scorer 标签, 原片目录, 输出宽, 输出高；
+        scorer 空串表示全部，原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H)。
     """
     goals: str = ""
     scorer: str = ""
+    rawdir: str = RAW_DIR
+    out_w: int = OUT_W
+    out_h: int = OUT_H
     args: list[str] = sys.argv[1:]
     i: int = 0
     while i < len(args):
@@ -66,9 +86,16 @@ def parse_argv() -> tuple[str, str]:
         elif args[i] == "--scorer" and i + 1 < len(args):
             scorer = args[i + 1]
             i += 2
+        elif args[i] == "--rawdir" and i + 1 < len(args):
+            rawdir = args[i + 1]
+            i += 2
+        elif args[i] == "--out" and i + 1 < len(args):
+            w, h = args[i + 1].lower().split("x")
+            out_w, out_h = int(w), int(h)
+            i += 2
         else:
             i += 1
-    return goals, scorer
+    return goals, scorer, rawdir, out_w, out_h
 
 
 def _encode_timeout_sec(duration_sec: float) -> int:
@@ -139,13 +166,14 @@ def _validate_goals(data: dict[str, Any], goals_path: str) -> list[dict[str, Any
     return confirmed
 
 
-def cut_normal(src: str, goal: dict[str, Any], out_path: str) -> None:
+def cut_normal(src: str, goal: dict[str, Any], out_path: str, scale_pad: str) -> None:
     """常速切片（50fps 素材）。
 
     Args:
         src: 原片路径。
         goal: 进球记录（clip_start/clip_end）。
         out_path: 输出片段路径。
+        scale_pad: scale_pad_filter 生成的滤镜串（输出尺寸随场次注入）。
     """
     run_ffmpeg(
         [
@@ -160,7 +188,7 @@ def cut_normal(src: str, goal: dict[str, Any], out_path: str) -> None:
             "-map",
             "0:a:0?",
             "-vf",
-            f"{SCALE_PAD_FILTER},fps={OUT_FPS}",
+            f"{scale_pad},fps={OUT_FPS}",
             "-c:v",
             "libx264",
             "-crf",
@@ -179,18 +207,19 @@ def cut_normal(src: str, goal: dict[str, Any], out_path: str) -> None:
     )
 
 
-def cut_slowmo(src: str, goal: dict[str, Any], out_path: str) -> None:
+def cut_slowmo(src: str, goal: dict[str, Any], out_path: str, scale_pad: str) -> None:
     """100fps 素材：入网前常速(降50fps)、入网后 2 秒半速慢放，两段拼接。
 
     part2 滤镜顺序必须是 scale/pad → setpts 拉伸时间轴 → fps 重采样
     （先 fps 会把 100fps 抽掉一半帧，输出只剩有效 25fps）；part1 保留
     现场声、part2 配 lavfi 静音轨，part1/part2/cut_normal 三者流布局
-    一致（h264/yuv420p/1440x1080/50fps + aac）才能 -c copy 直接拼接。
+    一致（h264/yuv420p/同尺寸/50fps + aac）才能 -c copy 直接拼接。
 
     Args:
         src: 原片路径。
         goal: 进球记录（clip_start/anchor_time/clip_end）。
         out_path: 输出片段路径。
+        scale_pad: scale_pad_filter 生成的滤镜串（输出尺寸随场次注入）。
     """
     anchor: float = goal["anchor_time"]
     part1: str = out_path.replace(".mp4", "_p1.mp4")
@@ -208,7 +237,7 @@ def cut_slowmo(src: str, goal: dict[str, Any], out_path: str) -> None:
             "-map",
             "0:a:0?",
             "-vf",
-            f"{SCALE_PAD_FILTER},fps={OUT_FPS}",
+            f"{scale_pad},fps={OUT_FPS}",
             "-c:v",
             "libx264",
             "-crf",
@@ -242,7 +271,7 @@ def cut_slowmo(src: str, goal: dict[str, Any], out_path: str) -> None:
             "-map",
             "1:a:0",
             "-vf",
-            f"{SCALE_PAD_FILTER},setpts=PTS*2.0,fps={OUT_FPS}",
+            f"{scale_pad},setpts=PTS*2.0,fps={OUT_FPS}",
             "-c:v",
             "libx264",
             "-crf",
@@ -276,7 +305,7 @@ def main() -> int:
     """
     run_id = new_run_id()
     configure_logging(run_id)
-    goals_path, scorer = parse_argv()
+    goals_path, scorer, rawdir, out_w, out_h = parse_argv()
     if not goals_path:
         logger.error("缺少 --goals 参数")
         return 1
@@ -296,19 +325,20 @@ def main() -> int:
         os.makedirs(work_dir, exist_ok=True)
 
         t_start: float = time.time()
+        scale_pad: str = scale_pad_filter(out_w, out_h)
         clips: list[str] = []
         missing: list[str] = []
         for i, goal in enumerate(goals, 1):
-            src: str = os.path.join(RAW_DIR, goal["file"])
+            src: str = os.path.join(rawdir, goal["file"])
             if not os.path.exists(src):
                 logger.error("原片缺失，跳过: %s", goal["file"])
                 missing.append(goal["file"])
                 continue
             clip: str = os.path.join(work_dir, f"clip_{i:03d}.mp4")
             if goal.get("slowmo"):
-                cut_slowmo(src, goal, clip)
+                cut_slowmo(src, goal, clip, scale_pad)
             else:
-                cut_normal(src, goal, clip)
+                cut_normal(src, goal, clip, scale_pad)
             clips.append(clip)
             logger.info(
                 "  片段 %d/%d: %s @%.1fs%s",
