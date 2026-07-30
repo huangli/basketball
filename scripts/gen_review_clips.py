@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """生成候选审核视频（供立哥人工标注 进球/非进球）。
 
-读取 candidates.json，先把同一文件的候选按时间间隔聚类为"事件"
-（同一进球常触发多个候选，重叠片段重复观看浪费审核时间），每个事件只出
-一个片段：覆盖 [首候选-2s, 末候选+2s]，缩放 840x840 并烧录事件编号水印，
-按文件拼成一个审核 mp4。裁剪：--hoops 提供筐轨迹时按轨迹包围盒自适应
-（全程见筐），否则回退 conf 最高候选为中心的固定裁剪。
+读取 candidates.json，先把同一文件的候选聚类为"事件"（同一进球常触发多个
+候选，重叠片段重复观看浪费审核时间；规则见 cluster_candidates：纯时间链
++时空放宽双条件），每个事件只出一个片段：覆盖 [首候选-2s, 末候选+2s]，
+缩放 840x840 并烧录事件编号水印，按文件拼成一个审核 mp4。事件锚点取末
+成员 t0（见 event_anchor，批次 1 实证 max-conf 锚点在长事件切错时段）。
+裁剪：--hoops 提供筐轨迹时按轨迹包围盒自适应（全程见筐），否则回退 conf
+最高候选为中心的固定裁剪。--keep-clips 时另写 events_index.json，按
+hoop_dist（事件成员到筐轨迹的最小距离）升序排列，真球靠前供人工先标。
 
 输入：--candidates 指定的 candidates.json（schema 损坏抛 SchemaError）；
     --vlmcache 指定的 VLM 缓存 JSON（可选；损坏仅记 WARNING 并忽略判定水印）；
     --srcdir/--orig 按场次注入原片目录与原片尺寸（缺省为旧 4:3 测试素材参数）；
     --hoops 指定的 hoops.json（可选；无则回退锚点裁剪）
-输出：<outdir>/<fid>_events.mp4
+输出：<outdir>/<fid>_events.mp4；--keep-clips 时另出 events_index.json（按 hoop_dist 升序）
 依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）
 用法:
     python scripts/gen_review_clips.py --candidates work/label/candidates.json
@@ -21,6 +24,7 @@
 """
 
 import logging
+import math
 import os
 import sys
 import time
@@ -37,6 +41,11 @@ RAW_GLOB: str = "archive/0_raw_videos_test/**/*_{fid}_D.MP4"  # 测试素材已�
 OUT_DIR: str = "work/review"
 
 CLUSTER_GAP_SEC: float = 2.0  # 候选间隔 <= 该值归为同一事件（同进球触发候选实测间隔 <=1.7s）
+# 时空放宽合并：间隔 <=6.0s 且球位 (cx,cy) 距离 <=400px(img 系) 也归同一事件——
+# 批次 1 实测 190354 同一进球两候选间隔 2.6s/309px 被纯时间链拆成两事件、合集重复；
+# 篮板补篮类真动作间隔虽可能 >2s，锚点取末成员后仍正确
+CLUSTER_MERGE_GAP_SEC: float = 6.0
+CLUSTER_MERGE_DIST: float = 400.0
 CLIP_BEFORE_SEC: float = 2.0  # 片段起点：事件首候选前
 CLIP_AFTER_SEC: float = 2.0  # 片段终点：事件末候选后
 MIN_HALF_IMG: int = 420  # img 系裁剪半径
@@ -81,22 +90,55 @@ def find_source(fid: str, srcdir: str = "") -> str | None:
 
 def cluster_candidates(
     cands: list[dict[str, Any]],
+    *,
+    gap_sec: float = CLUSTER_GAP_SEC,
+    merge_gap_sec: float = CLUSTER_MERGE_GAP_SEC,
+    merge_dist: float = CLUSTER_MERGE_DIST,
 ) -> list[list[dict[str, Any]]]:
-    """把按 t0 排序的候选按 CLUSTER_GAP_SEC 间隔聚类为事件。
+    """把候选聚类为事件（纯时间链 + 时空放宽双条件，满足任一即同事件）。
+
+    相邻候选（与当前事件末成员比较）满足以下任一即归入同一事件：
+
+    - 时间：t0 差 <= gap_sec（现状行为，同进球触发候选实测间隔 <=1.7s）；
+    - 时空：t0 差 <= merge_gap_sec 且 (cx,cy) 欧氏距离 <= merge_dist——
+      消 190354 式同球重复（实测同一进球两候选间隔 2.6s/309px 被纯时间链
+      拆成两事件）；篮板补篮类真动作锚点取末成员后仍正确。
 
     Args:
-        cands: 候选列表（任意顺序）。
+        cands: 候选列表（任意顺序，须含 t0/cx/cy 字段）。
+        gap_sec: 纯时间链合并的 t0 差上限（秒）。
+        merge_gap_sec: 时空放宽合并的 t0 差上限（秒）。
+        merge_dist: 时空放宽合并的球位距离上限（img 系像素）。
 
     Returns:
         事件列表，每个事件是候选列表（按 t0 升序）。
     """
     clusters: list[list[dict[str, Any]]] = []
     for c in sorted(cands, key=lambda c: c["t0"]):
-        if clusters and c["t0"] - clusters[-1][-1]["t0"] <= CLUSTER_GAP_SEC:
-            clusters[-1].append(c)
-        else:
-            clusters.append([c])
+        if clusters:
+            prev: dict[str, Any] = clusters[-1][-1]
+            gap: float = c["t0"] - prev["t0"]
+            dist: float = math.hypot(c["cx"] - prev["cx"], c["cy"] - prev["cy"])
+            if gap <= gap_sec or (gap <= merge_gap_sec and dist <= merge_dist):
+                clusters[-1].append(c)
+                continue
+        clusters.append([c])
     return clusters
+
+
+def event_anchor(members: list[dict[str, Any]]) -> float:
+    """事件锚点 = 末成员 t0（动作链末端 = 球停网/落地）。
+
+    批次 1 实证：长事件（0544/1508/1948）max-conf 锚点落在非进球成员、
+    片段切错时段，末成员锚点全部命中；单成员事件行为不变。
+
+    Args:
+        members: 事件内候选（按 t0 升序，非空）。
+
+    Returns:
+        锚点时刻（秒）。
+    """
+    return members[-1]["t0"]
 
 
 def _encode_timeout_sec(duration_sec: float) -> int:
@@ -281,6 +323,47 @@ def find_event_track(
         ):
             return ev["track"]
     return None
+
+
+def event_hoop_dist(
+    members: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> float | None:
+    """事件到筐的最小距离（img 系 px）：各成员 (cx,cy) 到其 t0 时刻筐位距离的最小值。
+
+    每成员先用 find_event_track 的选取逻辑找 window 含其 t0 的筐轨迹，
+    再取轨迹内 sec 最近点作为该时刻筐位；所有成员都无筐轨迹命中时返回 None。
+
+    Args:
+        members: 事件内候选（cx/cy 为 img 系坐标）。
+        events: 该 fid 的 hoops.json 事件列表。
+
+    Returns:
+        最小筐距（img 系像素）；无筐轨迹命中为 None。
+    """
+    best: float | None = None
+    for m in members:
+        track: list[list[Any]] | None = find_event_track(events, m["t0"])
+        if not track:
+            continue
+        pt: list[Any] = min(track, key=lambda p: abs(p[0] - m["t0"]))
+        d: float = math.hypot(m["cx"] - pt[1], m["cy"] - pt[2])
+        if best is None or d < best:
+            best = d
+    return best
+
+
+def sort_events_by_hoop_dist(events: list[dict[str, Any]]) -> None:
+    """events_index 原地按 hoop_dist 升序排序：真球靠前，人工先标高密度区。
+
+    hoop_dist 为 None（无筐轨迹）的事件排最后；稳定排序，相同 hoop_dist 的
+    事件保持各 fid 内原有时间序。只排序不裁剪——批次 1 实测真球筐距
+    66/260/570px vs 全体中位 540px，排序信号有效但不足以自动剔除。
+
+    Args:
+        events: events_index 事件列表（每项含 hoop_dist 字段，数值或 None）。
+    """
+    events.sort(key=lambda ev: (ev["hoop_dist"] is None, ev["hoop_dist"] or 0.0))
 
 
 def _event_watermark(
@@ -578,7 +661,7 @@ def main() -> int:
             clips: list[str] = []
             for idx, members in enumerate(clusters, start=1):
                 clip: str = os.path.join(clip_dir, f"{fid}_e{idx}.mp4")
-                anchor_t0: float = max(members, key=lambda m: m["ac"])["t0"]
+                anchor_t0: float = event_anchor(members)
                 track: list[list[Any]] | None = find_event_track(
                     hoops_by_fid.get(fid, []), anchor_t0
                 )
@@ -607,6 +690,7 @@ def main() -> int:
                         _event_watermark(fid, idx, members, verdict, no_hoop),
                         wide_path,
                     )
+                    hoop_dist: float | None = event_hoop_dist(members, hoops_by_fid.get(fid, []))
                     index_events.append(
                         {
                             "key": f"{fid}#e{idx}",
@@ -616,6 +700,7 @@ def main() -> int:
                             "clip_wide": os.path.relpath(wide_path, out_dir),
                             "src_file": os.path.basename(src),
                             "anchor_t0": round(anchor_t0, 1),
+                            "hoop_dist": round(hoop_dist) if hoop_dist is not None else None,
                             "verdict": verdict,
                         }
                     )
@@ -636,6 +721,9 @@ def main() -> int:
             )
 
         if keep_clips:
+            # 按筐距升序（None 排最后）：真球靠前，人工先标高密度区；只排序不裁剪。
+            # 剪辑文件命名/生成顺序不变（仍按 fid 时间序），仅 index 数组顺序变。
+            sort_events_by_hoop_dist(index_events)
             atomic_write_json(
                 os.path.join(out_dir, "events_index.json"),
                 {"events": index_events},

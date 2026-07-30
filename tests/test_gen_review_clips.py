@@ -1,7 +1,9 @@
-"""gen_review_clips._validate_candidates / find_source 单元测试。
+"""gen_review_clips 单元测试。
 
 覆盖：candidates.json schema 校验（合法通过、顶层非列表、记录非对象、
-缺字段、数值字段为 bool）；find_source 的 --srcdir 直找与缺失。
+缺字段、数值字段为 bool）；find_source 的 --srcdir 直找与缺失；
+cluster_candidates 时空放宽聚类（批次 2 新增）；event_anchor 末成员锚点；
+event_hoop_dist / sort_events_by_hoop_dist（events_index 筐距排序）。
 """
 
 from __future__ import annotations
@@ -15,9 +17,13 @@ from errors import SchemaError
 from gen_review_clips import (
     _validate_candidates,
     adaptive_crop,
+    cluster_candidates,
+    event_anchor,
+    event_hoop_dist,
     event_verdict,
     find_event_track,
     find_source,
+    sort_events_by_hoop_dist,
 )
 
 _PATH = "work/pilot/candidates.json"
@@ -132,3 +138,127 @@ def test_event_verdict_four_branches() -> None:
     )
     assert event_verdict(members, {"f1#1@420": {"answer": "NO"}}) == "VLM:N"
     assert event_verdict(members, {}) == ""
+
+
+# ---- 批次 2 改进 1：事件锚点取末成员 ----
+
+
+def test_event_anchor_last_member_not_max_conf() -> None:
+    # Arrange：ac 最高的成员不在末尾（批次 1 长事件 max-conf 锚点切错时段场景）
+    members = [
+        _cand(t0=10.0, ac=0.95),
+        _cand(t0=12.0, ac=0.10),
+        _cand(t0=13.5, ac=0.50),
+    ]
+    # Act / Assert：锚点取末成员 t0，而非 max-conf 成员
+    assert event_anchor(members) == 13.5
+
+
+def test_event_anchor_single_member_unchanged() -> None:
+    # Arrange / Act / Assert：单成员事件行为与旧 max-conf 一致
+    assert event_anchor([_cand(t0=18.2, ac=0.31)]) == 18.2
+
+
+# ---- 批次 2 改进 2：事件聚类加时空放宽条件 ----
+
+
+def test_cluster_spatiotemporal_merge_190354_case() -> None:
+    # Arrange：190354 式同球重复——两候选间隔 2.6s(>2.0)、距离 309px(<=400)
+    cands = [_cand(t0=10.0, cx=100, cy=100), _cand(t0=12.6, cx=409, cy=100)]
+    # Act
+    clusters = cluster_candidates(cands)
+    # Assert：时空放宽合并为 1 事件
+    assert len(clusters) == 1
+    assert len(clusters[0]) == 2
+
+
+def test_cluster_merge_boundary_inclusive() -> None:
+    # Arrange：边界值 gap=6.0s、dist=400px，均为 <= 即合并
+    cands = [_cand(t0=10.0, cx=0, cy=0), _cand(t0=16.0, cx=400, cy=0)]
+    # Act / Assert
+    assert len(cluster_candidates(cands)) == 1
+
+
+def test_cluster_far_distance_not_merged() -> None:
+    # Arrange：同 2.6s 间隔但距离 401px(>400) → 不合并
+    cands = [_cand(t0=10.0, cx=100, cy=100), _cand(t0=12.6, cx=501, cy=100)]
+    # Act / Assert
+    assert len(cluster_candidates(cands)) == 2
+
+
+def test_cluster_beyond_merge_gap_not_merged() -> None:
+    # Arrange：间隔 6.1s(>6.0)，即使球位重合也不合并
+    cands = [_cand(t0=10.0, cx=100, cy=100), _cand(t0=16.1, cx=100, cy=100)]
+    # Act / Assert
+    assert len(cluster_candidates(cands)) == 2
+
+
+def test_cluster_pure_time_chain_unchanged() -> None:
+    # Arrange：间隔 <=2.0s 纯时间链行为不变（球位再远也链式合并）
+    cands = [
+        _cand(t0=10.0, cx=0, cy=0),
+        _cand(t0=12.0, cx=1900, cy=1000),
+        _cand(t0=13.9, cx=0, cy=0),
+    ]
+    # Act
+    clusters = cluster_candidates(cands)
+    # Assert：3 候选链式合成 1 事件
+    assert len(clusters) == 1
+    assert len(clusters[0]) == 3
+
+
+# ---- 批次 2 改进 3：events_index 筐距 hoop_dist ----
+
+
+def _hoop_events() -> list[dict[str, Any]]:
+    """构造单筐事件：window [0,20]，轨迹两点 (500,300)@5s / (520,300)@10s。"""
+    return [
+        {
+            "fid": "0011",
+            "window": [0.0, 20.0],
+            "detected": True,
+            "track": [[5.0, 500, 300, "det"], [10.0, 520, 300, "det"]],
+        }
+    ]
+
+
+def test_event_hoop_dist_min_over_members() -> None:
+    # Arrange：成员1 t0=5.0 → 轨迹 sec 最近点 (500,300)，距离 hypot(60,0)=60；
+    # 成员2 t0=12.0 → 最近点 (520,300)@10s，距离 hypot(440,240)≈501.2
+    members = [_cand(t0=5.0, cx=560, cy=300), _cand(t0=12.0, cx=960, cy=540)]
+    # Act
+    d = event_hoop_dist(members, _hoop_events())
+    # Assert：取各成员最小值
+    assert d == pytest.approx(60.0)
+
+
+def test_event_hoop_dist_no_track_returns_none() -> None:
+    # Arrange：window 不含成员 t0 / 无事件 → 无筐轨迹命中
+    events = [
+        {"fid": "0011", "window": [0.0, 1.0], "detected": True, "track": [[0.0, 1, 1, "det"]]}
+    ]
+    # Act / Assert
+    assert event_hoop_dist([_cand(t0=99.0)], events) is None
+    assert event_hoop_dist([_cand(t0=5.0)], []) is None
+
+
+def test_event_hoop_dist_skips_undetected_event() -> None:
+    # Arrange：detected=false 的事件不参与（与 find_event_track 选取逻辑一致）
+    events = [{"fid": "0011", "window": [0.0, 20.0], "detected": False, "track": []}]
+    # Act / Assert
+    assert event_hoop_dist([_cand(t0=5.0)], events) is None
+
+
+def test_sort_events_by_hoop_dist_ascending_none_last() -> None:
+    # Arrange：数值与 None 混合；两条 None 验证稳定排序保持原相对顺序（fid 内时间序）
+    events = [
+        {"key": "a", "hoop_dist": 570},
+        {"key": "b", "hoop_dist": None},
+        {"key": "c", "hoop_dist": 66},
+        {"key": "d", "hoop_dist": None},
+        {"key": "e", "hoop_dist": 260},
+    ]
+    # Act
+    sort_events_by_hoop_dist(events)
+    # Assert：升序、None 在尾、None 间保持原顺序
+    assert [e["key"] for e in events] == ["c", "e", "a", "b", "d"]
