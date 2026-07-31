@@ -42,6 +42,7 @@
 ## 代码规范（强制，勿再询问）
 
 - **所有 `scripts/` 下的 Python 代码必须遵守根目录 `rules.md`**（鲁棒优先 ＞ 性能 ＞ 简洁）。
+- **spec/plan/todo 三件套先行（2026-07-30 立哥定）**：`scripts/`、`tests/` 的新功能、多文件改动等非小修小补的代码工作，动手前必须先产出三件套——spec（目标/边界/成功标准，放 `docs/`，按本文档自审要求过 spec-reviewer）、plan（执行步骤，放 `tasks/plan.md`）、todo（勾选清单，放 `tasks/todo.md`）；plan/todo 同属 `tasks\*.md` 自审范围。小修 bug、单点参数调整、`work/` 下一次性探索脚本可豁免。直接开写容易出错，禁止。
 - **lint/format/test**：Ruff 为唯一权威（`ruff.toml`），格式化 `ruff format`，检查 `ruff check`，测试 `pytest`。提交前跑 `ruff format scripts tests && ruff check --fix scripts tests && pytest -q`（`--fix` 后须复核 diff）。
 - `archive/` 下已冻结代码不受 `rules.md` 约束，不要回头改。
 
