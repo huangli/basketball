@@ -32,6 +32,7 @@ from glob import escape, glob
 from typing import Any
 
 from errors import BasketballPipelineError, SchemaError
+from extract_frames import probe_duration_sec
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json, run_ffmpeg
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,9 @@ CLUSTER_GAP_SEC: float = 2.0  # 候选间隔 <= 该值归为同一事件（同�
 CLUSTER_MERGE_GAP_SEC: float = 6.0
 CLUSTER_MERGE_DIST: float = 400.0
 CLIP_BEFORE_SEC: float = 2.0  # 片段起点：事件首候选前
-CLIP_AFTER_SEC: float = 2.0  # 片段终点：事件末候选后
+CLIP_AFTER_SEC: float = (
+    4.0  # 片段终点：事件末候选后（批次 2 立哥反馈：+2s 时补篮/筐沿跳舞类结局未含，+4s 覆盖）
+)
 MIN_HALF_IMG: int = 420  # img 系裁剪半径
 CROP_MARGIN: int = 300  # 筐轨迹包围盒外扩边距（原片系 px）
 MIN_ADAPTIVE_SIDE: int = 1200  # 自适应裁剪边长下限（原片系 px，保证框住筐区动作）
@@ -86,6 +89,169 @@ def find_source(fid: str, srcdir: str = "") -> str | None:
         logger.error("%s: 原片匹配数=%d，跳过", fid, len(matches))
         return None
     return matches[0]
+
+
+def find_next_source(src: str, srcdir: str) -> str | None:
+    """找 src 在场次目录中的下一个连续切片文件（dji 分段命名，文件名即拍摄时间）。
+
+    Args:
+        src: 当前原片路径。
+        srcdir: 场次原片目录；空串表示旧测试素材（命名不连续，不续接）。
+
+    Returns:
+        下一个文件路径；无目录、当前为最后一个或匹配异常返回 None。
+    """
+    if not srcdir:
+        return None
+    files: list[str] = sorted(glob(os.path.join(escape(srcdir), "**", "*.mp4"), recursive=True))
+    base: str = os.path.basename(src)
+    idx: list[int] = [i for i, f in enumerate(files) if os.path.basename(f) == base]
+    if len(idx) != 1 or idx[0] + 1 >= len(files):
+        return None
+    return files[idx[0] + 1]
+
+
+MAX_CONT_SEC: float = 4.0  # 跨文件续接段最长秒数（审核片段尾巴最多 +4s）
+
+
+def split_window(
+    start: float, end: float, dur: float
+) -> tuple[tuple[float, float], tuple[float, float] | None]:
+    """把 [start, end] 按本文件时长 dur 拆为 (本文件段, 续文件段)；不越界返回 (整段, None)。
+
+    续文件段从 0 起、长度上限 MAX_CONT_SEC（防异常时长把片段拖长）。
+
+    Args:
+        start: 窗口起点（秒）。
+        end: 窗口终点（秒）。
+        dur: 本文件时长（秒）。
+
+    Returns:
+        ((start, min(end, dur)), (0, end-dur) 或 None)。
+    """
+    if end <= dur:
+        return (start, end), None
+    cont: float = min(end - dur, MAX_CONT_SEC)
+    return (start, dur), (0.0, cont)
+
+
+def plan_clip_segments(
+    src: str, start: float, end: float, srcdir: str
+) -> tuple[list[tuple[str, float, float]], bool]:
+    """规划片段切片：窗口越出本文件末尾时，续接到场次下一个切片文件。
+
+    批次 2 实测 87/185 事件锚点+尾巴越出文件末（dji ~14s 连续切片，
+    结局常在下一文件），此前片段被静默截断导致无法判读。
+
+    Args:
+        src: 当前原片路径。
+        start: 窗口起点（秒）。
+        end: 窗口终点（秒）。
+        srcdir: 场次原片目录（空串不续接）。
+
+    Returns:
+        (切片段列表 [(文件, 起, 止), ...], 是否跨文件续接)；
+        ffprobe 失败或无下一文件时回退单段截断。
+    """
+    try:
+        dur: float = probe_duration_sec(src)
+    except BasketballPipelineError as exc:
+        logger.warning("时长探测失败，按不越界处理: %s: %s", os.path.basename(src), exc)
+        return [(src, start, end)], False
+    (a0, a1), cont = split_window(start, end, dur)
+    if cont is None:
+        return [(src, a0, a1)], False
+    nxt: str | None = find_next_source(src, srcdir)
+    if nxt is None:
+        logger.warning("%s 窗口越界但无下一切片，截断在文件末", os.path.basename(src))
+        return [(src, a0, a1)], False
+    logger.info(
+        "  跨文件续接: %s +%.1fs -> %s",
+        os.path.basename(src),
+        cont[1] - cont[0],
+        os.path.basename(nxt),
+    )
+    return [(src, a0, a1), (nxt, cont[0], cont[1])], True
+
+
+def _encode_clip(src: str, start: float, end: float, vf: str, out_path: str) -> None:
+    """单段编码：裁剪/缩放/水印/2x 加速 + atempo（审核片段统一参数）。
+
+    Args:
+        src: 原片路径。
+        start: 起点（秒）。
+        end: 终点（秒）。
+        vf: 视频滤镜串。
+        out_path: 输出路径。
+    """
+    run_ffmpeg(
+        [
+            "-ss",
+            f"{start:.2f}",
+            "-to",
+            f"{end:.2f}",
+            "-i",
+            src,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-vf",
+            vf,
+            "-af",
+            f"atempo={SPEED}",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "22",
+            "-preset",
+            "fast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            out_path,
+        ],
+        timeout_sec=_encode_timeout_sec(end - start),
+    )
+
+
+def _concat_parts(parts: list[str], out_path: str) -> None:
+    """把同参数分段 -c copy 拼接为 out_path 并清理临时文件。
+
+    Args:
+        parts: 分段路径（与 out_path 同目录）。
+        out_path: 最终输出路径。
+    """
+    list_path: str = out_path.replace(".mp4", "_concat.txt")
+    with open(list_path, "w", encoding="utf-8") as f:
+        for p in parts:
+            f.write(f"file '{os.path.basename(p)}'\n")
+    run_ffmpeg(["-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", out_path])
+    for p in (*parts, list_path):
+        os.remove(p)
+
+
+def _render_segments(segs: list[tuple[str, float, float]], vf: str, out_path: str) -> None:
+    """按 plan_clip_segments 的规划渲染片段：单段直接编码，多段编码后拼接。
+
+    Args:
+        segs: [(文件, 起, 止), ...]。
+        vf: 视频滤镜串（各段相同，跨文件续接段复用同一取景框）。
+        out_path: 输出路径。
+    """
+    if len(segs) == 1:
+        src, a, b = segs[0]
+        _encode_clip(src, a, b, vf, out_path)
+        return
+    parts: list[str] = []
+    for n, (src, a, b) in enumerate(segs, start=1):
+        part: str = out_path.replace(".mp4", f"_p{n}.mp4")
+        _encode_clip(src, a, b, vf, part)
+        parts.append(part)
+    _concat_parts(parts, out_path)
 
 
 def cluster_candidates(
@@ -390,8 +556,11 @@ def cut_wide_clip(
     end: float,
     text: str,
     out_path: str,
+    srcdir: str = "",
 ) -> None:
     """裁出同一事件的全景片段（全帧缩放，供辨认投球人）。
+
+    窗口越出本文件末尾时自动续接到场次下一个切片文件（srcdir 非空时）。
 
     Args:
         src: 原片路径。
@@ -399,7 +568,11 @@ def cut_wide_clip(
         end: 片段终点（原片秒）。
         text: 水印文本（未转义）。
         out_path: 输出片段路径。
+        srcdir: 场次原片目录（跨文件续接用；空串不续接）。
     """
+    segs, continued = plan_clip_segments(src, start, end, srcdir)
+    if continued:
+        text += " 跨文件续接"
     text = text.replace("\\", "\\\\").replace(":", "\\:")  # drawtext 选项分隔符转义
     vf: str = (
         f"scale={WIDE_W}:{WIDE_H},fps={OUT_FPS},"
@@ -408,38 +581,7 @@ def cut_wide_clip(
         f"x=15:y=15:fontsize=30:fontcolor=yellow:"
         f"box=1:boxcolor=black@0.8"
     )
-    run_ffmpeg(
-        [
-            "-ss",
-            f"{start:.2f}",
-            "-to",
-            f"{end:.2f}",
-            "-i",
-            src,
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
-            "-vf",
-            vf,
-            "-af",
-            f"atempo={SPEED}",
-            "-c:v",
-            "libx264",
-            "-crf",
-            "22",
-            "-preset",
-            "fast",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "96k",
-            out_path,
-        ],
-        timeout_sec=_encode_timeout_sec(end - start),
-    )
+    _render_segments(segs, vf, out_path)
 
 
 def cut_cluster_clip(
@@ -452,8 +594,12 @@ def cut_cluster_clip(
     orig: tuple[int, int] = (ORIG_W, ORIG_H),
     hoop_track: list[list[Any]] | None = None,
     mark_no_hoop: bool = False,
+    srcdir: str = "",
 ) -> None:
     """裁出单个事件的审核片段（裁剪 + 事件编号水印）。
+
+    窗口越出本文件末尾时自动续接到场次下一个切片文件（srcdir 非空时）；
+    续接段复用同一取景框（筐轨迹包围盒 ≥1200px 边长，2~4s 内相机漂移在容差内）。
 
     Args:
         src: 原片路径。
@@ -465,14 +611,18 @@ def cut_cluster_clip(
         orig: 原片（宽，高），按场次注入（16:9 新素材为 3840x2160）。
         hoop_track: 筐轨迹（hoops.json）；提供时自适应裁剪，全程见筐。
         mark_no_hoop: 已提供 hoops 但本事件无筐检出，水印追加"无筐检出"。
+        srcdir: 场次原片目录（跨文件续接用；空串不续接）。
     """
     start: float = max(0.0, members[0]["t0"] - CLIP_BEFORE_SEC)
     end: float = members[-1]["t0"] + CLIP_AFTER_SEC
+    segs, continued = plan_clip_segments(src, start, end, srcdir)
     if hoop_track:
         crop_x, crop_y, side = adaptive_crop(hoop_track, orig[0], orig[1])
     else:
         crop_x, crop_y, side = cluster_crop(members, orig[0], orig[1])
     text: str = _event_watermark(fid, idx, members, verdict, mark_no_hoop)
+    if continued:
+        text += " 跨文件续接"
     text = text.replace("\\", "\\\\").replace(":", "\\:")  # drawtext 选项分隔符转义
     vf: str = (
         f"crop={side}:{side}:{crop_x}:{crop_y},"
@@ -482,38 +632,7 @@ def cut_cluster_clip(
         f"x=15:y=15:fontsize=30:fontcolor=yellow:"
         f"box=1:boxcolor=black@0.8"
     )
-    run_ffmpeg(
-        [
-            "-ss",
-            f"{start:.2f}",
-            "-to",
-            f"{end:.2f}",
-            "-i",
-            src,
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
-            "-vf",
-            vf,
-            "-af",
-            f"atempo={SPEED}",
-            "-c:v",
-            "libx264",
-            "-crf",
-            "22",
-            "-preset",
-            "fast",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "96k",
-            out_path,
-        ],
-        timeout_sec=_encode_timeout_sec(end - start),
-    )
+    _render_segments(segs, vf, out_path)
 
 
 def concat_clips(clips: list[str], list_path: str, out_path: str) -> None:
@@ -677,6 +796,7 @@ def main() -> int:
                     orig,
                     track,
                     mark_no_hoop=no_hoop,
+                    srcdir=srcdir,
                 )
                 clips.append(clip)
                 if keep_clips:
@@ -689,6 +809,7 @@ def main() -> int:
                         end,
                         _event_watermark(fid, idx, members, verdict, no_hoop),
                         wide_path,
+                        srcdir=srcdir,
                     )
                     hoop_dist: float | None = event_hoop_dist(members, hoops_by_fid.get(fid, []))
                     index_events.append(

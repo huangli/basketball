@@ -68,9 +68,9 @@ small { color: #999; }
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未标</button>
   <button class="nav" id="sound">声音开/关</button>
-  <button class="nav" id="wide">投球人视角 (W)</button>
+  <button class="nav" id="wide">筐区视角 (W)</button>
   <button id="export">导出 goals.json</button>
-  <br><small>按键：J=进球 P=进球不收 F=不是 W=投球人 ←/→=翻页</small>
+  <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 ←/→=翻页（默认全景）</small>
   <small>进度与位置自动存，刷新回到上次位置</small>
 </div>
 <video id="v" autoplay loop muted playsinline></video>
@@ -102,8 +102,8 @@ function show(i) {
   if (!EVENTS.length) return;
   cur = Math.max(0, Math.min(i, EVENTS.length - 1));
   const e = EVENTS[cur];
-  wide = false;
-  v.src = e.clip;
+  wide = true;
+  v.src = e.clip_wide || e.clip;
   v.play().catch(() => {});
   localStorage.setItem(POSKEY, String(cur));
   const [done, goals, pracs] = stats();
@@ -112,7 +112,7 @@ function show(i) {
     `（进球 ${goals} 不收 ${pracs}） | ${e.key} t=${e.anchor_t0}s`;
   document.getElementById("verdict").textContent = e.verdict || "";
   document.getElementById("sound").textContent = v.muted ? "声音：关" : "声音：开";
-  document.getElementById("wide").textContent = "投球人视角 (W)";
+  document.getElementById("wide").textContent = "筐区视角 (W)";
 }
 function toggleWide() {
   const e = EVENTS[cur];
@@ -120,7 +120,7 @@ function toggleWide() {
   wide = !wide;
   v.src = wide ? e.clip_wide : e.clip;
   v.play().catch(() => {});
-  document.getElementById("wide").textContent = wide ? "回筐区视角 (W)" : "投球人视角 (W)";
+  document.getElementById("wide").textContent = wide ? "筐区视角 (W)" : "全景视角 (W)";
 }
 function mark(r, scorer) {
   const e = EVENTS[cur];

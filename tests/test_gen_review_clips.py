@@ -3,7 +3,8 @@
 覆盖：candidates.json schema 校验（合法通过、顶层非列表、记录非对象、
 缺字段、数值字段为 bool）；find_source 的 --srcdir 直找与缺失；
 cluster_candidates 时空放宽聚类（批次 2 新增）；event_anchor 末成员锚点；
-event_hoop_dist / sort_events_by_hoop_dist（events_index 筐距排序）。
+event_hoop_dist / sort_events_by_hoop_dist（events_index 筐距排序）；
+跨文件续接（split_window / find_next_source / plan_clip_segments 回退）。
 """
 
 from __future__ import annotations
@@ -22,8 +23,11 @@ from gen_review_clips import (
     event_hoop_dist,
     event_verdict,
     find_event_track,
+    find_next_source,
     find_source,
+    plan_clip_segments,
     sort_events_by_hoop_dist,
+    split_window,
 )
 
 _PATH = "work/pilot/candidates.json"
@@ -262,3 +266,41 @@ def test_sort_events_by_hoop_dist_ascending_none_last() -> None:
     sort_events_by_hoop_dist(events)
     # Assert：升序、None 在尾、None 间保持原顺序
     assert [e["key"] for e in events] == ["c", "e", "a", "b", "d"]
+
+
+def test_split_window_within_duration() -> None:
+    # Arrange / Act / Assert：窗口不越界 → 整段 + 无续接
+    assert split_window(2.0, 6.0, 14.0) == ((2.0, 6.0), None)
+
+
+def test_split_window_overflow_splits_and_caps() -> None:
+    # Arrange / Act：越界 4s（恰上限）与越界 11s（超上限）
+    seg, cont = split_window(10.0, 18.0, 14.0)
+    _, cont2 = split_window(10.0, 25.0, 14.0)
+    # Assert：本文件段截到文件末；续接段从 0 起且 MAX_CONT_SEC(4s) 封顶
+    assert seg == (10.0, 14.0)
+    assert cont == (0.0, 4.0)
+    assert cont2 == (0.0, 4.0)
+
+
+def test_find_next_source_sorted(tmp_path: pathlib.Path) -> None:
+    # Arrange：乱序写入三个切片
+    for name in ("b_002.mp4", "a_001.mp4", "c_003.mp4"):
+        (tmp_path / name).write_bytes(b"x")
+    # Act / Assert：按文件名排序取下一个；最后一个与空 srcdir 返回 None
+    nxt = find_next_source(str(tmp_path / "a_001.mp4"), str(tmp_path))
+    assert nxt is not None
+    assert nxt.endswith("b_002.mp4")
+    assert find_next_source(str(tmp_path / "c_003.mp4"), str(tmp_path)) is None
+    assert find_next_source(str(tmp_path / "a_001.mp4"), "") is None
+
+
+def test_plan_clip_segments_fallback_on_unprobeable(tmp_path: pathlib.Path) -> None:
+    # Arrange：不可 ffprobe 的假视频
+    fake = tmp_path / "x.mp4"
+    fake.write_bytes(b"not-a-video")
+    # Act
+    segs, cont = plan_clip_segments(str(fake), 1.0, 9.0, str(tmp_path))
+    # Assert：探测失败回退单段截断（WARNING 记日志），不炸
+    assert cont is False
+    assert segs == [(str(fake), 1.0, 9.0)]
