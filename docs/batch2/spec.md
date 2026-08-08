@@ -2,8 +2,7 @@
 
 > 2026-07-30 v2（spec-review 修订）。依据：批次 1 闭环复盘
 >（docs/2026-07-26-current-goal-detection-pipeline.md §4）与 AGENTS.md 下批五改进。
-> 状态：①②⑤已由另一会话在工作区实现（gen_review_clips.py 未提交改动，115 测试全绿）；
-> 本 spec 与之对齐，剩余任务见 §Success Criteria 与 tasks/plan.md。
+> 状态：①②⑤已实现并提交（commit 4abc0c4），批次 2 跑批完成（185 事件待标注）。
 
 ## Objective
 
@@ -58,8 +57,7 @@ scripts/            → 流水线脚本（rules.md 约束）
 tests/              → pytest 单测（纯函数，不碰真帧/网络）
 work/20260722/      → 场次产物（批次 1 封存；批次 2 产物用 _b2 / review_b2 区分）
 output/20260722/    → 成品合集
-docs/               → 方案文档
-tasks/              → plan.md / todo.md（批次 2 执行计划）
+docs/               → 方案文档（本 spec 在 docs/batch2/，已完成，无 plan/todo）
 ```
 
 ## Code Style
