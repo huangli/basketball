@@ -7,13 +7,25 @@
 100fps 素材入网后 2 秒半速慢放（slowmo=true 时两段拼接）。
 同参数 concat 直接重封装。产物：output/<场次>/个人_<标签>_进球合集.mp4。
 
-输入：--goals 指定的 goals.json（status=confirmed 记录；schema 损坏抛 SchemaError）
-输出：output/<场次>/个人_<标签>_进球合集.mp4
-依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）
+输入：--goals 指定的 goals.json（status=confirmed 记录；schema 损坏抛 SchemaError）；
+    --roster 指定的 roster.json（可选，校验走 scripts/roster.py，必须 confirmed=true）
+输出：output/<场次>/个人_<标签>_进球合集.mp4 或 队伍_<队别>_进球集锦.mp4
+依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）、
+    scripts/roster.py（format_key/validate_roster/resolve_scorer，spec M3 契约）
 用法:
     python scripts/build_highlight.py --goals work/pilot/goals.json --scorer 大斌
     python scripts/build_highlight.py --goals work/20260722/goals.json \
         --rawdir "20260722地平线/2026 年 7月22 日 地平线" --out 1920x1080
+    python scripts/build_highlight.py --goals work/20260722/goals.json \
+        --roster work/20260722/roster.json --out 1920x1080 --team 黑
+
+组合真值表（spec: docs/scorer/spec.md §build_highlight 组合真值表，写死）：
+①无 roster 无过滤=全员现状不变；②无 roster 给 --scorer=旧 goals.scorer 精确
+匹配+0 命中 WARNING 提示改用 --roster；③有 roster 无过滤=全归属球（未归属
+WARNING 跳过）；④--scorer 经 roster.resolve_scorer 解析（tag|name），输出名用
+解析后 tag；⑤--team 出 队伍_{team}_进球集锦.mp4；⑥--scorer+--team 互斥报错
+退出 1；⑦无 roster 给 --team 报错退出 1；⑧--team 便服 报错退出 1；
+--roster 未 confirmed=true 拒收退出 1。
 """
 
 import contextlib
@@ -25,6 +37,7 @@ from typing import Any
 
 from errors import BasketballPipelineError, SchemaError
 from pipe_common import configure_logging, new_run_id, read_json, run_ffmpeg
+from roster import Roster, format_key, resolve_scorer, validate_roster
 
 logger = logging.getLogger(__name__)
 
@@ -65,18 +78,21 @@ KNOWN_STATUSES: frozenset[str] = frozenset(
 SILENT_AUDIO_SRC: str = "anullsrc=channel_layout=stereo:sample_rate=48000"
 
 
-def parse_argv() -> tuple[str, str, str, int, int]:
+def parse_argv() -> tuple[str, str, str, int, int, str, str]:
     """解析命令行参数。
 
     Returns:
-        (goals.json 路径, scorer 标签, 原片目录, 输出宽, 输出高；
-        scorer 空串表示全部，原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H)。
+        (goals.json 路径, scorer 标签, 原片目录, 输出宽, 输出高, roster.json 路径,
+        team 队别；scorer/team 空串表示未给，roster 空串表示无 roster，
+        原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H)。
     """
     goals: str = ""
     scorer: str = ""
     rawdir: str = RAW_DIR
     out_w: int = OUT_W
     out_h: int = OUT_H
+    roster: str = ""
+    team: str = ""
     args: list[str] = sys.argv[1:]
     i: int = 0
     while i < len(args):
@@ -93,9 +109,126 @@ def parse_argv() -> tuple[str, str, str, int, int]:
             w, h = args[i + 1].lower().split("x")
             out_w, out_h = int(w), int(h)
             i += 2
+        elif args[i] == "--roster" and i + 1 < len(args):
+            roster = args[i + 1]
+            i += 2
+        elif args[i] == "--team" and i + 1 < len(args):
+            team = args[i + 1]
+            i += 2
         else:
             i += 1
-    return goals, scorer, rawdir, out_w, out_h
+    return goals, scorer, rawdir, out_w, out_h, roster, team
+
+
+def load_roster(roster_path: str) -> Roster:
+    """读取并校验 roster.json（契约严格走 roster.py，rules.md §0.2）。
+
+    Args:
+        roster_path: roster.json 路径。
+
+    Returns:
+        校验后的 Roster。
+
+    Raises:
+        SchemaError: schema 损坏（缺 players/tag 重复/team 非法/键格式错）。
+        OSError: 读取失败。
+    """
+    data: Any = read_json(roster_path, what="roster.json")
+    return validate_roster(data, roster_path)
+
+
+def require_confirmed(roster: Roster, roster_path: str) -> None:
+    """--roster 必须 confirmed=true（立哥确认是终裁），未确认拒收（spec 真值表）。
+
+    Args:
+        roster: 校验后的 Roster。
+        roster_path: 文件路径（仅用于错误信息）。
+
+    Raises:
+        BasketballPipelineError: roster.confirmed 非 true（调用方口径 = 退出 1）。
+    """
+    if not roster.confirmed:
+        raise BasketballPipelineError(
+            f"{roster_path}: roster 未 confirmed=true，拒收（需立哥在确认页完成归属后导出）"
+        )
+
+
+def select_goals(
+    goals: list[dict[str, Any]],
+    roster: Roster | None,
+    scorer: str,
+    team: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """按 spec 组合真值表过滤 confirmed 记录并决定输出文件名主体（8 分支）。
+
+    Args:
+        goals: _validate_goals 返回的 confirmed 记录。
+        roster: 校验且 confirmed 的 Roster；None 表示未给 --roster。
+        scorer: --scorer 值（空串 = 未给）。
+        team: --team 值（空串 = 未给）。
+
+    Returns:
+        (选中记录, 输出文件名主体)，主体形如 ``个人_全员_进球合集`` /
+        ``个人_黑21_进球合集`` / ``队伍_黑_进球集锦``。
+
+    Raises:
+        BasketballPipelineError: ⑥--scorer+--team 互斥；⑦无 roster 给 --team；
+            ⑧--team 便服；④--scorer 在 roster 内查无此人。
+    """
+    if scorer and team:
+        raise BasketballPipelineError("--scorer 与 --team 互斥（真值表⑥），只能给一个")
+    if team and roster is None:
+        raise BasketballPipelineError("无 --roster 无法分队（真值表⑦），请先出 roster.json")
+    if team == "便服":
+        raise BasketballPipelineError("便服不进分队合集（真值表⑧），只进全员/个人合集")
+
+    if team:
+        # ⑤：按 team 取 players.tags → 反查 assignments 过滤（roster 必非 None，⑦已拦）
+        tags: set[str] = {p.tag for p in roster.players if p.team == team}
+        selected = [
+            g
+            for g in goals
+            if roster.assignments.get(format_key(g["file"], float(g["anchor_time"]))) in tags
+        ]
+        return selected, f"队伍_{team}_进球集锦"
+
+    if roster is not None and scorer:
+        # ④：roster 内解析 tag|name，输出名用解析后 tag
+        player = resolve_scorer(roster, scorer)
+        if player is None:
+            raise BasketballPipelineError(
+                f"roster 内查无此人: {scorer!r}（tag/name 均未命中，真值表④）"
+            )
+        selected = [
+            g
+            for g in goals
+            if roster.assignments.get(format_key(g["file"], float(g["anchor_time"]))) == player.tag
+        ]
+        return selected, f"个人_{player.tag}_进球合集"
+
+    if roster is not None:
+        # ③：全归属球；未归属 WARNING 跳过（SKIP 球允许未归属，不阻塞）
+        selected = []
+        for g in goals:
+            key: str = format_key(g["file"], float(g["anchor_time"]))
+            if key in roster.assignments:
+                selected.append(g)
+            else:
+                logger.warning("未归属球跳过: %s", key)
+        return selected, "个人_全员_进球合集"
+
+    if scorer:
+        # ②：旧兼容路径，goals.scorer 精确匹配；0 命中 WARNING 提示改用 --roster
+        selected = [g for g in goals if g.get("scorer") == scorer]
+        if not selected:
+            logger.warning(
+                "--scorer=%s 按 goals.scorer 精确匹配命中 0 条；建议改用 --roster 归属",
+                scorer,
+            )
+        return selected, f"个人_{scorer}_进球合集"
+
+    # ①：全员现状不变
+    return list(goals), "个人_全员_进球合集"
 
 
 def _encode_timeout_sec(duration_sec: float) -> int:
@@ -305,7 +438,7 @@ def main() -> int:
     """
     run_id = new_run_id()
     configure_logging(run_id)
-    goals_path, scorer, rawdir, out_w, out_h = parse_argv()
+    goals_path, scorer, rawdir, out_w, out_h, roster_path, team = parse_argv()
     if not goals_path:
         logger.error("缺少 --goals 参数")
         return 1
@@ -313,10 +446,19 @@ def main() -> int:
         data: dict[str, Any] = read_json(goals_path, what="goals.json")
         goals: list[dict[str, Any]] = _validate_goals(data, goals_path)
         session: str = data.get("session", "unknown")
-        goals = [g for g in goals if not scorer or g.get("scorer") == scorer]
+        roster: Roster | None = None
+        if roster_path:
+            roster = load_roster(roster_path)
+            require_confirmed(roster, roster_path)
+        goals, out_stem = select_goals(goals, roster, scorer, team)
         goals.sort(key=lambda g: (g["file"], g["anchor_time"]))
         if not goals:
-            logger.error("无可合成记录 (scorer=%s)", scorer or "全部")
+            logger.error(
+                "无可合成记录 (scorer=%s team=%s roster=%s)",
+                scorer or "全部",
+                team or "无",
+                roster_path or "无",
+            )
             return 1
 
         out_dir: str = os.path.join(OUT_ROOT, session)
@@ -357,8 +499,7 @@ def main() -> int:
         with open(list_path, "w", encoding="utf-8") as f:
             for clip in clips:
                 f.write(f"file '{os.path.basename(clip)}'\n")
-        tag: str = scorer or "全员"
-        out_path: str = os.path.join(out_dir, f"个人_{tag}_进球合集.mp4")
+        out_path: str = os.path.join(out_dir, f"{out_stem}.mp4")
         run_ffmpeg(
             [
                 "-f",

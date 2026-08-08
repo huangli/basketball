@@ -299,14 +299,18 @@ def load_detection_cache(
 
 def run_mot(
     all_balls: list[list[Detection]],
+    *,
+    min_length: int = STATIC_WINDOW,
 ) -> list[Track]:
     """简单 MOT：贪心最近邻匹配跟踪所有球检测。
 
     Args:
         all_balls: 每帧的球检测列表。
+        min_length: 收录轨迹的最小长度（检测数）；默认 STATIC_WINDOW（候选挖掘口径）。
+            crop_scorers 轨迹法定位传 1——窗口内短轨迹（入网/落地片段）也是有效证据。
 
     Returns:
-        所有长度 >= STATIC_WINDOW 的轨迹列表。
+        所有长度 >= min_length 的轨迹列表。
     """
     active: list[Track] = []
     finished: list[Track] = []
@@ -338,14 +342,14 @@ def run_mot(
         still: list[Track] = []
         for track in active:
             if track.missed > MAX_MISSED:
-                if track.length >= STATIC_WINDOW:
+                if track.length >= min_length:
                     finished.append(track)
             else:
                 still.append(track)
         active = still
 
     for track in active:
-        if track.length >= STATIC_WINDOW:
+        if track.length >= min_length:
             finished.append(track)
 
     return finished

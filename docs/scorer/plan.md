@@ -13,9 +13,10 @@ build_highlight.py（真值表范围内）；不碰 gen_review_clips.py / gen_la
 - **契约先行**：roster schema、键格式化（`f"{t:.1f}"` 双端同一函数）、file→fid 映射、
   scorer 解析（tag|name）收敛到 `scripts/roster.py` 共享模块，写读两端（gen_scorer_page /
   build_highlight）都 import 它，禁止各自裸拼（spec M3）。
-- **投篮者定位**：persons 框无 ID → 窗口 [anchor−2.5s, −0.3s] 内 IoU>0.3 贪心链成临时
-  track，逐帧取离球最近人框计入其 track，得票最多者胜出、并列取平均距离更近者；
-  有效票 <2 → SKIP（spec B2）。
+- **投篮者定位**（2026-08-08 起替换为轨迹法，spec v3 §投篮者定位算法 / todo T2b）：
+  窗口 [anchor−4.0, +0.5] 内 `run_mot(min_length=1)` 重链球轨迹 → 端点距候选锚点
+  最近者（≤200px）为进球轨迹 → 末端回放找最后严格持球点定投篮者 → 无持球回退
+  轨迹起点最近人框 → 轨迹缺失 SKIP。逐帧散点规则已证伪（海报球/邻场球致球位瞬移）。
 - **裁图规格**：代表帧（离球最近帧）人框外扩 20%，短边不足 400px 等比放大到 400px。
 - **颜色分队**：采样区=框水平中 60% × 垂直 25~60%；HSV 双阈（黑 V<TH_BLACK /
   白 V>TH_WHITE 且 S<TH_SAT），近阈归便服；阈值常量放 crop_scorers.py 顶部常量区，
@@ -67,7 +68,7 @@ build_highlight.py（真值表范围内）；不碰 gen_review_clips.py / gen_la
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| 定位 SKIP 率 >30% | 高 | Checkpoint 1 实测；返工方向：扩大窗口/放宽 IoU/取球最后离开人框的帧 |
+| 定位 SKIP 率 >30% | 高 | Checkpoint 1 实测；批次 1 轨迹法实测 SKIP 0/17（v2 投票法返工为轨迹法后已消除） |
 | 颜色阈值标定不足，便服桶过大 | 中 | 阈值按 17 张实裁图标定；便服只进全员/个人合集，不阻塞 |
 | 投篮者=传球者选错（多人密集） | 中 | 窗口投票+确认页裁图目检兜底；错了一键改 |
 | 与另一会话撞车 | 低 | 只动新文件 + build_highlight.py；Checkpoint 2 git status 验证 |

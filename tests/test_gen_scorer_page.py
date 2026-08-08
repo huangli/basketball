@@ -1,0 +1,487 @@
+"""gen_scorer_page 单元测试（spec: docs/scorer/spec.md T4 认人确认页）。
+
+覆盖：team_of_tag 前缀推队、parse_players 名单解析、merge_assignments 并集/
+同键冲突、match_clip 4s 容差匹配与相对路径、build_entries 排序与无候选兜底、
+build_html 内联数据与导出契约、main 端到端（tmp 目录写 scorer.html）。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+
+import pytest
+
+from errors import BasketballPipelineError, SchemaError
+from gen_scorer_page import (
+    build_entries,
+    build_html,
+    main,
+    match_clip,
+    merge_assignments,
+    parse_players,
+    team_of_tag,
+)
+from roster import Player, format_key
+
+
+def _goal(file: str = "a.mp4", anchor: float = 4.1) -> dict:
+    """构造一条合法 confirmed 记录。"""
+    return {
+        "file": file,
+        "anchor_time": anchor,
+        "clip_start": max(0.0, anchor - 4.0),
+        "clip_end": anchor + 2.0,
+        "status": "confirmed",
+        "scorer": "",
+    }
+
+
+def _candidate(
+    file: str = "a.mp4",
+    anchor: float = 4.1,
+    status: str = "OK",
+    crop: str = "a_t4.1.jpg",
+    team_guess: str | None = "黑",
+) -> dict:
+    """构造一条合法候选记录（key 走 roster.format_key 契约）。"""
+    return {
+        "key": format_key(file, anchor),
+        "file": file,
+        "anchor_time": anchor,
+        "status": status,
+        "reason": "" if status == "OK" else "few_votes",
+        "crop": crop,
+        "team_guess": team_guess,
+        "votes": 3,
+        "total_votes": 10,
+    }
+
+
+def _event(src_file: str = "a.mp4", anchor_t0: float = 4.0, clip: str = "clips/a_e1.mp4") -> dict:
+    """构造一条合法事件记录。"""
+    return {
+        "key": "a#e1",
+        "fid": "a",
+        "event_idx": 1,
+        "clip": clip,
+        "clip_wide": "clips/a_e1_wide.mp4",
+        "src_file": src_file,
+        "anchor_t0": anchor_t0,
+        "verdict": "?",
+    }
+
+
+class TestTeamOfTag:
+    """标签前缀推队（页面 JS teamOfTag 同规则）。"""
+
+    def test_prefix_teams(self) -> None:
+        # Arrange / Act / Assert
+        assert team_of_tag("黑21") == "黑"
+        assert team_of_tag("白-熊志鹏") == "白"
+        assert team_of_tag("灰T恤-A") == "便服"
+
+
+class TestParsePlayers:
+    """--players 名单串解析。"""
+
+    def test_tag_name_pairs(self) -> None:
+        # Arrange / Act
+        players = parse_players("黑21=大斌,白-熊志鹏=熊志鹏,白-小陈=小陈")
+        # Assert
+        assert players == [
+            Player(tag="黑21", name="大斌", team="黑"),
+            Player(tag="白-熊志鹏", name="熊志鹏", team="白"),
+            Player(tag="白-小陈", name="小陈", team="白"),
+        ]
+
+    def test_name_optional_and_empty_spec(self) -> None:
+        # Arrange / Act / Assert
+        assert parse_players("") == []
+        assert parse_players("黑21") == [Player(tag="黑21", name="", team="黑")]
+
+    def test_missing_tag_raises(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="tag"):
+            parse_players("=大斌")
+
+
+class TestMergeAssignments:
+    """--roster-existing 并集合并（spec T4）。"""
+
+    def test_union_disjoint(self) -> None:
+        # Arrange / Act
+        merged = merge_assignments({"a.mp4#4.1": "黑21"}, {"b.mp4#2.0": "白22"})
+        # Assert
+        assert merged == {"a.mp4#4.1": "黑21", "b.mp4#2.0": "白22"}
+
+    def test_same_key_same_value_ok(self) -> None:
+        # Arrange / Act
+        merged = merge_assignments({"a.mp4#4.1": "黑21"}, {"a.mp4#4.1": "黑21"})
+        # Assert
+        assert merged == {"a.mp4#4.1": "黑21"}
+
+    def test_same_key_conflict_raises(self) -> None:
+        # Arrange / Act / Assert：同键不同值显式失败（调用方退出 1）
+        with pytest.raises(BasketballPipelineError, match="同键冲突"):
+            merge_assignments({"a.mp4#4.1": "黑21"}, {"a.mp4#4.1": "白22"})
+
+
+class TestMatchClip:
+    """审核片段匹配：src_file 相同且 |anchor_t0−anchor|≤4s，取最近者。"""
+
+    def test_match_within_tolerance(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        events = [_event(anchor_t0=6.0), _event(anchor_t0=100.0)]
+        # Act
+        rel = match_clip(events, "a.mp4", 4.1, str(index_dir), str(out_dir))
+        # Assert：命中 6.0（|6.0−4.1|=1.9≤4s），优先全景 clip_wide，相对路径用正斜杠
+        assert rel == "../review_v3/clips/a_e1_wide.mp4"
+
+    def test_fallback_to_clip_when_no_wide(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：无 clip_wide 字段回退筐区 clip
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        ev = _event(anchor_t0=6.0)
+        del ev["clip_wide"]
+        # Act
+        rel = match_clip([ev], "a.mp4", 4.1, str(index_dir), str(out_dir))
+        # Assert
+        assert rel == "../review_v3/clips/a_e1.mp4"
+
+    def test_backslash_clip_normalized(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：events_index 实跑产物是 Windows 反斜杠
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        ev = _event(anchor_t0=4.0)
+        ev["clip_wide"] = "clips\\a_e1_wide.mp4"
+        # Act
+        rel = match_clip([ev], "a.mp4", 4.1, str(index_dir), str(out_dir))
+        # Assert
+        assert rel == "../review_v3/clips/a_e1_wide.mp4"
+
+    def test_no_match_returns_empty(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：异源文件 / 超容差 都不匹配
+        events = [_event(src_file="b.mp4", anchor_t0=4.0), _event(anchor_t0=20.0)]
+        # Act / Assert
+        assert match_clip(events, "a.mp4", 4.1, str(tmp_path), str(tmp_path)) == ""
+
+
+class TestBuildEntries:
+    """页面条目组装：confirmed 球为全集，按 key 关联候选。"""
+
+    def test_sorted_and_joined(self) -> None:
+        # Arrange：goals 乱序，候选含 SKIP
+        goals = [_goal("b.mp4", 2.0), _goal("a.mp4", 4.1)]
+        candidates = [
+            _candidate("a.mp4", 4.1),
+            _candidate("b.mp4", 2.0, status="SKIP", crop="", team_guess=None),
+        ]
+        # Act
+        entries = build_entries(goals, candidates, None, "", "")
+        # Assert：按 file+anchor 排序；SKIP 无裁图无预填
+        assert [e["key"] for e in entries] == ["a.mp4#4.1", "b.mp4#2.0"]
+        assert entries[0]["crop"] == "a_t4.1.jpg"
+        assert entries[0]["team_guess"] == "黑"
+        assert entries[0]["clip"] == ""  # 无 --index
+        assert entries[1]["status"] == "SKIP"
+
+    def test_goal_without_candidate_becomes_skip(self) -> None:
+        # Arrange / Act
+        entries = build_entries([_goal()], [], None, "", "")
+        # Assert：防御兜底，不炸、按 SKIP 列出
+        assert entries[0]["status"] == "SKIP"
+        assert entries[0]["reason"] == "no_candidate"
+        assert entries[0]["crop"] == ""
+
+    def test_clip_filled_when_events_given(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        # Act
+        entries = build_entries(
+            [_goal()], [_candidate()], [_event(anchor_t0=4.0)], str(index_dir), str(out_dir)
+        )
+        # Assert
+        assert entries[0]["clip"] == "../review_v3/clips/a_e1_wide.mp4"
+
+    def test_candidate_clip_preferred_over_events(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：candidates 带现切预览片段时优先于 events_index 匹配
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        cand = _candidate()
+        cand["clip"] = "clips/a_t4.1.mp4"
+        # Act
+        entries = build_entries(
+            [_goal()], [cand], [_event(anchor_t0=4.0)], str(index_dir), str(out_dir)
+        )
+        # Assert：与裁图同锚点的预览片段胜出，不走事件兜底
+        assert entries[0]["clip"] == "clips/a_t4.1.mp4"
+
+    def test_empty_candidate_clip_falls_back_to_events(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：candidates 有 clip 字段但为空串（切片失败）→ 仍走事件兜底
+        index_dir = tmp_path / "s" / "review_v3"
+        out_dir = tmp_path / "s" / "scorers"
+        index_dir.mkdir(parents=True)
+        out_dir.mkdir()
+        cand = _candidate()
+        cand["clip"] = ""
+        # Act
+        entries = build_entries(
+            [_goal()], [cand], [_event(anchor_t0=4.0)], str(index_dir), str(out_dir)
+        )
+        # Assert
+        assert entries[0]["clip"] == "../review_v3/clips/a_e1_wide.mp4"
+
+
+class TestBuildHtml:
+    """HTML 渲染：数据内联、导出契约、交互控件。"""
+
+    def test_inlines_items_players_session(self) -> None:
+        # Arrange
+        entries = build_entries([_goal()], [_candidate()], None, "", "")
+        players = [Player(tag="黑21", name="大斌", team="黑")]
+        # Act
+        html = build_html(entries, players, "20260722", {}, {})
+        # Assert
+        assert '"key": "a.mp4#4.1"' in html
+        assert '"tag": "黑21"' in html
+        assert 'const SESSION = "20260722";' in html
+
+    def test_progress_localstorage_key_contains_session(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "mysession", {}, {})
+        # Assert
+        assert '"scorer_" + SESSION' in html
+        assert "localStorage" in html
+
+    def test_export_contract_roster_json(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "20260722", {}, {})
+        # Assert：导出结构字段与文件名契约（roster.py validate_roster 可过）
+        assert "roster_" in html and ".json" in html
+        assert "confirmed" in html
+        assert "assignments" in html
+        assert "players" in html
+        # confirmed 条件：全部非 SKIP 球已归属
+        assert 'it.status === "SKIP" || marks[it.key]' in html
+
+    def test_skip_badge_and_free_text_and_keys(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "s", {}, {})
+        # Assert：SKIP 标"无法定位"、自由文本输入、数字键 1-9、S 跳过
+        assert "无法定位" in html
+        assert 'id="free"' in html
+        assert '"1" && k <= "9"' in html
+        assert '"s"' in html
+
+    def test_existing_assignments_inlined(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "s", {"a.mp4#4.1": "黑21"}, {})
+        # Assert：已有 roster 归属内联作预填底色
+        assert '"a.mp4#4.1": "黑21"' in html
+
+
+class TestMain:
+    """main 端到端：tmp 目录造输入，产出 scorer.html。"""
+
+    def _write_inputs(self, tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+        """造 scorers/goals 两个输入文件，返回路径。"""
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(
+            json.dumps({"session": "s", "candidates": [_candidate()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps({"session": "s", "goals": [_goal()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return scorers, goals
+
+    def test_generates_scorer_html(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals = self._write_inputs(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--session",
+                "s",
+                "--players",
+                "黑21=大斌",
+            ]
+        )
+        # Assert：默认输出 <scorers 同目录>/scorer.html
+        assert rc == 0
+        html_path = scorers.parent / "scorer.html"
+        assert html_path.is_file()
+        html = html_path.read_text(encoding="utf-8")
+        assert '"key": "a.mp4#4.1"' in html
+
+    def test_roster_existing_merged(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：已有 roster 的归属应内联进页面
+        scorers, goals = self._write_inputs(tmp_path)
+        existing = tmp_path / "roster.json"
+        existing.write_text(
+            json.dumps(
+                {
+                    "session": "s",
+                    "confirmed": True,
+                    "players": [{"tag": "黑21", "name": "大斌", "team": "黑"}],
+                    "assignments": {"a.mp4#4.1": "黑21"},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        # Act
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--roster-existing",
+                str(existing),
+            ]
+        )
+        # Assert
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"a.mp4#4.1": "黑21"' in html
+
+    def test_bad_candidates_schema_exit_1(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(json.dumps({"candidates": [{"key": 1}]}), encoding="utf-8")
+        goals = tmp_path / "goals.json"
+        goals.write_text(json.dumps({"goals": []}), encoding="utf-8")
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--session", "s"])
+        # Assert：schema 损坏显式失败
+        assert rc == 1
+
+
+def test_match_clip_picks_closest(tmp_path: pathlib.Path) -> None:
+    # Arrange：两个同文件事件都在容差内，取时间差最小者（全景优先）
+    index_dir = tmp_path / "idx"
+    index_dir.mkdir()
+    far = _event(anchor_t0=1.0, clip="clips/far.mp4")
+    far["clip_wide"] = "clips/far_wide.mp4"
+    near = _event(anchor_t0=4.0, clip="clips/near.mp4")
+    near["clip_wide"] = "clips/near_wide.mp4"
+    events = [far, near]
+    # Act
+    rel = match_clip(events, "a.mp4", 4.1, str(index_dir), str(tmp_path))
+    # Assert
+    assert rel.endswith("clips/near_wide.mp4")
+
+
+def test_entries_clip_empty_without_index() -> None:
+    # Arrange / Act：无 --index 时只显示裁图
+    entries = build_entries([_goal()], [_candidate()], None, "", "")
+    # Assert
+    assert entries[0]["clip"] == ""
+
+
+def test_validate_candidates_bad_status(tmp_path: pathlib.Path) -> None:
+    # Arrange：status 非法值必须显式失败（经 main 退出 1）
+    scorers_dir = tmp_path / "scorers"
+    scorers_dir.mkdir()
+    scorers = scorers_dir / "scorer_candidates.json"
+    bad = _candidate(status="BROKEN")
+    scorers.write_text(json.dumps({"session": "s", "candidates": [bad]}), encoding="utf-8")
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps({"goals": []}), encoding="utf-8")
+    # Act / Assert
+    assert main(["--scorers", str(scorers), "--goals", str(goals), "--session", "s"]) == 1
+
+
+def test_main_missing_session_exit_1(tmp_path: pathlib.Path) -> None:
+    # Arrange：candidates 无 session 且未给 --session
+    scorers_dir = tmp_path / "scorers"
+    scorers_dir.mkdir()
+    scorers = scorers_dir / "scorer_candidates.json"
+    scorers.write_text(json.dumps({"candidates": []}), encoding="utf-8")
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps({"goals": []}), encoding="utf-8")
+    # Act / Assert
+    assert main(["--scorers", str(scorers), "--goals", str(goals)]) == 1
+
+
+def test_index_events_bad_schema_exit_1(tmp_path: pathlib.Path) -> None:
+    # Arrange：events_index 损坏（事件缺 clip）
+    scorers_dir = tmp_path / "scorers"
+    scorers_dir.mkdir()
+    scorers = scorers_dir / "scorer_candidates.json"
+    scorers.write_text(json.dumps({"session": "s", "candidates": [_candidate()]}), encoding="utf-8")
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps({"session": "s", "goals": [_goal()]}), encoding="utf-8")
+    index = tmp_path / "events_index.json"
+    index.write_text(
+        json.dumps({"events": [{"src_file": "a.mp4", "anchor_t0": 4.0}]}), encoding="utf-8"
+    )
+    # Act / Assert
+    rc = main(
+        [
+            "--scorers",
+            str(scorers),
+            "--goals",
+            str(goals),
+            "--session",
+            "s",
+            "--index",
+            str(index),
+        ]
+    )
+    assert rc == 1
+
+
+def test_main_output_next_to_candidates(tmp_path: pathlib.Path) -> None:
+    # Arrange
+    scorers_dir = tmp_path / "deep" / "scorers"
+    scorers_dir.mkdir(parents=True)
+    scorers = scorers_dir / "scorer_candidates.json"
+    scorers.write_text(json.dumps({"session": "s", "candidates": [_candidate()]}), encoding="utf-8")
+    goals = tmp_path / "goals.json"
+    goals.write_text(json.dumps({"session": "s", "goals": [_goal()]}), encoding="utf-8")
+    # Act
+    rc = main(["--scorers", str(scorers), "--goals", str(goals)])
+    # Assert：输出默认取 candidates 里的 session，文件落在同目录
+    assert rc == 0
+    assert (scorers_dir / "scorer.html").is_file()
+
+
+def test_match_clip_absolute_vs_relative_consistent(tmp_path: pathlib.Path) -> None:
+    # Arrange：out_dir 与 index_dir 同根时相对路径不含 ".."
+    base = tmp_path / "s"
+    index_dir = base / "review"
+    out_dir = base / "scorers"
+    index_dir.mkdir(parents=True)
+    out_dir.mkdir()
+    # Act
+    rel = match_clip([_event(anchor_t0=4.0)], "a.mp4", 4.1, str(index_dir), str(out_dir))
+    # Assert
+    assert os.sep not in rel or "/" in rel  # 统一正斜杠
+    assert rel == "../review/clips/a_e1_wide.mp4"

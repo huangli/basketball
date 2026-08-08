@@ -1,7 +1,8 @@
 # Spec: 进球人识别（投篮者定位 / 分队 / 认人确认页 / roster.json）
 
 > 2026-07-30 v1 → 2026-07-31 v2（按 docs/scorer/review01.md 修订：
-> B1 真值表、B2 定位算法、M1-M6 全修）。
+> B1 真值表、B2 定位算法、M1-M6 全修）→ 2026-08-08 v3（轨迹法替换逐帧投票，
+> 批次 1 验收返修；实测 OK 17/17、SKIP 0）。
 > 目标：把"这球是谁进的"从纯人工问答变成"机器预填 + 立哥点确认"，
 > 产出个人合集与分队合集。与批次 2 流水线并行开发，**只用新文件**，对既有数据只读。
 
@@ -31,12 +32,16 @@ Python 3.14.3（标准库 + numpy/PIL；scikit-learn 已装备用）；ffmpeg；
 export PYTHONIOENCODING=utf-8
 python -m ruff format scripts tests && python -m ruff check --fix scripts tests && python -m pytest -q
 
-# 投篮者裁图 + 颜色分队（读 goals.json + mot_cache，产出 crops + scorer_candidates.json）
+# 投篮者裁图 + 颜色分队（轨迹法定位；产出 crops + clips + scorer_candidates.json）
 python scripts/crop_scorers.py --goals work/20260722/goals.json --detectdir work/detect \
-    --framesdir work/frames --out work/20260722/scorers
+    --framesdir work/frames --out work/20260722/scorers \
+    --candidates work/20260722/candidates.json \
+    --rawdir "20260722地平线/2026 年 7月22 日 地平线"
 # 号码识别（可选；结果落 number_cache.json 幂等不重复扣费；>20 球须先问立哥）
 python scripts/crop_scorers.py --goals work/20260722/goals.json --detectdir work/detect \
-    --framesdir work/frames --out work/20260722/scorers --read-numbers
+    --framesdir work/frames --out work/20260722/scorers \
+    --candidates work/20260722/candidates.json \
+    --rawdir "20260722地平线/2026 年 7月22 日 地平线" --read-numbers
 # 认人确认页（--players 优先；无名单时退化为自由文本输入 + 颜色预填）
 python scripts/gen_scorer_page.py --scorers work/20260722/scorers/scorer_candidates.json \
     --goals work/20260722/goals.json --session 20260722 --players "黑21=大斌,白22=某某"
@@ -101,18 +106,25 @@ tests/                 → 纯函数单测（合成 mot_cache/goals，不碰真�
 | 有 | 有 | 有 | 互斥，报错退出 1 |
 | 无 | – | 有 | 无 roster 无法分队，报错退出 1 |
 
-## 投篮者定位算法（B2 修订，写死）
+## 投篮者定位算法（B2 修订，v3 轨迹法，写死）
 
-已知事实：mot_cache `persons` 是**无 track ID 的框列表**（run_mot 只对球做 MOT），
-"投票"前必须先做帧间关联。
+已知事实：mot_cache `persons` 是**无 track ID 的框列表**（run_mot 只对球做 MOT）；
+逐帧 max-conf 球检测不可信（海报球/邻场球导致球位瞬移，批次 1 实测 0.2s 跳 800px），
+**任何逐帧散点规则（持球/最近人框投票）均被证伪**（v2 的 IoU 链投票法即在此列，
+17 球实测明确错 2 + 可疑多张）。v3 起改用轨迹法：
 
-1. **帧间关联（简易 IoU 链）**：窗口 [anchor−2.5s, anchor−0.3s] 内，相邻帧人框两两
-   IoU>0.3 贪心串联为临时 person track（跨帧断裂即新 track）。
-2. **逐帧投票**：每帧取"离球最近的人框"（球无检测则该帧弃票），计入其所属 track。
-3. **胜出规则**：得票最多 track 胜出；并列取窗口内离球平均距离更近者。
-   有效票 <2 帧（含 anchor<1.5s 短窗口）→ SKIP（不炸、不瞎猜）。
-4. **裁图**：胜出 track 在窗口内的代表帧（离球最近帧），人框外扩 20%，
-   短边不足 400px 时等比放大到 400px（号码识别可读性下限）。
+1. 窗口 [anchor−4.0, anchor+0.5]，用 `mot_candidates.run_mot(min_length=1)`
+   在窗口内重链球轨迹（短轨迹必须保留：5fps 下飞行段必然断成 1–3 点短链）。
+2. 选轨迹：末端与候选锚点（--candidates 提供的 cx/cy，fid+|t0−anchor|≤0.3s 匹配）
+   最近者为进球轨迹；端点距 >200px → SKIP。
+3. 沿轨迹从末端回放：最后一个球心严格落在人框内（无 margin）的轨迹点 →
+   该人框=投篮者（最后持球者）；整轨无持球点 → 轨迹起点时刻最近人框（start_fallback）；
+   轨迹不存在 → SKIP。
+4. 裁图帧=该轨迹点所在帧；规格不变（外扩 20%、短边放大到 400px）。
+
+批次 1 实测：OK 17/17、SKIP 0；裁图明确对 4 / 勉强 10 / 可疑 1 / 明确错 2。
+**残余风险**（锚点落在防守人身上或锚点附近只有场边人时轨迹法无解）由确认页
+人工终裁兜底——预览片段与裁图同锚点，立哥一眼可改。裁图/预填只是辅助，视频是终裁依据。
 
 ## 颜色分队判据（M4 修订）
 
@@ -124,8 +136,10 @@ tests/                 → 纯函数单测（合成 mot_cache/goals，不碰真�
 
 pytest 纯函数单测（不碰真帧/网络/API）：
 
-- 定位：合成 mot_cache（两 person track + 球轨迹），IoU 链关联正确、投票众数胜出、
-  并列时取更近者；有效帧 <2 → SKIP
+- 定位（v3 轨迹法）：合成 mot_cache 窗口重链（run_mot min_length=1）；端点距候选锚点
+  最近者胜出、>200px → SKIP；持球点严格包含无 margin；整轨无持球 → start_fallback；
+  SKIP 三分支（no_track / 端点过远 / 起点无人框）；--candidates fid+|t0−anchor|≤0.3s
+  匹配、未给或未匹配时退化为端点时间最近选轨迹
 - 键格式化：f"{t:.1f}" 两端一致（4.1234→"4.1"）；file→fid 去扩展名
 - 颜色分队：合成纯色裁图 → 三分类正确；近阈归"便服"
 - roster schema：缺 players / tag 重复 / team 非法值 / 键格式错 → SchemaError
