@@ -2,6 +2,7 @@
 
 > 取代 `docs/superpowers/specs/2026-07-23-yolo-ball-trajectory-detection.md`（v4 设计稿，检测细节已演进）。
 > 本文档反映**已实测验证**的实现，数据全部来自试点实测。
+> **2026-08-01 注：事件级 K3 判定环节已下线（批次 2 实测 7 次 YES 仅 6 真 1 误、仅覆盖 6/37 球，NO 误杀真球 4 起险致漏球，排序性价比过低，立哥定），批次 3 起生产流程不跑 VLM。本文 K3 / vlm_judge_events 相关章节（§2④、§3.5、§5 等）保留作历史记录与未来多模型试验参考，生产流程以 AGENTS.md 工作流约定为准。**
 
 ## 1. 目标
 
@@ -22,7 +23,8 @@
                  （入网遮挡签名；a 有前驱、b 端 conf≥0.3、盲区无检测）
               过滤：死球(停>3s)、持球(球框覆盖率>0.5落入人框；
                  原 IoU>0.3 经 7886 检测实证数学上不可触发，2026-07-26 审查修正)
- ④ 精筛（机器排序 + 人裁判；2026-07-28 起机器不再当裁判）
+ ④ 精筛（机器排序 + 人裁判；2026-07-28 起机器不再当裁判；
+         2026-08-01 起 K3 判定下线，本环节仅余事件合并+筐距排序；以下为历史记录）
               K3 事件级判定：每事件 1 次调用（anchor±1.5s 四帧、筐居中 420、
               三值 YES/NO/UNCLEAR），产出仅作排序信号（NO 排尾快扫）；
               裸 YES/NO 与无筐轨迹事件的 NO 一律降级 UNCLEAR；
@@ -35,7 +37,7 @@
 ```
 
 脚本与产物对应：`extract_frames.py`(①) → `mot_candidates.py`(②③) → `pilot_candidates.py`(候选清单) →
-`detect_hoops.py`(筐轨迹) → `vlm_judge_events.py`(④ 事件级；`vlm_filter.py` 为候选级旧协议) →
+`detect_hoops.py`(筐轨迹) → `vlm_judge_events.py`(④ 事件级，**2026-08-01 起停用留档**；`vlm_filter.py` 为候选级旧协议) →
 `gen_review_clips.py`(⑤) → `gen_label_page.py`(标注页) → 人工标注 →
 `build_highlight.py`(⑥)。模型在 `models/`，缓存在 `work/detect/`。
 
