@@ -42,8 +42,9 @@
 ## 代码规范（强制，勿再询问）
 
 - **所有 `scripts/` 下的 Python 代码必须遵守根目录 `rules.md`**（鲁棒优先 ＞ 性能 ＞ 简洁）。
-- **spec/plan/todo 三件套先行（2026-07-30 立哥定）**：`scripts/`、`tests/` 的新功能、多文件改动等非小修小补的代码工作，动手前必须先产出三件套——spec（目标/边界/成功标准，放 `docs/`，按本文档自审要求过 spec-reviewer）、plan（执行步骤，放 `tasks/plan.md`）、todo（勾选清单，放 `tasks/todo.md`）；plan/todo 同属 `tasks\*.md` 自审范围。小修 bug、单点参数调整、`work/` 下一次性探索脚本可豁免。直接开写容易出错，禁止。
+- **spec/plan/todo/review 四件套先行（2026-07-30 立哥定，07-31 定目录）**：`scripts/`、`tests/` 的新功能、多文件改动等非小修小补的代码工作，动手前必须先产出四件套——spec（目标/边界/成功标准）、plan（执行步骤）、todo（勾选清单）、review（审查报告存档），**每一个 spec 一个子文件夹，四件套同放 `docs/<功能名>/`**（spec.md / plan.md / todo.md / reviewNN.md；不再使用 tasks/ 目录）；**review 按轮次编号**（review01.md、review02.md……每轮审查一份，递增不覆盖），按本文档自审要求过 spec-reviewer；`docs/` 根下只放长期方案文档（pipeline 主文档、对外需求文档等）。小修 bug、单点参数调整、`work/` 下一次性探索脚本可豁免。直接开写容易出错，禁止。
 - **lint/format/test**：Ruff 为唯一权威（`ruff.toml`），格式化 `ruff format`，检查 `ruff check`，测试 `pytest`。提交前跑 `ruff format scripts tests && ruff check --fix scripts tests && pytest -q`（`--fix` 后须复核 diff）。
+- **自动提交（2026-08-01 立哥定）**：修改完成即 git commit，不再等立哥口令——按逻辑改动为单位提交；代码改动须先过上条 lint/format/test 关口全绿，文档改动须先过 spec-reviewer；提交信息用中文 conventional 风格（参照 `git log`）；**只 commit 不 push**；素材、中间产物、模型权重等 `.gitignore` 排除项及敏感/凭证文件一律不 add。
 - `archive/` 下已冻结代码不受 `rules.md` 约束，不要回头改。
 
 ## 工作流约定
@@ -52,7 +53,7 @@
 - 中间产物放 `work\`（frames / detect / review / label / pilot），成品放 `output\<场次>\`
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
 - **检测流水线**（详见方案文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件级 K3 判定（排序信号，不当裁判）→ 事件合并+筐距排序 → label.html 标注页（J/P/F）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）
-- **文档自审（强制）**：创建或修改 `docs/` 下 spec 文档、`AGENTS.md`、`rules.md`、`tasks\*.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
+- **文档自审（强制）**：创建或修改 `docs/` 下文档（含各功能子文件夹的 spec/plan/todo/review）、`AGENTS.md`、`rules.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
 - 进球归属：个人合集需标进球者；立哥人工标注（当前），照片库自动认人（待立哥供照）
 
 ## 当前状态（2026-07-28）
