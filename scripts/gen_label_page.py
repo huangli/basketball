@@ -30,6 +30,9 @@ import logging
 import os
 from typing import Any
 
+import gen_review_clips  # 全模块路径引用其 CLIP_BEFORE/AFTER_SEC（审核窗口口径）；
+
+# 注意与本文件同名常量（导出剪辑窗口）值不同，禁止 from-import 裸引同名常量
 from errors import BasketballPipelineError
 from pipe_common import configure_logging, new_run_id, read_json
 
@@ -37,6 +40,65 @@ logger = logging.getLogger(__name__)
 
 CLIP_BEFORE_SEC: float = 4.0  # 剪辑规格：锚点前
 CLIP_AFTER_SEC: float = 2.0  # 剪辑规格：锚点后
+
+
+def assign_same_rally_groups(events: list[dict[str, Any]]) -> dict[str, int]:
+    """标记疑似同回合事件组（同 fid 内审核窗口重叠即同组，机器只提示不判定）。
+
+    窗口近似取 [anchor_t0 − 前窗, anchor_t0 + 后窗]，前/后窗引自
+    gen_review_clips（审核片段口径，前 2s 后 4s）：实际片段左界相对事件
+    首候选（比 anchor_t0 更早），events_index 无事件跨度字段，左界为保守
+    子集——重叠判定偏严，可能漏组但绝不误并。依据与反例约束见
+    docs/dedup-same-goal/spec.md。
+
+    Args:
+        events: events_index.json 的事件列表，每条需含 key/fid/anchor_t0；
+            缺字段的事件跳过（记 WARNING），不影响其余事件分组。
+
+    Returns:
+        {event_key: 组号}，仅含 ≥2 事件的组；组号按 fid 首现顺序、
+        组内按 anchor_t0 升序扫描，从 1 递增。
+    """
+    before: float = gen_review_clips.CLIP_BEFORE_SEC
+    after: float = gen_review_clips.CLIP_AFTER_SEC
+    by_fid: dict[str, list[tuple[float, str]]] = {}
+    for e in events:
+        fid: Any = e.get("fid")
+        anchor: Any = e.get("anchor_t0")
+        key: Any = e.get("key")
+        if (
+            not isinstance(fid, str)
+            or not isinstance(anchor, (int, float))
+            or isinstance(anchor, bool)
+            or not isinstance(key, str)
+        ):
+            logger.warning("事件缺 fid/anchor_t0/key，跳过同回合分组: %s", str(e)[:80])
+            continue
+        by_fid.setdefault(fid, []).append((float(anchor), key))
+
+    groups: dict[str, int] = {}
+    gid: int = 0
+    for items in by_fid.values():
+        items.sort()  # anchor 升序（同 anchor 按 key，确定性）
+        cur: list[str] = []
+        right: float = float("-inf")
+        for anchor, key in items:
+            if anchor - before <= right:  # 与当前组窗口重叠，传递闭包并入
+                cur.append(key)
+                right = max(right, anchor + after)
+            else:
+                if len(cur) >= 2:
+                    gid += 1
+                    for k in cur:
+                        groups[k] = gid
+                cur = [key]
+                right = anchor + after
+        if len(cur) >= 2:
+            gid += 1
+            for k in cur:
+                groups[k] = gid
+    return groups
+
 
 _HTML = """<!DOCTYPE html>
 <html lang="zh">
