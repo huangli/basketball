@@ -50,7 +50,7 @@
 ## 工作流约定
 
 - **当前方案文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配、生产计划，先读它再动手）
-- 中间产物放 `work\`（frames / detect / review / label / pilot），成品放 `output\<场次>\`
+- 中间产物放 `work\`（frames / detect / <场次>/；review、label、pilot 等旧 v1 目录已归档 `archive/work_legacy/`，gitignore，2026-08-09 workspace-layout 整理），成品放 `output\<场次>\`
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
 - **检测流水线**（详见方案文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，页面默认 1x = 有效 2x，S 键加至有效 4x；同文件审核窗口重叠事件标"疑似同回合"组标签，组内新判 J 可一键把同组未标注成员标 F 跳过，导出时同组多 J 弹确认框兜底）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**事件级 K3 判定已下线**（2026-08-01 立哥定：批次 2 实测 7 次 YES 仅 6 真 1 误、仅覆盖 6/35 球，NO 误杀真球 4 起、排尾险致漏球，排序性价比过低，批次 3 起不跑）
 - **文档自审（强制）**：创建或修改 `docs/` 下文档（含各功能子文件夹的 spec/plan/todo/review）、`AGENTS.md`、`rules.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
@@ -68,4 +68,5 @@
 - **机器裁判方向终结（已证伪）**：K3 事件级判定、豆包视频模型慢放判定均撞"盲区像素证据弱"同一堵墙；**架构定位 = 机器排序 + 人裁判**；K3 判定 2026-08-01 起下线
 - **自动剔除长期关闭**：0 漏检宣称 99% 召回需 299 独立正样本 ≈15 场次；NO 只排序不剔除
 - 球员照片库待立哥新增（到手后可上人脸识别预填）；新比赛素材待立哥加入（干完他会删旧素材）
+- **workspace-layout 已整理（2026-08-09）**：根目录散文件与 work/ 旧产物（v1 目录、日志、调研/回放脚本、测试素材 frames+detect）全部归档 `archive/work_legacy/`（gitignore），根 goals.json 空残留→`archive/goals_root_legacy.json`，剪辑流程图.html→`docs/`；现 work/ 仅 frames/detect/20260722 三块；四件套与移动清单在 `docs/workspace-layout/`
 - 文档：`docs/2026-07-26-current-goal-detection-pipeline.md`（方案主文档）、`docs/2026-07-28-goal-autotriage-requirements.md`（对外需求文档）
