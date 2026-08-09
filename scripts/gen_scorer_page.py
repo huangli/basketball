@@ -17,7 +17,10 @@ validate_roster 可校验），confirmed=true 仅当全部非 SKIP 球已归属�
     candidates 里的 session）、--index（可选 events_index.json，兜底视频按
     src_file 相同且 |anchor_t0−anchor_time|≤4s 匹配 clip_wide）、--players（可选
     "黑21=大斌,白-熊志鹏=熊志鹏" 式逗号分隔名单）、--roster-existing（可选，
-    合并已有 roster：assignments 并集预填、players 以新名单为准缺 tag WARNING）
+    合并已有 roster：assignments 并集预填、players 以新名单为准缺 tag WARNING）、
+    --clusters（可选 scorer_clusters.json，必须与 --scorers 同目录：rep_crops 与
+    裁图同目录相对引用；有则页面顶部出簇区，簇级选人批量预填簇内全部球，
+    逐球区单独改覆盖簇归属，导出 roster 契约不变；spec: docs/scorer-cluster/spec.md）
 输出：<scorer_candidates.json 同目录>/scorer.html
 依赖：scripts/roster.py（format_key/validate_roster/Player，契约唯一入口）、
     scripts/pipe_common.py（read_json/run_id 日志）、scripts/errors.py
@@ -90,6 +93,13 @@ button.sel { outline: 3px solid #fc3; }
 video { max-width: 48vw; max-height: 68vh; background: #000; }
 .badge { color: #fc3; }
 small { color: #999; }
+#clusters { margin: 8px 0; }
+.cluster-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+               background: #1c1c1c; border: 1px solid #333; border-radius: 8px;
+               padding: 6px; margin: 6px 0; }
+.cluster-row img.rep { max-height: 120px; max-width: 160px; background: #000; }
+.clusterlabel { color: #fc3; margin: 0 8px; }
+.cluster-row button { font-size: 14px; padding: 6px 10px; }
 </style>
 </head>
 <body>
@@ -106,6 +116,7 @@ small { color: #999; }
   <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 ←/→=翻页；SKIP 球标"无法定位"可手选</small>
   <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster___SESSION__.json</small>
 </div>
+<div id="clusters"></div>
 <img id="crop" alt="投篮者裁图">
 <video id="v" autoplay loop muted playsinline></video>
 <script>
@@ -113,13 +124,19 @@ const ITEMS = __ITEMS__;
 const PLAYERS = __PLAYERS__;
 const EXISTING = __EXISTING__;
 const EXPLAYERS = __EXPLAYERS__;
+const CLUSTERS = __CLUSTERS__;
 const SESSION = "__SESSION__";
 const LSKEY = "scorer_" + SESSION;
 const POSKEY = LSKEY + "_pos";
+const TOUCHKEY = LSKEY + "_touched";
 let marks = {};
 try { marks = JSON.parse(localStorage.getItem(LSKEY) || "{}"); } catch (e) { marks = {}; }
 // 已有 roster 归属作底，本页改动覆盖之（立哥在页面上的修改是终裁）
 marks = Object.assign({}, EXISTING, marks);
+// touched = 逐球手动改过的 key（簇级批量预填不得覆盖；独立 localStorage 键，
+// 不动既有 marks 存储格式）
+let touched = {};
+try { touched = JSON.parse(localStorage.getItem(TOUCHKEY) || "{}"); } catch (e) { touched = {}; }
 let cur = 0;
 function save() {
   // 合并写入：先读回存储与本页记录合并再写，防止同时开多个页面互相覆盖
@@ -127,6 +144,11 @@ function save() {
   try { stored = JSON.parse(localStorage.getItem(LSKEY) || "{}"); } catch (e) { stored = {}; }
   marks = Object.assign(stored, marks);
   localStorage.setItem(LSKEY, JSON.stringify(marks));
+  let storedTouched = {};
+  try { storedTouched = JSON.parse(localStorage.getItem(TOUCHKEY) || "{}"); }
+  catch (e) { storedTouched = {}; }
+  touched = Object.assign(storedTouched, touched);
+  localStorage.setItem(TOUCHKEY, JSON.stringify(touched));
 }
 function teamOfTag(tag) {
   // 与 Python 端 team_of_tag 同规则：标签前缀定队，其余便服
@@ -160,6 +182,46 @@ function renderPlayers() {
     box.appendChild(div);
   }
 }
+function renderClusters() {
+  // 簇区：每簇一行（代表图墙 + 簇内球数 + 选球员按钮），渲染在逐球区之前；
+  // 无簇数据（未传 --clusters）整区隐藏，页面行为与旧版一致
+  const box = document.getElementById("clusters");
+  box.innerHTML = "";
+  if (!CLUSTERS.length) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  for (const cl of CLUSTERS) {
+    const row = document.createElement("div");
+    row.className = "cluster-row";
+    for (const rc of cl.rep_crops) {
+      const im = document.createElement("img");
+      im.src = rc;
+      im.className = "rep";
+      im.alt = "簇代表图";
+      row.appendChild(im);
+    }
+    const lab = document.createElement("span");
+    lab.className = "clusterlabel";
+    lab.textContent = "簇#" + cl.cluster_id + "（" + cl.keys.length + " 球，已归属 " +
+      cl.keys.filter(k => marks[k]).length + "）";
+    row.appendChild(lab);
+    for (const p of PLAYERS) {
+      const b = document.createElement("button");
+      b.textContent = p.tag + (p.name ? "=" + p.name : "");
+      b.className = "team-" + p.team;
+      b.onclick = () => clusterAssign(cl.cluster_id, p.tag);
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+}
+function clusterAssign(cid, tag) {
+  // 簇级选人 = 批量预填：只写未被逐球手动改过的 key（逐球覆盖优先于簇归属）
+  const cl = CLUSTERS.find(c => c.cluster_id === cid);
+  if (!cl) return;
+  for (const k of cl.keys) { if (!touched[k]) marks[k] = tag; }
+  save();
+  show(cur);
+}
 function show(i) {
   if (!ITEMS.length) return;
   cur = Math.max(0, Math.min(i, ITEMS.length - 1));
@@ -173,6 +235,7 @@ function show(i) {
   localStorage.setItem(POSKEY, String(cur));
   let info = `第 ${cur + 1}/${ITEMS.length} 个 | 已归属 ${nDone()}/${ITEMS.length}` +
     ` | ${it.file} t=${it.anchor_time}s`;
+  if (it.cluster_id) info += ` | 簇#${it.cluster_id}`;
   // 预填优先级：号码匹配（K3 读号）> 颜色 team_guess；歧义不预填
   const ab = document.getElementById("accept");
   if (it.status === "SKIP") info += " | 无法定位";
@@ -193,10 +256,12 @@ function show(i) {
   document.getElementById("cur").textContent =
     marks[it.key] ? "当前归属: " + marks[it.key] : "未归属";
   renderPlayers();
+  renderClusters();
 }
 function assign(tag) {
   if (!ITEMS.length) return;
   marks[ITEMS[cur].key] = tag;
+  touched[ITEMS[cur].key] = true;
   save();
   let nxt = ITEMS.findIndex((x, idx) => idx > cur && !marks[x.key]);
   if (nxt < 0) nxt = ITEMS.findIndex(x => !marks[x.key]);
@@ -568,6 +633,108 @@ def match_clip(
     return rel.replace(os.sep, "/")
 
 
+def _validate_clusters(data: Any, path: str) -> list[dict[str, Any]]:  # noqa: ANN401
+    """校验 scorer_clusters.json 结构（cluster_scorers 输出契约；rules.md §0.2）。
+
+    Args:
+        data: read_json 读出的原始 JSON。
+        path: 文件路径（仅用于错误信息）。
+
+    Returns:
+        clusters 记录列表（保留原始 dict）。
+
+    Raises:
+        SchemaError: 顶层非对象 / 缺 clusters 列表 / 簇缺 cluster_id/keys/rep_crops
+            或类型错 / cluster_id 重复。
+    """
+    if not isinstance(data, dict):
+        raise SchemaError(f"{path}: 顶层必须是对象，实际 {type(data).__name__}")
+    clusters: Any = data.get("clusters")
+    if not isinstance(clusters, list):
+        raise SchemaError(f"{path}: 缺 clusters 列表或类型错误")
+    seen_ids: set[int] = set()
+    for i, cl in enumerate(clusters):
+        if not isinstance(cl, dict):
+            raise SchemaError(f"{path}: 第{i}个簇不是对象")
+        cid: Any = cl.get("cluster_id")
+        if isinstance(cid, bool) or not isinstance(cid, int):
+            raise SchemaError(f"{path}: 第{i}个簇 cluster_id 缺失或非 int")
+        if cid in seen_ids:
+            raise SchemaError(f"{path}: cluster_id 重复: {cid}")
+        seen_ids.add(cid)
+        keys: Any = cl.get("keys")
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise SchemaError(f"{path}: 第{i}个簇 keys 缺失或非 str 列表")
+        rep: Any = cl.get("rep_crops")
+        if not isinstance(rep, list) or not all(isinstance(r, str) for r in rep):
+            raise SchemaError(f"{path}: 第{i}个簇 rep_crops 缺失或非 str 列表")
+    return clusters
+
+
+def build_cluster_map(clusters: list[dict[str, Any]], candidate_keys: set[str]) -> dict[str, int]:
+    """key → cluster_id 映射；引用 candidates 之外的 key 记 WARNING 跳过（不炸）。
+
+    同一 key 出现在多个簇（聚类契约本应互斥）取首个并记 WARNING，容忍不炸。
+
+    Args:
+        clusters: _validate_clusters 校验后的簇列表。
+        candidate_keys: 本页 candidates 的 key 集合。
+
+    Returns:
+        key → cluster_id（只含 candidates 里存在的 key）。
+    """
+    mapping: dict[str, int] = {}
+    for cl in clusters:
+        cid: int = cl["cluster_id"]
+        for key in cl["keys"]:
+            if key not in candidate_keys:
+                logger.warning("簇 %d 引用的 key 不在 candidates 里，跳过: %s", cid, key)
+                continue
+            if key in mapping:
+                logger.warning("key 同时属于簇 %d 与簇 %d，取前者: %s", mapping[key], cid, key)
+                continue
+            mapping[key] = cid
+    return mapping
+
+
+def build_page_clusters(
+    clusters: list[dict[str, Any]], entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """簇 → 页面簇区数据：keys 过滤到本页条目（confirmed 球），过滤后为空的簇剔除。
+
+    rep_crops 原样透传（文件名相对 candidates 同目录，与逐球区 crop 引用口径一致；
+    --clusters 必须与 --scorers 同目录由 CLI 层保证）。
+
+    Args:
+        clusters: _validate_clusters 校验后的簇列表。
+        entries: build_entries 产出的页面条目。
+
+    Returns:
+        页面簇区数据列表（cluster_id/keys/rep_crops），保持入参簇序。
+    """
+    entry_keys: set[str] = {e["key"] for e in entries}
+    page: list[dict[str, Any]] = []
+    for cl in clusters:
+        keys: list[str] = [k for k in cl["keys"] if k in entry_keys]
+        dropped: int = len(cl["keys"]) - len(keys)
+        if dropped:
+            logger.info(
+                "簇 %d 有 %d 个 key 不在本页 confirmed 球里（其他批次/非 confirmed，页面不显示）",
+                cl["cluster_id"],
+                dropped,
+            )
+        if not keys:
+            continue
+        page.append(
+            {
+                "cluster_id": cl["cluster_id"],
+                "keys": keys,
+                "rep_crops": list(cl["rep_crops"]),
+            }
+        )
+    return page
+
+
 def build_entries(
     confirmed: list[dict[str, Any]],
     candidates: list[dict[str, Any]],
@@ -575,6 +742,7 @@ def build_entries(
     index_dir: str,
     out_dir: str,
     players: list[Player] | None = None,
+    cluster_map: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """组装页面条目：每条 = 一个 confirmed 球（按 file+anchor 排序）。
 
@@ -584,6 +752,7 @@ def build_entries(
     events_index 的 clip_wide 匹配（仅作无预览片段时的兜底）。预填优先级：
     号码匹配（number_guess 的 number+color 与名单 tag 匹配）＞ 颜色 team_guess；
     号码匹配到多个球员 → 不预填，prefill_note="ambiguous"（页面标"号码歧义"）。
+    给了 cluster_map 则每条追加 cluster_id（不在任何簇/unclustered → None）。
 
     Args:
         confirmed: goals.json 的 confirmed 记录。
@@ -592,12 +761,15 @@ def build_entries(
         index_dir: events_index.json 所在目录。
         out_dir: scorer.html 输出目录。
         players: 球员名单（号码匹配用）；None/空列表则只做颜色预填。
+        cluster_map: key → cluster_id（build_cluster_map 产物）；None 表示无
+            --clusters，条目 cluster_id 全为 None（页面不渲染簇区）。
 
     Returns:
         页面条目列表（key/file/anchor_time/status/reason/crop/team_guess/clip/
-        number_guess/prefill_tag/prefill_note）。
+        number_guess/prefill_tag/prefill_note/cluster_id）。
     """
     players = players or []
+    cluster_map = cluster_map or {}
     by_key: dict[str, dict[str, Any]] = {c["key"]: c for c in candidates}
     entries: list[dict[str, Any]] = []
     ordered = sorted(confirmed, key=lambda g: (g["file"], float(g["anchor_time"])))
@@ -650,6 +822,7 @@ def build_entries(
                 "number_guess": number_guess,
                 "prefill_tag": prefill_tag,
                 "prefill_note": prefill_note,
+                "cluster_id": cluster_map.get(key),
             }
         )
     return entries
@@ -661,8 +834,9 @@ def build_html(
     session: str,
     existing_assignments: dict[str, str],
     existing_players: dict[str, Player],
+    clusters: list[dict[str, Any]] | None = None,
 ) -> str:
-    """把条目/名单/已有归属渲染为自包含确认页 HTML。
+    """把条目/名单/已有归属/簇数据渲染为自包含确认页 HTML。
 
     Args:
         entries: build_entries 产出的页面条目（原样内联）。
@@ -670,6 +844,8 @@ def build_html(
         session: 场次名（标题、localStorage 键、导出文件名后缀）。
         existing_assignments: 已有 roster 的 assignments（页面预填底色）。
         existing_players: 已有 roster 的 tag → Player（自动补录时沿用 name/team）。
+        clusters: build_page_clusters 产出的簇区数据；None/空列表不渲染簇区
+            （无 --clusters 时页面行为与旧版一致）。
 
     Returns:
         scorer.html 全文。
@@ -687,6 +863,7 @@ def build_html(
         .replace("__PLAYERS__", players_json)
         .replace("__EXISTING__", json.dumps(existing_assignments, ensure_ascii=False))
         .replace("__EXPLAYERS__", explayers_json)
+        .replace("__CLUSTERS__", json.dumps(clusters or [], ensure_ascii=False))
         .replace("__SESSION__", session)
     )
 
@@ -702,7 +879,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--players", default="", help='球员名单，如 "黑21=大斌,白-熊志鹏=熊志鹏"（可选）'
     )
     parser.add_argument("--roster-existing", default="", help="已有 roster.json（可选，合并预填）")
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--clusters",
+        type=Path,
+        default=None,
+        help="scorer_clusters.json 路径（可选，簇级确认；必须与 --scorers 同目录）",
+    )
+    ns = parser.parse_args(argv)
+    if ns.clusters is not None and ns.clusters.resolve().parent != ns.scorers.resolve().parent:
+        parser.error("--clusters 必须与 --scorers 同目录（rep_crops 与裁图同目录相对引用口径）")
+    return ns
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -733,6 +919,13 @@ def main(argv: list[str] | None = None) -> int:
 
         out_dir: str = str(scorers_path.resolve().parent)
 
+        clusters_raw: list[dict[str, Any]] | None = None
+        cluster_map: dict[str, int] | None = None
+        if args.clusters is not None:
+            cl_data: Any = read_json(args.clusters, what="scorer_clusters.json")
+            clusters_raw = _validate_clusters(cl_data, str(args.clusters))
+            cluster_map = build_cluster_map(clusters_raw, {c["key"] for c in candidates})
+
         players: list[Player] = parse_players(args.players)
         existing_assignments: dict[str, str] = {}
         existing_players: dict[str, Player] = {}
@@ -755,21 +948,33 @@ def main(argv: list[str] | None = None) -> int:
                     )
 
         entries: list[dict[str, Any]] = build_entries(
-            confirmed, candidates, events, index_dir, out_dir, players
+            confirmed, candidates, events, index_dir, out_dir, players, cluster_map=cluster_map
         )
 
-        html: str = build_html(entries, players, session, existing_assignments, existing_players)
+        page_clusters: list[dict[str, Any]] | None = None
+        if clusters_raw is not None:
+            page_clusters = build_page_clusters(clusters_raw, entries)
+
+        html: str = build_html(
+            entries,
+            players,
+            session,
+            existing_assignments,
+            existing_players,
+            clusters=page_clusters,
+        )
         out_path: Path = scorers_path.resolve().parent / "scorer.html"
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(html)
         n_skip: int = sum(1 for e in entries if e["status"] == STATUS_SKIP)
         n_clip: int = sum(1 for e in entries if e["clip"])
         logger.info(
-            "确认页 %d 球（SKIP %d，带片段 %d，球员按钮 %d）-> %s（浏览器打开即可认人）",
+            "确认页 %d 球（SKIP %d，带片段 %d，球员 %d，簇 %d）-> %s（浏览器打开即可认人）",
             len(entries),
             n_skip,
             n_clip,
             len(players),
+            len(page_clusters or []),
             out_path,
         )
         return 0

@@ -2,21 +2,30 @@
 
 覆盖：team_of_tag 前缀推队、parse_players 名单解析、merge_assignments 并集/
 同键冲突、match_clip 4s 容差匹配与相对路径、build_entries 排序与无候选兜底、
-build_html 内联数据与导出契约、main 端到端（tmp 目录写 scorer.html）。
+build_html 内联数据与导出契约、main 端到端（tmp 目录写 scorer.html）；
+--clusters 簇级确认（docs/scorer-cluster/spec.md）：clusters schema 校验、
+build_cluster_map 归属与越界 key 跳过、cluster_id 注入与 unclustered→None、
+build_page_clusters 过滤、簇区渲染与 node --check JS 语法校验。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pathlib
+import shutil
+import subprocess
 
 import pytest
 
 from errors import BasketballPipelineError, SchemaError
 from gen_scorer_page import (
+    _validate_clusters,
+    build_cluster_map,
     build_entries,
     build_html,
+    build_page_clusters,
     main,
     match_clip,
     match_players_by_name,
@@ -615,3 +624,273 @@ def test_match_clip_absolute_vs_relative_consistent(tmp_path: pathlib.Path) -> N
     # Assert
     assert os.sep not in rel or "/" in rel  # 统一正斜杠
     assert rel == "../review/clips/a_e1_wide.mp4"
+
+
+# ---- --clusters 簇级确认（docs/scorer-cluster/spec.md） ----
+
+
+def _cluster(
+    cid: int = 1,
+    keys: tuple[str, ...] = ("a.mp4#4.1",),
+    rep_crops: tuple[str, ...] = ("a_t4.1.jpg",),
+) -> dict:
+    """构造一条合法簇记录（cluster_scorers 输出契约）。"""
+    return {"cluster_id": cid, "keys": list(keys), "rep_crops": list(rep_crops)}
+
+
+class TestValidateClusters:
+    """scorer_clusters.json schema 校验（顶层缺 clusters/类型错 → SchemaError）。"""
+
+    def test_valid_payload(self) -> None:
+        # Arrange / Act
+        clusters = _validate_clusters(
+            {"version": "cluster-v1", "clusters": [_cluster()], "unclustered": []}, "c.json"
+        )
+        # Assert
+        assert clusters == [_cluster()]
+
+    def test_top_level_not_dict(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="顶层"):
+            _validate_clusters([], "c.json")
+
+    def test_missing_clusters(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="clusters"):
+            _validate_clusters({"version": "cluster-v1"}, "c.json")
+
+    def test_clusters_not_list(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="clusters"):
+            _validate_clusters({"clusters": {}}, "c.json")
+
+    def test_bad_cluster_field_types(self) -> None:
+        # Arrange / Act / Assert：cluster_id bool、keys 非 str 列表、rep_crops 非列表
+        with pytest.raises(SchemaError, match="cluster_id"):
+            _validate_clusters({"clusters": [_cluster(cid=True)]}, "c.json")
+        with pytest.raises(SchemaError, match="keys"):
+            _validate_clusters({"clusters": [_cluster(keys=(1,))]}, "c.json")  # type: ignore[arg-type]
+        with pytest.raises(SchemaError, match="rep_crops"):
+            _validate_clusters({"clusters": [_cluster(rep_crops=("a.jpg", 2))]}, "c.json")  # type: ignore[arg-type]
+
+    def test_duplicate_cluster_id(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="重复"):
+            _validate_clusters({"clusters": [_cluster(cid=1), _cluster(cid=1)]}, "c.json")
+
+
+class TestBuildClusterMap:
+    """key → cluster_id 映射：越界 key WARNING 跳过，同 key 多簇取首个。"""
+
+    def test_basic_mapping(self) -> None:
+        # Arrange / Act
+        m = build_cluster_map(
+            [
+                _cluster(cid=1, keys=("a.mp4#4.1", "b.mp4#2.0")),
+                _cluster(cid=2, keys=("c.mp4#1.0",)),
+            ],
+            {"a.mp4#4.1", "b.mp4#2.0", "c.mp4#1.0"},
+        )
+        # Assert
+        assert m == {"a.mp4#4.1": 1, "b.mp4#2.0": 1, "c.mp4#1.0": 2}
+
+    def test_key_not_in_candidates_warns_and_skips(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Arrange / Act
+        with caplog.at_level(logging.WARNING):
+            m = build_cluster_map([_cluster(keys=("a.mp4#4.1", "ghost.mp4#9.9"))], {"a.mp4#4.1"})
+        # Assert：越界 key 跳过不炸，记 WARNING
+        assert m == {"a.mp4#4.1": 1}
+        assert any("ghost.mp4#9.9" in r.message for r in caplog.records)
+
+    def test_key_in_two_clusters_first_wins(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Arrange / Act
+        with caplog.at_level(logging.WARNING):
+            m = build_cluster_map(
+                [_cluster(cid=1), _cluster(cid=2, keys=("a.mp4#4.1",))], {"a.mp4#4.1"}
+            )
+        # Assert
+        assert m == {"a.mp4#4.1": 1}
+        assert any("同时属于" in r.message for r in caplog.records)
+
+
+class TestBuildEntriesClusterId:
+    """cluster_id 注入：同 key 同簇、unclustered→None、无 --clusters 全 None。"""
+
+    def test_cluster_id_injected(self) -> None:
+        # Arrange / Act
+        entries = build_entries(
+            [_goal()],
+            [_candidate()],
+            None,
+            "",
+            "",
+            cluster_map={"a.mp4#4.1": 3},
+        )
+        # Assert
+        assert entries[0]["cluster_id"] == 3
+
+    def test_unclustered_key_gets_none(self) -> None:
+        # Arrange / Act：映射里没有该 key（unclustered）
+        entries = build_entries([_goal()], [_candidate()], None, "", "", cluster_map={})
+        # Assert
+        assert entries[0]["cluster_id"] is None
+
+    def test_no_cluster_map_all_none(self) -> None:
+        # Arrange / Act：不传 --clusters（向后兼容）
+        entries = build_entries([_goal()], [_candidate()], None, "", "")
+        # Assert
+        assert entries[0]["cluster_id"] is None
+
+
+class TestBuildPageClusters:
+    """簇区数据：keys 过滤到本页 confirmed 球，空簇剔除，rep_crops 透传。"""
+
+    def test_filters_keys_not_in_entries(self) -> None:
+        # Arrange：簇含本页球 + 其他批次球
+        entries = build_entries([_goal()], [_candidate()], None, "", "")
+        clusters = [_cluster(keys=("a.mp4#4.1", "other.mp4#1.0"))]
+        # Act
+        page = build_page_clusters(clusters, entries)
+        # Assert
+        assert page == [{"cluster_id": 1, "keys": ["a.mp4#4.1"], "rep_crops": ["a_t4.1.jpg"]}]
+
+    def test_cluster_without_page_keys_dropped(self) -> None:
+        # Arrange / Act
+        page = build_page_clusters([_cluster(keys=("other.mp4#1.0",))], [])
+        # Assert
+        assert page == []
+
+
+class TestBuildHtmlClusters:
+    """簇区渲染：有簇出标记与 rep_crops 引用；无簇不渲染且行为同旧版。"""
+
+    def test_cluster_section_with_rep_crops(self) -> None:
+        # Arrange
+        entries = build_entries(
+            [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
+        )
+        page_clusters = build_page_clusters([_cluster()], entries)
+        # Act
+        html = build_html(entries, [], "s", {}, {}, clusters=page_clusters)
+        # Assert：簇区容器/行样式/代表图引用/簇级选人函数/逐球覆盖注释口径
+        assert 'id="clusters"' in html
+        assert "cluster-row" in html
+        assert "clusterAssign" in html
+        assert "a_t4.1.jpg" in html
+        assert '"cluster_id": 1' in html
+
+    def test_no_clusters_renders_empty(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "s", {}, {})
+        # Assert：无簇数据 → CLUSTERS 空数组，JS 整区隐藏
+        assert "const CLUSTERS = [];" in html
+
+    def test_generated_js_syntax_node_check(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：node 不在 PATH 则跳过（仿 7e9967c 防模板转义黑屏回归）
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node 不在 PATH")
+        entries = build_entries(
+            [_goal()],
+            [_candidate()],
+            None,
+            "",
+            "",
+            [Player(tag="黑21", name="大斌", team="地平线")],
+            cluster_map={"a.mp4#4.1": 1},
+        )
+        page_clusters = build_page_clusters([_cluster()], entries)
+        html = build_html(
+            entries,
+            [Player(tag="黑21", name="大斌", team="地平线")],
+            "s",
+            {},
+            {},
+            clusters=page_clusters,
+        )
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        js_path = tmp_path / "page.js"
+        js_path.write_text(script, encoding="utf-8")
+        # Act
+        proc = subprocess.run(  # noqa: S603 node 路径来自 shutil.which，可信
+            [node, "--check", str(js_path)], capture_output=True, text=True, check=False
+        )
+        # Assert
+        assert proc.returncode == 0, proc.stderr
+
+
+class TestMainClusters:
+    """main 端到端 --clusters：同目录强校验、schema 损坏退出 1、簇区内联。"""
+
+    def _write_inputs(
+        self, tmp_path: pathlib.Path
+    ) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+        """造 scorers/goals/clusters 三个输入文件（clusters 与 scorers 同目录），返回路径。"""
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(
+            json.dumps({"session": "s", "candidates": [_candidate()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps({"session": "s", "goals": [_goal()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        clusters = scorers_dir / "scorer_clusters.json"
+        clusters.write_text(
+            json.dumps(
+                {
+                    "version": "cluster-v1",
+                    "model": "m",
+                    "threshold": 0.25,
+                    "clusters": [_cluster()],
+                    "unclustered": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return scorers, goals, clusters
+
+    def test_end_to_end_with_clusters(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals, clusters = self._write_inputs(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--clusters",
+                str(clusters),
+                "--players",
+                "黑21=大斌",
+            ]
+        )
+        # Assert
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"cluster_id": 1' in html
+        assert "a_t4.1.jpg" in html
+
+    def test_bad_clusters_schema_exit_1(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals, clusters = self._write_inputs(tmp_path)
+        clusters.write_text(json.dumps({"version": "cluster-v1"}), encoding="utf-8")
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--clusters", str(clusters)])
+        # Assert：schema 损坏显式失败
+        assert rc == 1
+
+    def test_clusters_different_dir_rejected(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：clusters 与 scorers 不同目录（rep_crops 相对引用口径破坏）
+        scorers, goals, _ = self._write_inputs(tmp_path)
+        other = tmp_path / "other" / "scorer_clusters.json"
+        other.parent.mkdir()
+        other.write_text(json.dumps({"clusters": []}), encoding="utf-8")
+        # Act / Assert：parser.error 显式拒绝（SystemExit 2）
+        with pytest.raises(SystemExit):
+            main(["--scorers", str(scorers), "--goals", str(goals), "--clusters", str(other)])
