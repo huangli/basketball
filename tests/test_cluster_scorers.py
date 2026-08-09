@@ -1,25 +1,36 @@
-"""cluster_scorers.py 单元测试（CLIP 聚类 + 缓存 + 纯度自检）。
+"""cluster_scorers.py 单元测试（embedding 聚类 + 缓存 + 纯度自检 + --model 后端抽象）。
 
 全部纯函数/合成数据：不 import 真模型（open_clip/torch 只出现在 build_clip_encoder
-内部，测试注入假 encoder）、不碰网络、不碰真实素材。覆盖：candidates schema 校验、
-多文件合并（并集/同 key 后者覆盖）、crops/crop_scores 回退、embedding 均值+L2 归一、
-缓存幂等（第二次零推理）、裁图缺失进 unclustered 不炸整批、凝聚聚类（明显两堆/
-全相同/全不同/单球）、rep_crops 选取、纯度计算、CLI 端到端（全缓存命中不加载模型）。
+内部、torchreid 只出现在 build_osnet_encoder 内部，测试注入假 encoder 或 monkeypatch
+后端构造函数）、不碰网络、不碰真实素材。覆盖：candidates schema 校验、多文件合并
+（并集/同 key 后者覆盖）、crops/crop_scores 回退、embedding 均值+L2 归一、缓存幂等
+（第二次零推理）、裁图缺失进 unclustered 不炸整批、凝聚聚类（明显两堆/全相同/全不同/
+单球）、rep_crops 选取、纯度计算、--model 映射表与解析（非法值拒绝）、encoder 工厂
+分派（查无此模型显式失败）、OSNet 失败路径（权重缺失/torchreid 未装 → ExternalApiError
+不回退）、build_result model 字段记实际后端、CLI 端到端（CLIP/OSNet 全缓存命中不加载
+模型）。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
 
 from cluster_scorers import (
     MODEL_TAG,
+    MODEL_TAG_OSNET,
+    MODEL_TAGS,
+    OSNET_WEIGHTS_PATH,
     GoalCrops,
+    _parse_args,
+    build_encoder,
+    build_osnet_encoder,
     build_result,
     cluster_keys,
     embed_goal,
@@ -35,7 +46,7 @@ from cluster_scorers import (
     merge_candidates,
     save_clip_cache,
 )
-from errors import SchemaError
+from errors import BasketballPipelineError, ExternalApiError, SchemaError
 
 
 def _entry(
@@ -187,22 +198,23 @@ class TestMergeCandidates:
 
 
 class TestClipCache:
-    """缓存读写：幂等落盘、模型前缀过滤（model 变更旧键不命中）。"""
+    """缓存读写：幂等落盘、多后端键前缀共存（旧模型键保留不冲掉）。"""
 
     def test_roundtrip(self, tmp_path: Path) -> None:
         path = tmp_path / "clip_cache.json"
         cache = {f"{MODEL_TAG}:abc": [0.6, 0.8]}
         save_clip_cache(path, MODEL_TAG, cache)
-        assert load_clip_cache(path, MODEL_TAG) == cache
+        assert load_clip_cache(path) == cache
 
     def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
-        assert load_clip_cache(tmp_path / "none.json", MODEL_TAG) == {}
+        assert load_clip_cache(tmp_path / "none.json") == {}
 
-    def test_stale_model_keys_dropped(self, tmp_path: Path) -> None:
+    def test_other_model_keys_preserved(self, tmp_path: Path) -> None:
+        # 另一后端的键保留（互不命中靠键前缀，不回写冲掉）
         path = tmp_path / "clip_cache.json"
         cache = {f"{MODEL_TAG}:a": [1.0], "OldModel/x:b": [2.0]}
         save_clip_cache(path, MODEL_TAG, cache)
-        assert load_clip_cache(path, MODEL_TAG) == {f"{MODEL_TAG}:a": [1.0]}
+        assert load_clip_cache(path) == cache
 
 
 class TestEmbedGoals:
@@ -240,7 +252,7 @@ class TestEmbedGoals:
         # 模拟断点续跑：缓存落盘重读，注入全新计数 encoder
         cache_path = tmp_path / "clip_cache.json"
         save_clip_cache(cache_path, MODEL_TAG, cache)
-        cache2 = load_clip_cache(cache_path, MODEL_TAG)
+        cache2 = load_clip_cache(cache_path)
         enc2 = CountingEncoder({"a.jpg": [1.0, 0.0]})
         emb2, failed2 = embed_goals(goals, lambda: enc2, cache2, MODEL_TAG)
         # Assert
@@ -348,7 +360,7 @@ class TestBuildResult:
         }
         embeddings = {"k1": np.asarray([1.0]), "k2": np.asarray([1.0])}
         # Act
-        result = build_result(goals, embeddings, [["k1", "k2"]], 0.25)
+        result = build_result(goals, embeddings, [["k1", "k2"]], 0.25, MODEL_TAG)
         # Assert
         assert result["version"] == "cluster-v1"
         assert result["model"] == MODEL_TAG
@@ -357,6 +369,98 @@ class TestBuildResult:
             {"cluster_id": 1, "keys": ["k1", "k2"], "rep_crops": ["b.jpg", "b2.jpg"]}
         ]
         assert result["unclustered"] == ["k3"]
+
+    def test_model_field_records_actual_backend(self, tmp_path: Path) -> None:
+        # Arrange：OSNet 后端实跑 → model 字段应记 osnet tag 而非硬编码 CLIP tag
+        goals = {"k1": _goal("k1", tmp_path, crops=("a.jpg",), crop_scores=(0.5,))}
+        embeddings = {"k1": np.asarray([1.0])}
+        # Act
+        result = build_result(goals, embeddings, [["k1"]], 0.25, MODEL_TAG_OSNET)
+        # Assert
+        assert result["model"] == MODEL_TAG_OSNET == "osnet_x1_0/market1501"
+
+
+class TestModelBackend:
+    """--model 后端抽象：映射表写死、工厂分派、查无此模型显式失败、OSNet 失败路径。
+
+    全程不 import 真 torchreid/torch 模型：分派测试 monkeypatch 两个后端构造函数，
+    OSNet 失败路径在权重检查 / import 阶段即抛错（碰不到真模型加载）。
+    """
+
+    def test_model_tags_mapping(self) -> None:
+        # spec §数据契约写死：--model 取值 → model_tag 对应表
+        assert MODEL_TAGS == {
+            "clip": "ViT-B-32/laion2b_s34b_b79k",
+            "osnet_x1_0": "osnet_x1_0/market1501",
+        }
+        assert MODEL_TAGS["clip"] == MODEL_TAG  # CLIP tag 沿用现状常量
+        assert MODEL_TAGS["osnet_x1_0"] == MODEL_TAG_OSNET
+
+    def test_dispatch_clip(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # Arrange
+        sentinel = CountingEncoder({})
+        monkeypatch.setattr("cluster_scorers.build_clip_encoder", lambda: sentinel)
+        # Act / Assert：clip 走 CLIP 后端，不碰 reid_weights
+        assert build_encoder("clip", tmp_path / "ghost.pth") is sentinel
+
+    def test_dispatch_osnet(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # Arrange
+        sentinel = CountingEncoder({})
+        captured: list[Path] = []
+
+        def fake_osnet(weights_path: Path) -> CountingEncoder:
+            captured.append(weights_path)
+            return sentinel
+
+        monkeypatch.setattr("cluster_scorers.build_osnet_encoder", fake_osnet)
+        weights = tmp_path / "w.pth"
+        # Act / Assert：osnet_x1_0 走 OSNet 后端并透传权重路径
+        assert build_encoder("osnet_x1_0", weights) is sentinel
+        assert captured == [weights]
+
+    def test_unknown_model_raises(self) -> None:
+        with pytest.raises(BasketballPipelineError, match="查无此编码器后端"):
+            build_encoder("resnet50")
+
+    def test_osnet_missing_weights_raises(self, tmp_path: Path) -> None:
+        # Arrange：权重路径不存在 → 显式 ExternalApiError（含路径提示），不回退 CLIP
+        ghost = tmp_path / "no_such.pth"
+        # Act / Assert
+        with pytest.raises(ExternalApiError, match="权重文件不存在"):
+            build_osnet_encoder(ghost)
+
+    def test_osnet_torchreid_not_installed_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Arrange：权重文件存在（假文件），sys.modules 置 None 模拟 torchreid 未装
+        weights = tmp_path / "w.pth"
+        weights.write_bytes(b"fake-weights")
+        monkeypatch.setitem(sys.modules, "torchreid", None)
+        # Act / Assert：ImportError → ExternalApiError（含安装提示）
+        with pytest.raises(ExternalApiError, match="pip install deep-person-reid"):
+            build_osnet_encoder(weights)
+
+
+class TestParseArgsModel:
+    """--model / --reid-weights CLI 解析：默认值、合法值、非法值拒绝。"""
+
+    _BASE: ClassVar[list[str]] = ["--candidates", "c.json", "--out", "o.json"]
+
+    def test_default_model_is_clip(self) -> None:
+        ns = _parse_args(self._BASE)
+        assert ns.model == "clip"
+        assert ns.reid_weights == OSNET_WEIGHTS_PATH
+
+    def test_osnet_model_accepted(self, tmp_path: Path) -> None:
+        ns = _parse_args(
+            [*self._BASE, "--model", "osnet_x1_0", "--reid-weights", str(tmp_path / "w.pth")]
+        )
+        assert ns.model == "osnet_x1_0"
+        assert ns.reid_weights == tmp_path / "w.pth"
+
+    def test_invalid_model_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--model", "resnet50"])
 
 
 class TestEvaluatePurity:
@@ -442,6 +546,28 @@ class TestMainCli:
             {"cluster_id": 1, "keys": ["a.mp4#1.0", "b.mp4#2.0"], "rep_crops": ["a.jpg"]}
         ]
         assert result["unclustered"] == ["c.mp4#3.0"]
+
+    def test_end_to_end_osnet_cached(self, tmp_path: Path) -> None:
+        # Arrange：--model osnet_x1_0 + 全缓存命中（osnet tag 前缀键）→ 不 import torchreid
+        cand_dir = tmp_path / "scorers"
+        cand_dir.mkdir(parents=True)
+        (cand_dir / "a.jpg").write_bytes(b"fake-a")
+        cand = _write_candidates(
+            cand_dir / "scorer_candidates.json",
+            [_entry("a.mp4#1.0", crops=["a.jpg"], crop_scores=[0.9])],
+        )
+        out = tmp_path / "scorer_clusters.json"
+        cache = {f"{MODEL_TAG_OSNET}:{file_md5(cand_dir / 'a.jpg')}": [1.0, 0.0]}
+        save_clip_cache(out.parent / "clip_cache.json", MODEL_TAG_OSNET, cache)
+        # Act
+        rc = main(["--candidates", str(cand), "--out", str(out), "--model", "osnet_x1_0"])
+        # Assert：产物 model 字段记实际后端 tag
+        assert rc == 0
+        result = json.loads(out.read_text(encoding="utf-8"))
+        assert result["model"] == MODEL_TAG_OSNET
+        assert result["clusters"] == [
+            {"cluster_id": 1, "keys": ["a.mp4#1.0"], "rep_crops": ["a.jpg"]}
+        ]
 
     def test_evaluate_prints_report(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         # Arrange
