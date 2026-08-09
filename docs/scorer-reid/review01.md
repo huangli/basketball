@@ -65,3 +65,52 @@ roster.py 现状代码与 docs/scorer-cluster/review01.md 标定曲线核查）
 
 阻断问题全部修订完毕，三件套可进入实施（Phase A spike 先行，
 torchreid 装不上即停工报立哥）。
+
+---
+
+## 附：实跑标定记录（2026-08-09，Phase A~D 全部实跑后补记）
+
+### Phase A spike：通过
+
+- PyPI 上没有 deep-person-reid（GitHub 仓名），实际包名 **torchreid**
+  （0.2.5，清华镜像可装；隐性依赖 tensorboard 需补装）
+- 权重：torchreid 自带只有 ImageNet 预训练；**Market1501 训练权重**按
+  官方 MODEL_ZOO 的 Google Drive 链接另下载（10.4MB），存
+  `models/osnet_x1_0_market1501.pth`（Market rank-1 94.2%），
+  加载推理验证通过（512 维，classifier 键丢弃属预期）
+
+### Phase B3 标定：OSNet vs CLIP 双 linkage 曲线（20260722 三批次 104 球，99 键入统）
+
+| linkage | threshold | OSNet 簇数/纯度 | CLIP 簇数/纯度（对照） |
+|---------|-----------|----------------|----------------------|
+| average | 0.20 | 14 / 30.3% | 20 / 32.3% |
+| average | 0.15 | 33 / 45.5% | 42 / 48.5% |
+| average | 0.10 | 66 / 71.7% | 77 / 82.8% |
+| complete | 0.25 | 16 / 31.3% | 18 / 33.3% |
+| complete | 0.20 | 32 / 42.4% | 30 / 42.4% |
+| complete | 0.15 | 43 / 51.5% | 52 / 62.6% |
+| complete | 0.10 | 69 / 72.7% | 81 / 85.9% |
+
+**结论：≤30 簇 ≥85% 目标未达成，OSNet 与 CLIP 基本持平甚至略差**——
+Market1501 是街景监控域（近景正立全身），我们的裁图是俯视远景、运动模糊、
+遮挡频繁的球馆画面，域差距吃掉了专用模型优势。按降级出口执行：
+**簇级功能维持 CLIP complete@0.15 定稿不变**，OSNet 后端保留可用
+（--model osnet_x1_0），不推荐默认。审查代理的预期管理（"不达标是基准
+情形"）应验。
+
+后续真正值得试的：照片库人脸 embedding（等立哥供照）——人脸是跨场景
+最稳定的特征；全身外观路线（CLIP/OSNet）在本素材上已到天花板。
+
+### Phase C 实跑：跳票模式验证通过
+
+- 批次 3（51 球）：旧 goal-key 缓存迁移为 crops[0] md5 重键，
+  无 entry 对应的旧键（removed 球）原样保留；**新识别 0 张 / 0 tokens**，
+  回填无丢失
+- 迁移后旧键仍保留一轮（spec Boundaries），后续人工清理
+
+### 实跑发现并修复的 bug
+
+- **clip_cache 跨后端互冲**（阻断级）：load_clip_cache 按当前模型前缀过滤
+  再整体回写，OSNet 首跑把 CLIP 的 176 条 embedding 静默冲掉。已修为
+  全量保留（键前缀天然隔离互不命中），并补回归测试。修复后双后端
+  各 176 条共存验证通过

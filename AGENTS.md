@@ -15,9 +15,9 @@
 ## 环境（已验证）
 
 - `ffmpeg` / `ffprobe` 8.1.2（gyan.dev 完整版）在 PATH 中，含 NVENC/x264，直接可用
-- Python 3.14.3 已装；已装 ultralytics 8.4.104 + torch 2.13.0 (CPU) + opencv 5.0.0 + numpy 2.4.3 + pillow 12.3 + open_clip_torch 3.3.0 + scikit-learn 1.9.0 + transformers + timm 1.0.28 + httpx（pip 清华镜像源）
+- Python 3.14.3 已装；已装 ultralytics 8.4.104 + torch 2.13.0 (CPU) + opencv 5.0.0 + numpy 2.4.3 + pillow 12.3 + open_clip_torch 3.3.0 + scikit-learn 1.9.0 + transformers + timm 1.0.28 + httpx + torchreid 0.2.5 + tensorboard（pip 清华镜像源；torchreid 的 PyPI 名是 torchreid 非 deep-person-reid）
 - **硬件**：AMD Ryzen AI 9 HX 370 + Radeon 890M 核显（**无独立 N 卡**），32GB 内存；YOLO CPU 推理约 1.1s/帧（1920 宽 @ imgsz1280，双模型）
-- **模型**：`models/` 目录下 `abdullahtarek_ball.pt`（球检测主力）+ `yolov8n.pt`（人物，持球排除用）；`basketball_yolo11.pt`（Lumos-88，已证假阳性爆炸）、`446f6e6e79_yolo11m.pt`（已证不可用）留档
+- **模型**：`models/` 目录下 `abdullahtarek_ball.pt`（球检测主力）+ `yolov8n.pt`（人物，持球排除用）；`osnet_x1_0_market1501.pth`（行人 Re-ID，认人聚类备用后端，Market1501 训练，官方 MODEL_ZOO Google Drive 链接下载）；`basketball_yolo11.pt`（Lumos-88，已证假阳性爆炸）、`446f6e6e79_yolo11m.pt`（已证不可用）留档
 - 网络：代理在 `127.0.0.1:7897`（Clash）；pip 用清华镜像；HF 下载需 `HTTPS_PROXY=http://127.0.0.1:7897`
 - Shell 是 Windows PowerShell 7+；本机 Kimi Code CLI（Kimi Code 托管订阅，凭证 `~/.kimi-code/credentials/kimi-code.json`，**token 有效期仅 900s**，脚本每次调用前重读）
 - **VLM**：Kimi K3（经 Kimi Code 订阅 `api.kimi.com/coding/v1`，支持图片输入）；**生产流水线已不用**（2026-08-01 起下线，见工作流约定），留作未来多模型试验；用法与坑见方案文档 §2/§3.5/§5
@@ -64,7 +64,7 @@
 - **批次 3（第 151–300 视频）**：151 视频 → 913 候选 → 234 事件 → 标 61 J → 去重鉴定 **51 球** → `output/20260722_3/`；K3 下线后首个纯"机器排序+人裁判"批次；去重明细与系统性发现（同球双 J、大疆尾截短特性、文件名时间戳重叠）见主文档 §4 批次 3 节
 - **合集口径（2026-08-08 立哥定）**：不出全员总合集；分队合集按队伍出，但依赖认人（批次 2/3 均未标 scorer），立哥暂不认人——要分队合集时先跑认人流程
 - **标注页提效已交付（2026-08-09 立哥验收通过）**：dedup-same-goal（疑似同回合组标签 + 导出多 J 确认兜底，批次 3 回放 8 组同球双 J 全命中）+ label-speedup（组内新判 J 一键跳过同组、页面倍速控制——默认有效 2x，S 键加 4x；回放自动跳过 15 条、51 球零误标）；四件套在 `docs/dedup-same-goal/`、`docs/label-speedup/`
-- **认人流程（已固化）**：crop_scorers.py（轨迹法定位+多裁选帧+串人守卫+颜色分队预填）→（可选）cluster_scorers.py（CLIP 聚类，定稿 complete@0.15 需显式传 `--linkage complete --threshold 0.15`、非脚本默认；20260722 实测纯度 62.6%/52 簇，仅作分组预填不终裁）→ gen_scorer_page.py（确认页，--clusters 簇级一次选人+逐球覆盖，裁图仅辅助、视频为终裁）→ 立哥确认导出 roster.json → build_highlight.py --roster/--scorer/--team 出合集（命名见剪辑规格）；四件套在 `docs/scorer/`（spec/plan/todo/review01-03）与 `docs/scorer-cluster/`（认人提效，review01 含标定曲线）
+- **认人流程（已固化）**：crop_scorers.py（轨迹法定位+多裁选帧+串人守卫+颜色分队预填；--read-numbers 读号已升级为多帧众数投票，旧数据回填用 --numbers-cache-only 零新调用，新场次全量模式 --max-reads 按球数×3 估）→（可选）cluster_scorers.py（聚类仅作分组预填不终裁；**CLIP complete@0.15 为定稿**，需显式传 `--linkage complete --threshold 0.15`；OSNet Re-ID 后端 --model osnet_x1_0 已接入但 20260722 标定未超 CLIP——51.5% vs 62.6%，备用不推荐；曲线见 docs/scorer-reid/review01）→ gen_scorer_page.py（确认页，--clusters 簇级一次选人+逐球覆盖，--players-file 注入号码→姓名名单如 work/20260722/players.json，裁图仅辅助、视频为终裁）→ 立哥确认导出 roster.json → build_highlight.py --roster/--scorer/--team 出合集（命名见剪辑规格）；四件套在 `docs/scorer/`、`docs/scorer-cluster/`、`docs/scorer-reid/`
 - **机器裁判方向终结（已证伪）**：K3 事件级判定、豆包视频模型慢放判定均撞"盲区像素证据弱"同一堵墙；**架构定位 = 机器排序 + 人裁判**；K3 判定 2026-08-01 起下线
 - **自动剔除长期关闭**：0 漏检宣称 99% 召回需 299 独立正样本 ≈15 场次；NO 只排序不剔除
 - 球员照片库待立哥新增（到手后可上人脸识别预填）；新比赛素材待立哥加入（干完他会删旧素材）

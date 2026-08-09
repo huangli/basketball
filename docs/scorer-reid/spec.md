@@ -44,7 +44,8 @@ export PYTHONIOENCODING=utf-8 && python -m ruff format scripts tests && \
   python -m ruff check --fix scripts tests && python -m pytest -q
 
 # 依赖验证（Phase A spike，先跑这个再写后端）
-pip install deep-person-reid   # 清华镜像
+# 勘误（2026-08-09 实跑）：PyPI 没有 deep-person-reid，实际包名是 torchreid
+pip install torchreid tensorboard   # 清华镜像；tensorboard 是其隐性依赖
 python -c "import torchreid; print(torchreid.__version__)"
 
 # Re-ID 聚类 + 纯度自检（--model 切换后端，缓存键含 model 互不污染）
