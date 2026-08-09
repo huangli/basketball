@@ -70,9 +70,15 @@
     （黑21 拆分 大斌/王敏龙、白22 并入小朱、0544 改归蓝色27）后重出验收
   - Files: 无新代码（work/20260722/scorers/、roster.json、output/20260722/）
 
-- [x] T7（可选，先问立哥）：号码识别试点
-  - 2026-08-08 立哥定："以后很少会出现同样号码" → 号码可作为可靠预填特征，
-    但本批次不启用；留待后续批次评估
+- [x] T7: 号码识别试点（2026-08-08 立哥拍板启用，K3 非豆包——豆包余额可能不足）
+  - Acceptance: --read-numbers 走 number_cache.json 幂等；≤20 次新调用/轮；
+    K3 读裁图背号+颜色+背后名字（严格 JSON）；scorer_candidates.json 每条加
+    number_guess；确认页预填 号码匹配>颜色、同号多人标"号码歧义"不预填；
+    预填准确率告知立哥
+  - Verify: 缓存命中不重复扣额度；17 球逐球对照真值（1948=大斌黑21、1040=王敏龙黑21、
+    2034=小陈白T、0552/1056/1342=熊志鹏白、0544=蓝色27）
+  - Files: scripts/crop_scorers.py, scripts/gen_scorer_page.py,
+    tests/test_crop_scorers.py, tests/test_gen_scorer_page.py（M）
 
 - [x] T8: 收尾
   - Acceptance: spec-reviewer 审 plan/todo/最终 diff；AGENTS.md 状态同步；git 提交（立哥确认）

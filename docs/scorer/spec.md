@@ -16,7 +16,7 @@
 
 1. **投篮者定位**（零成本）：进球锚点前窗口内，mot_cache 球轨迹与人框关联找出投篮者，裁图。
 2. **分队颜色**（零成本）：投篮者躯干主色 → 黑/白/便服。业余局按颜色分队，语义天然成立。
-3. **号码识别**（可选，豆包 ~¥1/批）：读投篮者背号 → 预填"疑似黑21"。
+3. **号码识别**（可选，K3 走订阅额度）：读投篮者背号 → 预填"疑似黑21"。
    球衣互换时预填可能错，确认页裁图在立哥眼前，错了一键改。
 
 成功 = 立哥在认人确认页上每个进球 1~2 秒完成归属，导出 roster.json 后一条命令出个人/分队合集。
@@ -24,7 +24,7 @@
 ## Tech Stack
 
 Python 3.14.3（标准库 + numpy/PIL；scikit-learn 已装备用）；ffmpeg；
-豆包 seed-2.0-pro（可选号码识别，ARK_API_KEY 走环境变量不入文件）。无新依赖。
+Kimi K3（可选号码识别，复用 vlm_filter 的 OAuth 凭证机制，不落文件）。无新依赖。
 
 ## Commands
 
@@ -151,7 +151,7 @@ pytest 纯函数单测（不碰真帧/网络/API）：
 - Always：ruff+pytest 全绿再交付；roster 每场独立且 confirmed=true 才用于合成；
   预填只是建议，确认页必须同时显示裁图让立哥目检；
   本 spec 已授权 build_highlight 的 --roster/--team/--scorer 语义改动（真值表范围）
-- Ask first：号码识别调用豆包（>20 次/批）；**超出真值表范围**的 build_highlight 语义改动；
+- Ask first：号码识别单批超 20 次新调用；**超出真值表范围**的 build_highlight 语义改动；
   把 roster 写进 goals.json（当前设计分离，不合并）
 - Never：写真名进代码/测试（名单只从 --players/--players-file/players.json 注入）；
   修改 gen_review_clips.py / gen_label_page.py；改动批次 1 封存的 goals.json；
@@ -171,6 +171,6 @@ pytest 纯函数单测（不碰真帧/网络/API）：
 
 1. 本场球员名单（号码/特征 → 称呼 + 队别）——阻塞球员按钮；无名单时确认页退化为
    自由文本输入 + 颜色预填（聚类分组留待后续）
-2. 号码识别是否启用（豆包 ~¥1/批）——默认不启用，颜色分队免费先行
+2. 号码识别：2026-08-08 立哥拍板启用（K3，订阅额度；批次 1 实测读号 5/5 忠实无幻觉）
 3. 便服球员默认不进任何分队合集，只进全员与个人合集
 4. 批次 1/批次 2 roster 合并走 --roster-existing（见 Commands），players 以新名单为准

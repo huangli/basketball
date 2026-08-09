@@ -9,15 +9,19 @@ candidates 锚点索引匹配、裁图外扩 20% 且短边 ≥400px、颜色三�
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from PIL import Image
 
 from crop_scorers import (
     MotCache,
+    NumberGuess,
     _try_cut_preview,
+    apply_number_reading,
     classify_team,
     crop_and_save,
     cut_preview_clip,
@@ -25,15 +29,20 @@ from crop_scorers import (
     find_held_box,
     load_candidates_index,
     load_mot_cache,
+    load_number_cache,
     locate_scorer,
     main,
     match_anchor_xy,
+    number_guess_from_dict,
+    parse_number_answer,
     preview_window,
+    read_number,
+    save_number_cache,
     select_goal_track,
     start_nearest_box,
     track_window_dets,
 )
-from errors import BasketballPipelineError, SchemaError
+from errors import BasketballPipelineError, ExternalApiError, SchemaError
 from geom import Box
 from mot_candidates import Detection, Track
 
@@ -788,3 +797,218 @@ class TestCliPreviewClip:
         payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
         assert all(e["clip"] == "" for e in payload["candidates"])
         assert payload["candidates"][0]["status"] == "OK"
+
+
+class _FakeResp:
+    """伪造 httpx.Response（号码识别测试用，不碰网络）。"""
+
+    def __init__(self, status: int, payload: dict | None = None, text: str = "") -> None:
+        self.status_code = status
+        self._payload = payload if payload is not None else {}
+        self.text = text
+
+    def json(self) -> dict:
+        """返回预设响应体。"""
+        return self._payload
+
+
+class _FakeClient:
+    """伪造 httpx.Client：按脚本依次返回响应或抛异常。"""
+
+    def __init__(self, script: list[object]) -> None:
+        self.script = list(script)
+        self.calls = 0
+
+    def post(self, url: str, **kwargs: object) -> _FakeResp:
+        """按脚本返回；异常项则抛出。"""
+        item = self.script[min(self.calls, len(self.script) - 1)]
+        self.calls += 1
+        if isinstance(item, Exception):
+            raise item
+        assert isinstance(item, _FakeResp)
+        return item
+
+
+def _k3_ok_payload(guess_json: str, total_tokens: int = 100) -> dict:
+    """构造 K3 200 响应体（content 为给定 JSON 文本）。"""
+    return {
+        "choices": [{"message": {"content": guess_json}}],
+        "usage": {"total_tokens": total_tokens},
+    }
+
+
+def _crop_file(tmp_path: Path) -> Path:
+    """造一张真实裁图文件。"""
+    p = tmp_path / "crop.jpg"
+    Image.new("RGB", (100, 100), (30, 30, 30)).save(p)
+    return p
+
+
+class TestParseNumberAnswer:
+    """号码识别回复解析：容错与字段归一。"""
+
+    def test_good_json(self) -> None:
+        # Arrange / Act
+        guess = parse_number_answer(
+            '{"number": "21", "color": "黑", "name_text": "大斌", "confidence": "high"}'
+        )
+        # Assert
+        assert guess == NumberGuess(number="21", color="黑", name_text="大斌", confidence="high")
+
+    def test_markdown_fence_and_prose(self) -> None:
+        # Arrange：带围栏和前后废话
+        raw = '好的，结果如下：\n```json\n{"number": 7, "color": "白", "name_text": null, '
+        raw += '"confidence": "low"}\n```\n以上。'
+        # Act
+        guess = parse_number_answer(raw)
+        # Assert：int 号码归一为 str
+        assert guess is not None
+        assert guess.number == "7"
+        assert guess.confidence == "low"
+
+    def test_bad_json_returns_none(self) -> None:
+        # Arrange / Act / Assert
+        assert parse_number_answer("这不是 JSON") is None
+        assert parse_number_answer('{"number": "21", 坏掉') is None
+
+    def test_field_normalization(self) -> None:
+        # Arrange / Act
+        guess = number_guess_from_dict(
+            {"number": "2a", "color": "灰", "name_text": "", "confidence": "LOW"}
+        )
+        # Assert：非纯数字号码→None；非法颜色→None；空名字→None；非 high→low
+        assert guess is not None
+        assert guess.number is None
+        assert guess.color is None
+        assert guess.name_text is None
+        assert guess.confidence == "low"
+
+    def test_non_dict_returns_none(self) -> None:
+        # Arrange / Act / Assert
+        assert number_guess_from_dict([1, 2]) is None
+        assert number_guess_from_dict("x") is None
+
+
+class TestNumberCache:
+    """number_cache.json 读写幂等与版本失效。"""
+
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        # Arrange
+        path = tmp_path / "number_cache.json"
+        results = {"a.mp4#4.1": {"number": "21", "color": "黑", "confidence": "high"}}
+        # Act
+        save_number_cache(path, results)
+        got = load_number_cache(path)
+        # Assert
+        assert got["a.mp4#4.1"]["number"] == "21"
+
+    def test_missing_file_empty(self, tmp_path: Path) -> None:
+        # Arrange / Act / Assert
+        assert load_number_cache(tmp_path / "nope.json") == {}
+
+    def test_prompt_version_mismatch_invalidates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：写入后改 prompt 版本常量 → 缓存作废
+        path = tmp_path / "number_cache.json"
+        save_number_cache(path, {"k": {"number": "21"}})
+        monkeypatch.setattr("crop_scorers.NUMBER_PROMPT_VERSION", "number-v999")
+        # Act / Assert
+        assert load_number_cache(path) == {}
+
+
+class TestReadNumber:
+    """read_number 调用容错（假 client，不碰网络）。"""
+
+    def test_success(self, tmp_path: Path) -> None:
+        # Arrange
+        client = _FakeClient(
+            [_FakeResp(200, _k3_ok_payload('{"number":"21","color":"黑","confidence":"high"}'))]
+        )
+        # Act
+        guess, tokens, err = read_number(client, crop_path=_crop_file(tmp_path), key="k")  # type: ignore[arg-type]
+        # Assert
+        assert err == ""
+        assert guess is not None and guess.number == "21"
+        assert tokens == 100
+        assert client.calls == 1
+
+    def test_network_error_tolerated(self, tmp_path: Path) -> None:
+        # Arrange：全程网络错误（重试耗尽）
+        client = _FakeClient([httpx.ConnectError("boom")])
+        # Act
+        guess, _, err = read_number(client, crop_path=_crop_file(tmp_path), key="k")  # type: ignore[arg-type]
+        # Assert：不炸，返回错误摘要；重试口径 = K3_HTTP_RETRY+1 次
+        assert guess is None
+        assert "网络错误" in err
+        assert client.calls == 3
+
+    def test_401_reload_token_then_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：先 401 后 200；load_token/sleep 打桩（不碰真凭证、不真睡）
+        monkeypatch.setattr("crop_scorers.load_token", lambda force=False: "tok")
+        monkeypatch.setattr(time, "sleep", lambda *_: None)
+        client = _FakeClient(
+            [
+                _FakeResp(401, text="unauthorized"),
+                _FakeResp(200, _k3_ok_payload('{"number":null,"color":"白","confidence":"low"}')),
+            ]
+        )
+        # Act
+        guess, _, err = read_number(client, crop_path=_crop_file(tmp_path), key="k")  # type: ignore[arg-type]
+        # Assert
+        assert err == ""
+        assert guess is not None and guess.number is None and guess.color == "白"
+        assert client.calls == 2
+
+    def test_unparseable_reply_is_err(self, tmp_path: Path) -> None:
+        # Arrange：200 但回复不是号码 JSON
+        client = _FakeClient([_FakeResp(200, _k3_ok_payload("看不清"))])
+        # Act
+        guess, _, err = read_number(client, crop_path=_crop_file(tmp_path), key="k")  # type: ignore[arg-type]
+        # Assert
+        assert guess is None
+        assert "解析" in err
+
+    def test_missing_crop_is_err(self, tmp_path: Path) -> None:
+        # Arrange / Act
+        guess, _, err = read_number(
+            _FakeClient([]),
+            crop_path=tmp_path / "ghost.jpg",
+            key="k",  # type: ignore[arg-type]
+        )
+        # Assert：裁图缺失不发请求
+        assert guess is None
+        assert "读取裁图失败" in err
+
+
+class TestApplyNumberReading:
+    """apply_number_reading：>20 新调用拒绝、缓存命中零调用、失败不写缓存。"""
+
+    def _entries(self, n: int) -> list[dict[str, Any]]:
+        """造 n 条 OK 候选（crop 非空）。"""
+        return [
+            {"key": f"a.mp4#{i}.0", "status": "OK", "crop": "c.jpg", "number_guess": None}
+            for i in range(n)
+        ]
+
+    def test_over_20_fresh_rejected(self, tmp_path: Path) -> None:
+        # Arrange / Act / Assert：21 张新识别 > 20 → 显式失败（spec：先问立哥）
+        with pytest.raises(ExternalApiError, match="问立哥"):
+            apply_number_reading(self._entries(21), tmp_path)
+
+    def test_cache_hit_no_http(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Arrange：缓存已有结果；load_token 打桩（预检不碰真凭证）
+        monkeypatch.setattr("crop_scorers.load_token", lambda force=False: "tok")
+        save_number_cache(
+            tmp_path / "number_cache.json",
+            {"a.mp4#0.0": {"number": "21", "color": "黑", "confidence": "high"}},
+        )
+        entries = self._entries(1)
+        # Act
+        n_fresh, tokens = apply_number_reading(entries, tmp_path)
+        # Assert：零新调用，number_guess 从缓存补齐
+        assert n_fresh == 0
+        assert tokens == 0
+        assert entries[0]["number_guess"]["number"] == "21"

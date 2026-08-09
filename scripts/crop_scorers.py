@@ -24,23 +24,30 @@ t0/cx/cy，goals 锚点与其 dt=0 匹配）最近的轨迹 = 进球轨迹；沿
 往回放找最后一个"球心严格落在某人框内"的轨迹点 → 该人框 = 投篮者（最后持球者）；
 整轨无持球点 → 取轨迹起点时刻的最近人框；轨迹不存在/端点离锚点太远 → SKIP。
 SKIP 球无投篮者定位但仍切预览片段（立哥凭视频手选）。
-号码识别（--read-numbers，spec T7）本轮不做。
+号码识别（--read-numbers，spec T7，2026-08-08 立哥拍板启用）：K3 读裁图背号
+（复用 vlm_filter 的 load_token/crop_to_b64/重试口径），结果落 number_cache.json
+幂等不重复扣额度。
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
+import re
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import numpy as np
 from PIL import Image
 
-from errors import BasketballPipelineError, SchemaError
+from errors import BasketballPipelineError, ExternalApiError, SchemaError
 from geom import Box
 from mot_candidates import Detection, Track, euclidean, run_mot
 from pipe_common import (
@@ -51,6 +58,22 @@ from pipe_common import (
     run_ffmpeg,
 )
 from roster import fid_of, format_key
+from vlm_filter import (
+    API_URL as K3_API_URL,
+)
+from vlm_filter import (
+    HTTP_RETRY as K3_HTTP_RETRY,
+)
+from vlm_filter import (
+    HTTP_TIMEOUT_SEC as K3_HTTP_TIMEOUT_SEC,
+)
+from vlm_filter import (
+    MODEL as K3_MODEL,
+)
+from vlm_filter import (
+    crop_to_b64,
+    load_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +109,20 @@ TH_SAT: int = 70  # 白队的饱和度上限（彩色亮部/肤色不归白）
 MIN_BLACK_FRACTION: float = 0.25  # 黑色像素占比下限，不足（含近阈混杂）归"便服"
 MIN_WHITE_FRACTION: float = 0.20  # 白色像素占比下限，不足（含近阈混杂）归"便服"
 
+# ---- 号码识别参数（--read-numbers，spec T7；K3 读裁图背号，走订阅额度无需 key） ----
+NUMBER_PROMPT_VERSION: str = "number-v1"  # prompt 语义变更即升版本，旧缓存作废（幂等可追溯）
+MAX_NUMBER_READS_PER_RUN: int = 20  # spec：单次运行新调用 >20 次须先问立哥（缓存命中不计）
+NUMBER_PROMPT: str = (
+    "这是一张室内篮球场球员的照片裁图（投篮者）。请识别图中主要球员的："
+    "1）球衣号码（阿拉伯数字字符串，看不清或没有给 null）；"
+    "2）球衣颜色（黑/白/蓝/其他 四选一）；"
+    "3）球衣背后印的名字文字（如有请照抄，没有或看不清给 null）。"
+    '严格只输出一个 JSON 对象，不要输出任何其他内容：{"number": "21" 或 null, '
+    '"color": "黑"|"白"|"蓝"|"其他", "name_text": "..." 或 null, '
+    '"confidence": "high"|"low"}。'
+    "背对镜头但模糊、正面无号码等看不清的情况：number 给 null、confidence 给 low。"
+)
+
 STATUS_OK: str = "OK"
 STATUS_SKIP: str = "SKIP"
 
@@ -105,6 +142,258 @@ class MotCache:
     frames: int
     balls: tuple[tuple[Detection, ...], ...]
     persons: tuple[tuple[Box, ...], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NumberGuess:
+    """号码识别结果（K3 读裁图）；number/name_text 可为 None（看不清/没有）。"""
+
+    number: str | None
+    color: str | None
+    name_text: str | None
+    confidence: str  # "high" | "low"
+
+
+def number_guess_from_dict(data: Any) -> NumberGuess | None:  # noqa: ANN401 JSON 待归一
+    """把 dict（模型 JSON / 缓存条目）宽松归一为 NumberGuess；非 dict → None。
+
+    归一规则：number 取数字字符串（int/float 转 str，非数字归 None）；
+    color 只认 黑/白/蓝/其他；name_text 空串归 None；confidence 非 "high" 归 "low"。
+
+    Args:
+        data: 待归一的 dict。
+
+    Returns:
+        NumberGuess；data 非 dict 返回 None。
+    """
+    if not isinstance(data, dict):
+        return None
+    number: str | None = None
+    number_raw: Any = data.get("number")
+    if isinstance(number_raw, (int, float)) and not isinstance(number_raw, bool):
+        number = str(int(number_raw))
+    elif isinstance(number_raw, str):
+        digits: str = number_raw.strip()
+        number = digits if digits.isdigit() else None
+    color_raw: Any = data.get("color")
+    color: str | None = color_raw if color_raw in ("黑", "白", "蓝", "其他") else None
+    name_raw: Any = data.get("name_text")
+    name_text: str | None = name_raw.strip() if isinstance(name_raw, str) else None
+    if not name_text:
+        name_text = None
+    confidence: str = "high" if data.get("confidence") == "high" else "low"
+    return NumberGuess(number=number, color=color, name_text=name_text, confidence=confidence)
+
+
+def parse_number_answer(raw: str) -> NumberGuess | None:
+    """容错解析 K3 回复：提取首个 {...} JSON 块归一；坏 JSON/无 JSON → None。
+
+    Args:
+        raw: 模型回复全文（可能带 markdown 围栏或前后废话）。
+
+    Returns:
+        NumberGuess；解析失败返回 None（调用方记 ERR，不炸整批）。
+    """
+    m: re.Match[str] | None = re.search(r"\{.*\}", raw, re.DOTALL)
+    if m is None:
+        return None
+    try:
+        data: Any = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return None
+    return number_guess_from_dict(data)
+
+
+def load_number_cache(path: Path) -> dict[str, dict[str, Any]]:
+    """读 number_cache.json（幂等缓存）；缺失/损坏/prompt 版本不符 → 空（重识别）。
+
+    Args:
+        path: <out>/number_cache.json 路径。
+
+    Returns:
+        key → 缓存条目（含 number/color/name_text/confidence/usage/model/ts）。
+    """
+    if not path.exists():
+        return {}
+    payload: Any = read_json(path, what="number_cache.json")
+    if not isinstance(payload, dict):
+        logger.warning("number_cache.json 结构异常，重新开始")
+        return {}
+    meta: Any = payload.get("_meta")
+    if isinstance(meta, dict) and meta.get("prompt_version") != NUMBER_PROMPT_VERSION:
+        logger.warning("号码识别 prompt 版本变更，旧缓存作废重开")
+        return {}
+    results: Any = payload.get("results")
+    if not isinstance(results, dict):
+        return {}
+    return {str(k): v for k, v in results.items() if isinstance(v, dict)}
+
+
+def save_number_cache(path: Path, results: dict[str, dict[str, Any]]) -> None:
+    """原子写 number_cache.json（_meta 记录模型/prompt 版本/时间戳）。
+
+    Args:
+        path: <out>/number_cache.json 路径。
+        results: key → 缓存条目。
+
+    Raises:
+        OSError: IO 重试耗尽（由 atomic_write_json 抛出）。
+    """
+    payload: dict[str, Any] = {
+        "_meta": {
+            "prompt_version": NUMBER_PROMPT_VERSION,
+            "model": K3_MODEL,
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+        "results": results,
+    }
+    atomic_write_json(path, payload, what="number_cache.json")
+
+
+def read_number(
+    client: httpx.Client,
+    *,
+    crop_path: Path,
+    key: str,
+) -> tuple[NumberGuess | None, int, str]:
+    """对单张裁图调 K3 号码识别（重试口径同 vlm_filter.ask_vlm：网络错误重试、
+    401 等待后强制重载 token 重试、400/403 不重试）。
+
+    图片输入规格沿用 vlm_filter：crop_to_b64（IMG_SIZE=840 缩放 + base64 JPEG
+    data URI）；token 走 vlm_filter.load_token（OAuth 900s 临期自动重读）。
+
+    Args:
+        client: httpx 客户端（trust_env=False，直连不走代理）。
+        crop_path: 投篮者裁图路径。
+        key: 进球键（日志/缓存用）。
+
+    Returns:
+        (NumberGuess, total_tokens, 错误摘要)；成功 err=""；失败 guess=None
+        不炸整批（调用方记日志继续，失败不写缓存、下次重跑重试）。
+    """
+    try:
+        with Image.open(crop_path) as im:
+            img_b64: str = crop_to_b64(im.convert("RGB"))
+    except OSError as exc:
+        return None, 0, f"读取裁图失败: {exc}"
+    payload: dict[str, Any] = {
+        "model": K3_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": NUMBER_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                    },
+                ],
+            }
+        ],
+    }
+    last_err: str = "未知错误"
+    for _ in range(K3_HTTP_RETRY + 1):
+        try:
+            auth: dict[str, str] = {"Authorization": f"Bearer {load_token()}"}
+            resp: httpx.Response = client.post(
+                K3_API_URL, json=payload, headers=auth, timeout=K3_HTTP_TIMEOUT_SEC
+            )
+        except httpx.HTTPError as exc:
+            last_err = f"网络错误: {type(exc).__name__}: {exc}"
+            logger.warning("%s 号码识别网络错误，重试: %s", key, exc)
+            continue
+        if resp.status_code == 200:
+            try:
+                data: dict[str, Any] = resp.json()
+            except json.JSONDecodeError as exc:
+                return None, 0, f"HTTP 200 但响应非 JSON: {exc}"
+            raw: Any = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            raw_text: str = raw if isinstance(raw, str) else str(raw)
+            usage_raw: Any = data.get("usage")
+            usage_dict: dict[str, Any] = usage_raw if isinstance(usage_raw, dict) else {}
+            try:
+                tokens: int = int(usage_dict.get("total_tokens") or 0)
+            except TypeError, ValueError:
+                tokens = 0
+            guess: NumberGuess | None = parse_number_answer(raw_text)
+            if guess is None:
+                return None, tokens, "回复无法解析为号码 JSON"
+            return guess, tokens, ""
+        last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        if resp.status_code == 401:
+            logger.warning("%s 401，等待后强制重载 token 重试", key)
+            time.sleep(8)
+            load_token(force=True)
+            continue
+        if resp.status_code in (400, 403):
+            break  # 请求/权限问题，重试无意义
+    return None, 0, last_err
+
+
+def apply_number_reading(entries: list[dict[str, Any]], outdir: Path) -> tuple[int, int]:
+    """--read-numbers 主流程：对 OK 裁图逐张识别（缓存命中不重复扣额度）。
+
+    结果写入每条 entry 的 number_guess 字段；缓存落 <outdir>/number_cache.json
+    （每张识别后原子落盘，断点续跑）。单张失败记 ERROR 继续不炸整批（不写缓存，
+    下次重跑重试）。新调用 >MAX_NUMBER_READS_PER_RUN 拒绝执行（spec：>20 球须先问立哥）。
+
+    Args:
+        entries: _process_goal 产出的候选记录（原地补 number_guess）。
+        outdir: 输出目录（裁图与缓存所在）。
+
+    Returns:
+        (本次新识别张数, 本次总 token 用量)。
+
+    Raises:
+        ExternalApiError: 凭证缺失 / 超 20 张新调用。
+    """
+    targets: list[dict[str, Any]] = [e for e in entries if e["status"] == STATUS_OK and e["crop"]]
+    if not targets:
+        return 0, 0
+    cache_path: Path = outdir / "number_cache.json"
+    cache: dict[str, dict[str, Any]] = load_number_cache(cache_path)
+    fresh: list[dict[str, Any]] = [e for e in targets if e["key"] not in cache]
+    if len(fresh) > MAX_NUMBER_READS_PER_RUN:
+        raise ExternalApiError(
+            f"本轮需新识别 {len(fresh)} 张（>{MAX_NUMBER_READS_PER_RUN}），"
+            "spec 规定须先问立哥；确认后分批跑（缓存幂等）"
+        )
+    try:
+        load_token()  # 凭证预检：缺凭证尽早显式失败
+    except RuntimeError as exc:
+        raise ExternalApiError(f"K3 凭证不可用: {exc}") from exc
+    total_tokens: int = 0
+    with httpx.Client(trust_env=False) as client:  # trust_env=False：直连，不走代理
+        for e in fresh:
+            guess, tokens, err = read_number(client, crop_path=outdir / e["crop"], key=e["key"])
+            total_tokens += tokens
+            if err:
+                logger.error("号码识别失败（下次重跑重试）: %s: %s", e["key"], err)
+                continue
+            if guess is None:  # 防御：err 为空必有 guess（read_number 契约），逻辑错误显式失败
+                raise BasketballPipelineError(f"号码识别契约破坏: {e['key']} err 为空但 guess=None")
+            cache[e["key"]] = {
+                **asdict(guess),
+                "usage": {"total_tokens": tokens},
+                "model": K3_MODEL,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+            save_number_cache(cache_path, cache)
+            logger.info(
+                "号码识别: %s → number=%s color=%s name=%s conf=%s（%d tokens）",
+                e["key"],
+                guess.number,
+                guess.color,
+                guess.name_text,
+                guess.confidence,
+                tokens,
+            )
+    n_fresh: int = len(fresh)
+    for e in targets:
+        cached: dict[str, Any] | None = cache.get(e["key"])
+        guess = number_guess_from_dict(cached) if cached is not None else None
+        e["number_guess"] = asdict(guess) if guess is not None else None
+    return n_fresh, total_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -612,6 +901,7 @@ def _process_goal(
         "crop": "",
         "clip": "",
         "team_guess": None,
+        "number_guess": None,
         "votes": 0,
         "total_votes": 0,
     }
@@ -685,6 +975,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="candidates.json（可选；提供候选锚点 cx/cy 供轨迹法选轨迹，不给则退化为端点时间最近）",
     )
+    parser.add_argument(
+        "--read-numbers",
+        action="store_true",
+        help="K3 号码识别（可选；结果落 <out>/number_cache.json 幂等不重复扣额度）",
+    )
     return parser.parse_args(argv)
 
 
@@ -724,6 +1019,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             entries.append(entry)
             missing_errors += int(had_missing)
+
+        if args.read_numbers:
+            n_fresh, total_tokens = apply_number_reading(entries, args.out)
+            logger.info("号码识别完成: 新识别 %d 张，本次 %d tokens", n_fresh, total_tokens)
 
         out_json: Path = args.out / "scorer_candidates.json"
         atomic_write_json(

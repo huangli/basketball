@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,7 @@ button.sel { outline: 3px solid #fc3; }
 .team-便服 { background: #777; color: #fff; }
 .nav { background: #444; color: #fff; }
 #skip { background: #7a5c00; color: #fff; }
+#accept { background: #2c9e4b; color: #fff; }
 #export { background: #8a6d00; color: #fff; }
 #go { background: #2c9e4b; color: #fff; }
 #free { font-size: 18px; padding: 8px; width: 10em; background: #222;
@@ -86,12 +88,13 @@ small { color: #999; }
   <span id="prog"></span> <span class="badge" id="cur"></span><br>
   <span id="players"></span>
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
+  <button id="accept" style="display:none"></button>
   <button id="skip">跳过 (S)</button>
   <button class="nav" id="prev">← 上一个</button>
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未归属</button>
   <button id="export">导出 roster.json</button>
-  <br><small>按键：1-9=选球员 S=跳过 ←/→=翻页；SKIP 球标"无法定位"，可凭视频手选</small>
+  <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 ←/→=翻页；SKIP 球标"无法定位"可手选</small>
   <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster___SESSION__.json</small>
 </div>
 <img id="crop" alt="投篮者裁图">
@@ -149,8 +152,22 @@ function show(i) {
   localStorage.setItem(POSKEY, String(cur));
   let info = `第 ${cur + 1}/${ITEMS.length} 个 | 已归属 ${nDone()}/${ITEMS.length}` +
     ` | ${it.file} t=${it.anchor_time}s`;
+  // 预填优先级：号码匹配（K3 读号）> 颜色 team_guess；歧义不预填
+  const ab = document.getElementById("accept");
   if (it.status === "SKIP") info += " | 无法定位";
+  else if (it.prefill_tag) info += ` | 号码预填:${it.prefill_tag}`;
+  else if (it.prefill_note === "ambiguous") info += " | 号码歧义(同号多人)";
   else if (it.team_guess) info += ` | 颜色预填:${it.team_guess}`;
+  const ng = it.number_guess;
+  if (ng && ng.number) info += ` (读号:${ng.color || ""}${ng.number})`;
+  if (it.prefill_tag) {
+    ab.textContent = `采用 ${it.prefill_tag} (E)`;
+    ab.style.display = "inline-block";
+    ab.onclick = () => assign(it.prefill_tag);
+  } else {
+    ab.style.display = "none";
+    ab.onclick = null;
+  }
   document.getElementById("prog").textContent = info;
   document.getElementById("cur").textContent =
     marks[it.key] ? "当前归属: " + marks[it.key] : "未归属";
@@ -224,6 +241,7 @@ document.addEventListener("keydown", (ev) => {
     const idx = parseInt(k, 10) - 1;
     if (idx < PLAYERS.length) assign(PLAYERS[idx].tag);
   } else if (k === "s") skip();
+  else if (k === "e" && ITEMS.length && ITEMS[cur].prefill_tag) assign(ITEMS[cur].prefill_tag);
   else if (ev.key === "ArrowLeft") show(cur - 1);
   else if (ev.key === "ArrowRight") show(cur + 1);
 });
@@ -350,7 +368,31 @@ def _validate_candidates(data: Any, path: str) -> list[dict[str, Any]]:  # noqa:
             TEAM_CASUAL,
         ):
             raise SchemaError(f"{path}: 第{i}条候选 team_guess 非法: {c['team_guess']!r}")
+        if c.get("number_guess") is not None and not isinstance(c["number_guess"], dict):
+            raise SchemaError(f"{path}: 第{i}条候选 number_guess 不是对象")
     return candidates
+
+
+def match_players_by_number(
+    players: list[Player], number: str | None, color: str | None
+) -> list[Player]:
+    """号码+颜色匹配名单：tag 含颜色字且含独立号码数字（号码前后非数字）。
+
+    "黑"+"21" 命中 黑21-大斌 / 黑21-王敏龙（同号多人 → 调用方判歧义）；
+    "蓝"+"27" 命中 蓝色27；"2" 不会误中 "黑21"（数字边界防子串误配）。
+
+    Args:
+        players: 球员名单（--players 或已有 roster 的 players）。
+        number: K3 读出的号码字符串；None 不参与匹配。
+        color: K3 读出的颜色（黑/白/蓝/其他）；"其他"或 None 不参与匹配。
+
+    Returns:
+        命中的 Player 列表（0/1/N 个）。
+    """
+    if not number or not color or color == "其他":
+        return []
+    pat: re.Pattern[str] = re.compile(rf"(?<!\d){re.escape(number)}(?!\d)")
+    return [p for p in players if color in p.tag and pat.search(p.tag)]
 
 
 def _confirmed_goals(data: Any, goals_path: str) -> list[dict[str, Any]]:  # noqa: ANN401
@@ -466,13 +508,16 @@ def build_entries(
     events: list[dict[str, Any]] | None,
     index_dir: str,
     out_dir: str,
+    players: list[Player] | None = None,
 ) -> list[dict[str, Any]]:
     """组装页面条目：每条 = 一个 confirmed 球（按 file+anchor 排序）。
 
     以 goals.json 的 confirmed 球为全集，按 key 关联 candidates 取裁图/
-    team_guess/SKIP 状态；无候选记录（防御）按 SKIP 列出。视频优先级：
+    team_guess/number_guess/SKIP 状态；无候选记录（防御）按 SKIP 列出。视频优先级：
     candidates 的 "clip"（按进球锚点现切的预览片段，与裁图同球同时刻）＞
-    events_index 的 clip_wide 匹配（仅作无预览片段时的兜底）。
+    events_index 的 clip_wide 匹配（仅作无预览片段时的兜底）。预填优先级：
+    号码匹配（number_guess 的 number+color 与名单 tag 匹配）＞ 颜色 team_guess；
+    号码匹配到多个球员 → 不预填，prefill_note="ambiguous"（页面标"号码歧义"）。
 
     Args:
         confirmed: goals.json 的 confirmed 记录。
@@ -480,10 +525,13 @@ def build_entries(
         events: 事件列表；None 表示无 --index（无兜底视频）。
         index_dir: events_index.json 所在目录。
         out_dir: scorer.html 输出目录。
+        players: 球员名单（号码匹配用）；None/空列表则只做颜色预填。
 
     Returns:
-        页面条目列表（key/file/anchor_time/status/reason/crop/team_guess/clip）。
+        页面条目列表（key/file/anchor_time/status/reason/crop/team_guess/clip/
+        number_guess/prefill_tag/prefill_note）。
     """
+    players = players or []
     by_key: dict[str, dict[str, Any]] = {c["key"]: c for c in candidates}
     entries: list[dict[str, Any]] = []
     ordered = sorted(confirmed, key=lambda g: (g["file"], float(g["anchor_time"])))
@@ -502,6 +550,18 @@ def build_entries(
         clip: str = str(cand.get("clip", "")) if cand is not None else ""
         if not clip and events is not None:
             clip = match_clip(events, file, anchor, index_dir, out_dir)
+        # 号码预填：恰匹配一名球员才预填；多人同号 → 歧义不预填
+        number_guess: dict[str, Any] | None = cand.get("number_guess") if cand is not None else None
+        prefill_tag: str = ""
+        prefill_note: str = ""
+        if isinstance(number_guess, dict):
+            matches: list[Player] = match_players_by_number(
+                players, number_guess.get("number"), number_guess.get("color")
+            )
+            if len(matches) == 1:
+                prefill_tag = matches[0].tag
+            elif len(matches) > 1:
+                prefill_note = "ambiguous"
         entries.append(
             {
                 "key": key,
@@ -512,6 +572,9 @@ def build_entries(
                 "crop": crop,
                 "team_guess": team_guess,
                 "clip": clip,
+                "number_guess": number_guess,
+                "prefill_tag": prefill_tag,
+                "prefill_note": prefill_note,
             }
         )
     return entries
@@ -594,9 +657,6 @@ def main(argv: list[str] | None = None) -> int:
             index_dir = os.path.dirname(os.path.abspath(args.index))
 
         out_dir: str = str(scorers_path.resolve().parent)
-        entries: list[dict[str, Any]] = build_entries(
-            confirmed, candidates, events, index_dir, out_dir
-        )
 
         players: list[Player] = parse_players(args.players)
         existing_assignments: dict[str, str] = {}
@@ -618,6 +678,10 @@ def main(argv: list[str] | None = None) -> int:
                     logger.warning(
                         "已有 roster 归属的 tag 不在新名单中（导出时将自动补录）: %s", tag
                     )
+
+        entries: list[dict[str, Any]] = build_entries(
+            confirmed, candidates, events, index_dir, out_dir, players
+        )
 
         html: str = build_html(entries, players, session, existing_assignments, existing_players)
         out_path: Path = scorers_path.resolve().parent / "scorer.html"

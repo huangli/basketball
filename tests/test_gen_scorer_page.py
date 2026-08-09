@@ -19,6 +19,7 @@ from gen_scorer_page import (
     build_html,
     main,
     match_clip,
+    match_players_by_number,
     merge_assignments,
     parse_players,
     team_of_tag,
@@ -176,6 +177,98 @@ class TestMatchClip:
         assert match_clip(events, "a.mp4", 4.1, str(tmp_path), str(tmp_path)) == ""
 
 
+class TestMatchPlayersByNumber:
+    """号码+颜色 → 名单 tag 匹配（含歧义与数字边界）。"""
+
+    @staticmethod
+    def _players() -> list[Player]:
+        """本场名单（含两个黑21，供歧义分支）。"""
+        return [
+            Player(tag="黑21-大斌", name="大斌", team="黑"),
+            Player(tag="黑21-王敏龙", name="王敏龙", team="黑"),
+            Player(tag="白-熊志鹏", name="熊志鹏", team="白"),
+            Player(tag="蓝色27", name="", team="便服"),
+            Player(tag="赛文21", name="", team="便服"),
+        ]
+
+    def test_single_match(self) -> None:
+        # Arrange / Act
+        got = match_players_by_number(self._players(), "21", "黑")
+        # Assert：两个黑21 都中（调用方判歧义）
+        assert [p.tag for p in got] == ["黑21-大斌", "黑21-王敏龙"]
+
+    def test_blue_color_match(self) -> None:
+        # Arrange / Act / Assert
+        assert [p.tag for p in match_players_by_number(self._players(), "27", "蓝")] == ["蓝色27"]
+
+    def test_color_char_required(self) -> None:
+        # Arrange：赛文21 含 21 但不含黑/白/蓝 → 不中
+        # Act / Assert
+        assert match_players_by_number(self._players(), "21", "白") == []
+
+    def test_digit_boundary_no_substring(self) -> None:
+        # Arrange / Act / Assert：号码 "2" 不误中 "黑21"
+        assert match_players_by_number(self._players(), "2", "黑") == []
+
+    def test_none_or_other_color_no_match(self) -> None:
+        # Arrange / Act / Assert
+        assert match_players_by_number(self._players(), None, "黑") == []
+        assert match_players_by_number(self._players(), "21", None) == []
+        assert match_players_by_number(self._players(), "21", "其他") == []
+
+
+class TestNumberPrefill:
+    """条目预填：号码匹配 > 颜色；同号多人歧义不预填。"""
+
+    def _candidate_with_number(self, number: str | None, color: str | None) -> dict:
+        """造一条带 number_guess 的候选。"""
+        c = _candidate()
+        c["number_guess"] = {
+            "number": number,
+            "color": color,
+            "name_text": None,
+            "confidence": "high" if number else "low",
+        }
+        return c
+
+    def test_unique_number_match_prefills(self) -> None:
+        # Arrange：名单只有一个 黑21
+        players = [Player(tag="黑21-大斌", name="大斌", team="黑")]
+        # Act
+        entries = build_entries(
+            [_goal()], [self._candidate_with_number("21", "黑")], None, "", "", players
+        )
+        # Assert：号码预填压过颜色 team_guess（候选 team_guess=黑）
+        assert entries[0]["prefill_tag"] == "黑21-大斌"
+        assert entries[0]["prefill_note"] == ""
+
+    def test_ambiguous_same_number_no_prefill(self) -> None:
+        # Arrange：两个黑21 → 歧义
+        players = [
+            Player(tag="黑21-大斌", name="大斌", team="黑"),
+            Player(tag="黑21-王敏龙", name="王敏龙", team="黑"),
+        ]
+        # Act
+        entries = build_entries(
+            [_goal()], [self._candidate_with_number("21", "黑")], None, "", "", players
+        )
+        # Assert
+        assert entries[0]["prefill_tag"] == ""
+        assert entries[0]["prefill_note"] == "ambiguous"
+
+    def test_no_number_no_prefill(self) -> None:
+        # Arrange：K3 没读出号码
+        players = [Player(tag="黑21-大斌", name="大斌", team="黑")]
+        # Act
+        entries = build_entries(
+            [_goal()], [self._candidate_with_number(None, "黑")], None, "", "", players
+        )
+        # Assert：回退颜色预填（prefill 字段为空，页面显示 team_guess）
+        assert entries[0]["prefill_tag"] == ""
+        assert entries[0]["prefill_note"] == ""
+        assert entries[0]["team_guess"] == "黑"
+
+
 class TestBuildEntries:
     """页面条目组装：confirmed 球为全集，按 key 关联候选。"""
 
@@ -282,11 +375,14 @@ class TestBuildHtml:
     def test_skip_badge_and_free_text_and_keys(self) -> None:
         # Arrange / Act
         html = build_html([], [], "s", {}, {})
-        # Assert：SKIP 标"无法定位"、自由文本输入、数字键 1-9、S 跳过
+        # Assert：SKIP 标"无法定位"、自由文本输入、数字键 1-9、S 跳过、E 采用预填
         assert "无法定位" in html
         assert 'id="free"' in html
         assert '"1" && k <= "9"' in html
         assert '"s"' in html
+        assert 'id="accept"' in html
+        assert '"e"' in html
+        assert "号码歧义" in html
 
     def test_existing_assignments_inlined(self) -> None:
         # Arrange / Act
