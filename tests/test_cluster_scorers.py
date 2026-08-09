@@ -313,6 +313,23 @@ class TestClusterKeys:
         with pytest.raises(ValueError):
             cluster_keys(["a"], np.empty((0, 2)), 0.25)
 
+    def test_invalid_linkage_raises(self) -> None:
+        # Arrange / Act / Assert：非法 linkage 显式失败
+        matrix = np.eye(2)
+        with pytest.raises(ValueError, match="linkage"):
+            cluster_keys(["a", "b"], matrix, 0.25, linkage="ward")
+
+    def test_complete_linkage_two_piles(self) -> None:
+        # Arrange：同 test_two_piles 数据，complete linkage 同样应分两堆
+        e1 = np.asarray([1.0, 0.0])
+        e2 = np.asarray([0.0, 1.0])
+        near1 = l2_normalize(np.asarray([1.0, 0.1]))
+        near2 = l2_normalize(np.asarray([0.1, 1.0]))
+        matrix = np.stack([e1, near1, e2, near2])
+        # Act / Assert
+        clusters = cluster_keys(["a", "b", "c", "d"], matrix, 0.25, linkage="complete")
+        assert sorted(sorted(c) for c in clusters) == [["a", "b"], ["c", "d"]]
+
 
 class TestBuildResult:
     """scorer_clusters.json 载荷：契约字段、rep_crops 选质量最高球的前 2 张。"""

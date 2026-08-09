@@ -415,25 +415,33 @@ def embed_goals(
     return embeddings, failed
 
 
-def cluster_keys(keys: list[str], matrix: np.ndarray, threshold: float) -> list[list[str]]:
-    """凝聚聚类：cosine 距离 + average linkage + distance_threshold（不定簇数）。
+LINKAGES: tuple[str, ...] = ("average", "complete", "single")  # --linkage 合法值
+
+
+def cluster_keys(
+    keys: list[str], matrix: np.ndarray, threshold: float, linkage: str = "average"
+) -> list[list[str]]:
+    """凝聚聚类：cosine 距离 + distance_threshold（不定簇数）。
 
     Args:
         keys: 与 matrix 行对齐的进球键。
         matrix: (n, dim) embedding 矩阵（行已 L2 归一化；cosine 度量不依赖归一，
             归一仅为人读与缓存口径一致）。
         threshold: cosine 距离阈值（distance_threshold）。
+        linkage: 连接方式（average/complete/single；complete 簇更紧致，标定用）。
 
     Returns:
         簇列表（簇内键按输入序；簇序 = 各簇首键的输入序）；keys 为空返回空列表。
 
     Raises:
-        ValueError: keys 与 matrix 行数不一致 / threshold 不在 (0, 2]。
+        ValueError: keys 与 matrix 行数不一致 / threshold 不在 (0, 2] / linkage 非法。
     """
     if len(keys) != matrix.shape[0]:
         raise ValueError(f"keys 数({len(keys)})与 embedding 行数({matrix.shape[0]})不一致")
     if not 0.0 < threshold <= MAX_THRESHOLD:
         raise ValueError(f"threshold 须在 (0, {MAX_THRESHOLD}]，实际 {threshold}")
+    if linkage not in LINKAGES:
+        raise ValueError(f"linkage 须为 {LINKAGES} 之一，实际 {linkage!r}")
     if not keys:
         return []
     if len(keys) == 1:
@@ -441,7 +449,7 @@ def cluster_keys(keys: list[str], matrix: np.ndarray, threshold: float) -> list[
     labels: np.ndarray = AgglomerativeClustering(
         n_clusters=None,
         metric="cosine",
-        linkage="average",
+        linkage=linkage,
         distance_threshold=threshold,
     ).fit_predict(matrix)
     order: list[int] = sorted(set(int(x) for x in labels), key=lambda lb: list(labels).index(lb))
@@ -573,6 +581,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--roster", type=Path, default=None, help="roster.json 路径（--evaluate 用）"
     )
+    parser.add_argument(
+        "--linkage",
+        choices=["average", "complete", "single"],
+        default="average",
+        help="凝聚聚类连接方式（默认 %(default)s；complete 簇更紧致，标定对比用）",
+    )
     ns = parser.parse_args(argv)
     if not 0.0 < ns.threshold <= MAX_THRESHOLD:
         parser.error(f"--threshold 须在 (0, {MAX_THRESHOLD}]，实际 {ns.threshold}")
@@ -632,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
 
         keys: list[str] = list(embeddings)
         matrix: np.ndarray = np.stack([embeddings[k] for k in keys]) if keys else np.empty((0, 0))
-        clusters_keys: list[list[str]] = cluster_keys(keys, matrix, args.threshold)
+        clusters_keys: list[list[str]] = cluster_keys(keys, matrix, args.threshold, args.linkage)
         result: dict[str, Any] = build_result(goals, embeddings, clusters_keys, args.threshold)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(args.out, result, what="scorer_clusters.json")
