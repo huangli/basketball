@@ -330,22 +330,26 @@ def read_number(
     return None, 0, last_err
 
 
-def apply_number_reading(entries: list[dict[str, Any]], outdir: Path) -> tuple[int, int]:
+def apply_number_reading(
+    entries: list[dict[str, Any]], outdir: Path, max_reads: int = MAX_NUMBER_READS_PER_RUN
+) -> tuple[int, int]:
     """--read-numbers 主流程：对 OK 裁图逐张识别（缓存命中不重复扣额度）。
 
     结果写入每条 entry 的 number_guess 字段；缓存落 <outdir>/number_cache.json
     （每张识别后原子落盘，断点续跑）。单张失败记 ERROR 继续不炸整批（不写缓存，
-    下次重跑重试）。新调用 >MAX_NUMBER_READS_PER_RUN 拒绝执行（spec：>20 球须先问立哥）。
+    下次重跑重试）。新调用 >max_reads 拒绝执行（默认 20；spec：>20 球须先问立哥，
+    立哥批准后可用 --max-reads 显式放宽）。
 
     Args:
         entries: _process_goal 产出的候选记录（原地补 number_guess）。
         outdir: 输出目录（裁图与缓存所在）。
+        max_reads: 单次运行允许的最大新识别张数。
 
     Returns:
         (本次新识别张数, 本次总 token 用量)。
 
     Raises:
-        ExternalApiError: 凭证缺失 / 超 20 张新调用。
+        ExternalApiError: 凭证缺失 / 超 max_reads 张新调用。
     """
     targets: list[dict[str, Any]] = [e for e in entries if e["status"] == STATUS_OK and e["crop"]]
     if not targets:
@@ -353,10 +357,10 @@ def apply_number_reading(entries: list[dict[str, Any]], outdir: Path) -> tuple[i
     cache_path: Path = outdir / "number_cache.json"
     cache: dict[str, dict[str, Any]] = load_number_cache(cache_path)
     fresh: list[dict[str, Any]] = [e for e in targets if e["key"] not in cache]
-    if len(fresh) > MAX_NUMBER_READS_PER_RUN:
+    if len(fresh) > max_reads:
         raise ExternalApiError(
-            f"本轮需新识别 {len(fresh)} 张（>{MAX_NUMBER_READS_PER_RUN}），"
-            "spec 规定须先问立哥；确认后分批跑（缓存幂等）"
+            f"本轮需新识别 {len(fresh)} 张（>{max_reads}），"
+            "spec 规定须先问立哥；确认后用 --max-reads 显式放宽（缓存幂等）"
         )
     try:
         load_token()  # 凭证预检：缺凭证尽早显式失败
@@ -980,6 +984,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="K3 号码识别（可选；结果落 <out>/number_cache.json 幂等不重复扣额度）",
     )
+    parser.add_argument(
+        "--max-reads",
+        type=int,
+        default=MAX_NUMBER_READS_PER_RUN,
+        help="单次运行最大新识别张数（默认 %(default)s；立哥批准后显式放宽）",
+    )
     return parser.parse_args(argv)
 
 
@@ -1021,7 +1031,7 @@ def main(argv: list[str] | None = None) -> int:
             missing_errors += int(had_missing)
 
         if args.read_numbers:
-            n_fresh, total_tokens = apply_number_reading(entries, args.out)
+            n_fresh, total_tokens = apply_number_reading(entries, args.out, args.max_reads)
             logger.info("号码识别完成: 新识别 %d 张，本次 %d tokens", n_fresh, total_tokens)
 
         out_json: Path = args.out / "scorer_candidates.json"
