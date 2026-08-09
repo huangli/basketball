@@ -10,6 +10,8 @@
 
 # 中间产物（可再生成）
 work/
+# 旧工作区归档（workspace-layout 迁入的一次性产物）
+archive/work_legacy/
 
 # 系统垃圾
 Thumbs.db
@@ -21,6 +23,7 @@ Desktop.ini
 
 # 模型权重（二进制，AGENTS.md 记录下载方式）
 *.pt
+*.pth
 
 # Python 缓存与工具缓存
 __pycache__/
