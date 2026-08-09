@@ -101,7 +101,9 @@ def assign_same_rally_groups(events: list[dict[str, Any]]) -> dict[str, int]:
     return groups
 
 
-_HTML = """<!DOCTYPE html>
+# 注意必须是 raw string：模板内 JS 字符串含 \n 转义（导出确认框文案），
+# 普通三引号会被 Python 转义成真实换行，导致 JS 字符串跨行 SyntaxError（整页黑屏）
+_HTML = r"""<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">

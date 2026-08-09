@@ -163,6 +163,10 @@ def test_build_html_export_has_same_rally_confirm() -> None:
     # Assert：导出前置确认框（同组多进球时 confirm 拦截）
     assert "confirm(" in html
     assert "确实是两个球" in html
+    # 防回归：confirm 文案的 \n 必须以字面两字符存在于 JS 源码（_HTML 为 raw
+    # string 保此）；若被 Python 转义成真实换行，JS 字符串跨行 SyntaxError 整页黑屏
+    assert "\\n" in html
+    assert '多个进球：\n"' not in html
 
 
 def test_groups_skips_events_missing_fields(caplog: pytest.LogCaptureFixture) -> None:
