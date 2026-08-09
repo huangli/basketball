@@ -5,7 +5,9 @@
 build_html 内联数据与导出契约、main 端到端（tmp 目录写 scorer.html）；
 --clusters 簇级确认（docs/scorer-cluster/spec.md）：clusters schema 校验、
 build_cluster_map 归属与越界 key 跳过、cluster_id 注入与 unclustered→None、
-build_page_clusters 过滤、簇区渲染与 node --check JS 语法校验。
+build_page_clusters 过滤、簇区渲染与 node --check JS 语法校验；
+--players-file 名单文件注入（docs/scorer-reid/spec.md Phase D）：合法名单解析、
+坏 JSON/坏结构/非法队名 SchemaError、与 --players 互斥、号码预填链路命中。
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from gen_scorer_page import (
     build_entries,
     build_html,
     build_page_clusters,
+    load_players_file,
     main,
     match_clip,
     match_players_by_name,
@@ -85,13 +88,17 @@ def _event(src_file: str = "a.mp4", anchor_t0: float = 4.0, clip: str = "clips/a
 
 
 class TestTeamOfTag:
-    """标签前缀推队（页面 JS teamOfTag 同规则）。"""
+    """标签前缀推队（页面 JS teamOfTag 同规则；docs/scorer-reid/spec.md 锁现状映射）。"""
 
     def test_prefix_teams(self) -> None:
         # Arrange / Act / Assert
         assert team_of_tag("黑21") == "地平线"
         assert team_of_tag("白-熊志鹏") == "半截篮"
         assert team_of_tag("灰T恤-A") == "便服"
+
+    def test_blue_prefix_maps_to_black_team(self) -> None:
+        # Arrange / Act / Assert：蓝 → 地平线（蓝27 归地平线系 2026-08-09 立哥口径）
+        assert team_of_tag("蓝27") == "地平线"
 
 
 class TestParsePlayers:
@@ -116,6 +123,175 @@ class TestParsePlayers:
         # Arrange / Act / Assert
         with pytest.raises(SchemaError, match="tag"):
             parse_players("=大斌")
+
+
+# ---- --players-file 名单文件注入（docs/scorer-reid/spec.md Phase D） ----
+
+
+def _write_players_file(tmp_path: pathlib.Path, payload: object) -> pathlib.Path:
+    """把名单 payload 写成 JSON 文件，返回路径。"""
+    path = tmp_path / "players.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+class TestLoadPlayersFile:
+    """--players-file 名单文件解析：与 roster.players 同构，复用 roster 校验。"""
+
+    def test_valid_players_parsed(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：文件里的 team 以文件为准（不做前缀推定）
+        path = _write_players_file(
+            tmp_path,
+            [
+                {"tag": "白22-小朱", "name": "小朱", "team": "半截篮"},
+                {"tag": "黑21-大斌", "name": "大斌", "team": "地平线"},
+                {"tag": "灰T恤-A", "name": "", "team": "便服"},
+            ],
+        )
+        # Act
+        players = load_players_file(path)
+        # Assert
+        assert players == [
+            Player(tag="白22-小朱", name="小朱", team="半截篮"),
+            Player(tag="黑21-大斌", name="大斌", team="地平线"),
+            Player(tag="灰T恤-A", name="", team="便服"),
+        ]
+
+    def test_bad_json_raises(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：文件内容不是合法 JSON
+        path = tmp_path / "players.json"
+        path.write_text("[{not json", encoding="utf-8")
+        # Act / Assert
+        with pytest.raises(SchemaError):
+            load_players_file(path)
+
+    def test_top_level_not_list_raises(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：顶层是对象而非数组（roster.json 整文件误传场景）
+        path = _write_players_file(tmp_path, {"players": []})
+        # Act / Assert
+        with pytest.raises(SchemaError, match="数组"):
+            load_players_file(path)
+
+    def test_invalid_team_raises(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：team 非法值（合法值 = 地平线/半截篮/便服）
+        path = _write_players_file(tmp_path, [{"tag": "白22-小朱", "name": "小朱", "team": "白队"}])
+        # Act / Assert
+        with pytest.raises(SchemaError, match="team"):
+            load_players_file(path)
+
+    def test_duplicate_tag_raises(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：tag 重复（roster 契约同一校验）
+        path = _write_players_file(
+            tmp_path,
+            [
+                {"tag": "白22-小朱", "name": "小朱", "team": "半截篮"},
+                {"tag": "白22-小朱", "name": "朱", "team": "半截篮"},
+            ],
+        )
+        # Act / Assert
+        with pytest.raises(SchemaError, match="重复"):
+            load_players_file(path)
+
+    def test_number_prefill_with_file_players(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：文件名单注入后走号码预填链路（match_players_by_number 命中）
+        path = _write_players_file(
+            tmp_path, [{"tag": "白22-小朱", "name": "小朱", "team": "半截篮"}]
+        )
+        players = load_players_file(path)
+        cand = _candidate()
+        cand["number_guess"] = {
+            "number": "22",
+            "color": "白",
+            "name_text": None,
+            "confidence": "high",
+        }
+        # Act
+        entries = build_entries([_goal()], [cand], None, "", "", players)
+        # Assert
+        assert entries[0]["prefill_tag"] == "白22-小朱"
+        assert entries[0]["prefill_note"] == ""
+
+
+class TestPlayersFileCli:
+    """--players-file CLI 层：与 --players 互斥、端到端生成页面。"""
+
+    def _write_inputs(self, tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+        """造 scorers/goals 两个输入文件，返回路径。"""
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(
+            json.dumps({"session": "s", "candidates": [_candidate()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps({"session": "s", "goals": [_goal()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return scorers, goals
+
+    def test_mutex_with_players_rejected(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals = self._write_inputs(tmp_path)
+        players_file = _write_players_file(tmp_path, [])
+        # Act / Assert：同给两源 → parser.error 显式拒绝（SystemExit 2）
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    "--scorers",
+                    str(scorers),
+                    "--goals",
+                    str(goals),
+                    "--players",
+                    "黑21=大斌",
+                    "--players-file",
+                    str(players_file),
+                ]
+            )
+
+    def test_end_to_end_with_players_file(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals = self._write_inputs(tmp_path)
+        players_file = _write_players_file(
+            tmp_path, [{"tag": "白22-小朱", "name": "小朱", "team": "半截篮"}]
+        )
+        # Act
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--players-file",
+                str(players_file),
+            ]
+        )
+        # Assert：页面正常生成，文件名单内联为按钮名单
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"tag": "白22-小朱"' in html
+        assert '"team": "半截篮"' in html
+
+    def test_bad_players_file_exit_1(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：名单文件 schema 损坏（非法队名）
+        scorers, goals = self._write_inputs(tmp_path)
+        players_file = _write_players_file(
+            tmp_path, [{"tag": "白22", "name": "小朱", "team": "白队"}]
+        )
+        # Act：SchemaError 经 main 转为退出 1（显式失败不静默）
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--players-file",
+                str(players_file),
+            ]
+        )
+        # Assert
+        assert rc == 1
 
 
 class TestMergeAssignments:

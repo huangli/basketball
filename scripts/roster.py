@@ -13,7 +13,7 @@ schema 校验、assignments 键格式化、fid 映射、scorer 解析。
 契约要点（写读双方必须共用本模块，禁止各自裸拼，spec M3）：
 - assignments 键 = ``f"{file}#{t:.1f}"``（file 保留全名含 .mp4）；
 - fid = 文件主名（去扩展名），与 extract_frames / mot_candidates 的目录命名一致；
-- 合法 team 值：黑 / 白 / 便服。
+- 合法 team 值：地平线 / 半截篮 / 便服（见 VALID_TEAMS）。
 """
 
 from __future__ import annotations
@@ -80,13 +80,22 @@ def fid_of(file: str) -> str:
     return Path(file).stem
 
 
-def _validate_player(
+def player_from_dict(
     raw: Any,  # noqa: ANN401 JSON 待校验
     path: str,
     idx: int,
     seen_tags: set[str],
 ) -> Player:
     """校验单个 player 记录，返回结构体。
+
+    roster.json 与 --players-file 名单文件共用的唯一校验入口（spec:
+    docs/scorer-reid/spec.md §数据契约；两处的 players 记录同构）。
+
+    Args:
+        raw: 待校验的原始 JSON 记录。
+        path: 文件路径（仅用于错误信息）。
+        idx: 记录在 players 数组中的下标（仅用于错误信息）。
+        seen_tags: 已见 tag 集合（查重；命中即就地登记）。
 
     Raises:
         SchemaError: 记录非对象 / tag 缺失或非空 str / tag 重复 / name 非 str / team 非法。
@@ -148,7 +157,7 @@ def validate_roster(data: Any, path: str) -> Roster:  # noqa: ANN401 JSON 待校
     seen_tags: set[str] = set()
     players: list[Player] = []
     for i, raw in enumerate(players_raw):
-        players.append(_validate_player(raw, path, i, seen_tags))
+        players.append(player_from_dict(raw, path, i, seen_tags))
 
     assignments_raw: Any = data.get("assignments", {})
     if not isinstance(assignments_raw, dict):

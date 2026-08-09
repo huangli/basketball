@@ -16,19 +16,21 @@ validate_roster 可校验），confirmed=true 仅当全部非 SKIP 球已归属�
 输入：--scorers scorer_candidates.json、--goals goals.json、--session（缺省取
     candidates 里的 session）、--index（可选 events_index.json，兜底视频按
     src_file 相同且 |anchor_t0−anchor_time|≤4s 匹配 clip_wide）、--players（可选
-    "黑21=大斌,白-熊志鹏=熊志鹏" 式逗号分隔名单）、--roster-existing（可选，
+    "黑21=大斌,白-熊志鹏=熊志鹏" 式逗号分隔名单）、--players-file（可选，与
+    roster.players 同构的 JSON 数组名单文件，与 --players 互斥；spec:
+    docs/scorer-reid/spec.md）、--roster-existing（可选，
     合并已有 roster：assignments 并集预填、players 以新名单为准缺 tag WARNING）、
     --clusters（可选 scorer_clusters.json，必须与 --scorers 同目录：rep_crops 与
     裁图同目录相对引用；有则页面顶部出簇区，簇级选人批量预填簇内全部球，
     逐球区单独改覆盖簇归属，导出 roster 契约不变；spec: docs/scorer-cluster/spec.md）
 输出：<scorer_candidates.json 同目录>/scorer.html
-依赖：scripts/roster.py（format_key/validate_roster/Player，契约唯一入口）、
-    scripts/pipe_common.py（read_json/run_id 日志）、scripts/errors.py
+依赖：scripts/roster.py（format_key/validate_roster/Player/player_from_dict，
+    契约唯一入口）、scripts/pipe_common.py（read_json/run_id 日志）、scripts/errors.py
 典型调用：
     python scripts/gen_scorer_page.py --scorers work/20260722/scorers/scorer_candidates.json \
         --goals work/20260722/goals.json --session 20260722 \
         --index work/20260722/review_v3/events_index.json \
-        --players "黑21=大斌,白-熊志鹏=熊志鹏"
+        --players-file work/20260722/players.json
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ from typing import Any
 
 from errors import BasketballPipelineError, SchemaError
 from pipe_common import configure_logging, new_run_id, read_json
-from roster import Player, format_key, validate_roster
+from roster import Player, format_key, player_from_dict, validate_roster
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +388,32 @@ def parse_players(spec: str) -> list[Player]:
             raise SchemaError(f"--players 条目缺 tag: {item!r}")
         players.append(Player(tag=tag, name=name.strip() if sep else "", team=team_of_tag(tag)))
     return players
+
+
+def load_players_file(path: Path) -> list[Player]:
+    """加载 --players-file 名单文件：JSON 数组，与 roster.players 同构。
+
+    每条记录的校验复用 roster.player_from_dict（tag 非空唯一 / name 为 str /
+    team ∈ 地平线/半截篮/便服），与 roster.json 同一契约入口（rules.md §0.2：
+    schema 损坏必须显式失败，不静默容错）。
+
+    Args:
+        path: 名单文件路径（如 ``work/<场次>/players.json``）。
+
+    Returns:
+        Player 列表（保持文件顺序）。
+
+    Raises:
+        SchemaError: 坏 JSON / 顶层非数组 / 记录结构损坏 / tag 重复 / 队名非法。
+        OSError: IO 重试耗尽（文件不存在等）。
+    """
+    data: Any = read_json(path, what="players 名单文件")
+    if not isinstance(data, list):
+        raise SchemaError(
+            f"{path}: 顶层必须是数组（与 roster.players 同构），实际 {type(data).__name__}"
+        )
+    seen_tags: set[str] = set()
+    return [player_from_dict(raw, str(path), i, seen_tags) for i, raw in enumerate(data)]
 
 
 def merge_assignments(
@@ -876,7 +904,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--session", default="", help="场次名（缺省取 candidates 里的 session）")
     parser.add_argument("--index", default="", help="events_index.json 路径（可选，引用审核片段）")
     parser.add_argument(
-        "--players", default="", help='球员名单，如 "黑21=大斌,白-熊志鹏=熊志鹏"（可选）'
+        "--players",
+        default="",
+        help='球员名单，如 "黑21=大斌,白-熊志鹏=熊志鹏"（可选，与 --players-file 互斥）',
+    )
+    parser.add_argument(
+        "--players-file",
+        type=Path,
+        default=None,
+        help="球员名单 JSON 文件（与 roster.players 同构的数组；可选，与 --players 互斥）",
     )
     parser.add_argument("--roster-existing", default="", help="已有 roster.json（可选，合并预填）")
     parser.add_argument(
@@ -886,6 +922,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="scorer_clusters.json 路径（可选，簇级确认；必须与 --scorers 同目录）",
     )
     ns = parser.parse_args(argv)
+    if ns.players and ns.players_file is not None:
+        parser.error("--players 与 --players-file 互斥：名单只给一个来源（防双源不一致）")
     if ns.clusters is not None and ns.clusters.resolve().parent != ns.scorers.resolve().parent:
         parser.error("--clusters 必须与 --scorers 同目录（rep_crops 与裁图同目录相对引用口径）")
     return ns
@@ -926,7 +964,11 @@ def main(argv: list[str] | None = None) -> int:
             clusters_raw = _validate_clusters(cl_data, str(args.clusters))
             cluster_map = build_cluster_map(clusters_raw, {c["key"] for c in candidates})
 
-        players: list[Player] = parse_players(args.players)
+        players: list[Player] = (
+            load_players_file(args.players_file)
+            if args.players_file is not None
+            else parse_players(args.players)
+        )
         existing_assignments: dict[str, str] = {}
         existing_players: dict[str, Player] = {}
         if args.roster_existing:
