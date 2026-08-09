@@ -5,12 +5,15 @@
 candidates 锚点索引匹配、裁图外扩 20% 且短边 ≥400px、颜色三分类（近阈归便服）、
 预览片段参数与失败容错、CLI 端到端（合成 goals + mot_cache + 帧图，不碰真实素材）、
 轨迹选帧多裁（人框 IoU 链 链上/链断/多人/越界、质量分排序、≥0.5s 去重、
-crops/crop_scores 契约与 SKIP 无多裁字段）。
+crops/crop_scores 契约与 SKIP 无多裁字段）、读号多帧投票（规则全路径）、
+number_cache md5 重键迁移（幂等/查不到保留/裁图缺失 WARNING）、跳票模式零调用、
+全量模式 --max-reads 闸（按裁图张数计）。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,7 @@ from crop_scorers import (
     cut_preview_clip,
     drop_opposite_team,
     expand_box,
+    file_md5,
     find_held_box,
     frame_quality,
     load_candidates_index,
@@ -39,6 +43,7 @@ from crop_scorers import (
     locate_scorer,
     main,
     match_anchor_xy,
+    migrate_number_cache,
     number_guess_from_dict,
     parse_number_answer,
     pick_best_frames,
@@ -51,6 +56,7 @@ from crop_scorers import (
     team_of_box,
     trace_person,
     track_window_dets,
+    vote_number_guess,
 )
 from errors import BasketballPipelineError, ExternalApiError, SchemaError
 from geom import Box
@@ -629,6 +635,34 @@ class TestCliEndToEnd:
         payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
         assert payload["candidates"][0]["status"] == "OK"
 
+    def test_read_numbers_cache_only_cli(self, tmp_path: Path) -> None:
+        # Arrange：--read-numbers + --numbers-cache-only（空缓存 → 全跳票，零新调用零凭证）
+        goals, detectdir, framesdir, out = self._setup(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+                "--read-numbers",
+                "--numbers-cache-only",
+            ]
+        )
+        # Assert：OK 球逐张记 skipped、number_guess 置空；SKIP 球 number_votes=None；
+        # 零新调用不落缓存文件
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        ok, skip = payload["candidates"]
+        assert ok["number_guess"] is None
+        assert [v["source"] for v in ok["number_votes"]] == ["skipped"] * len(ok["crops"])
+        assert skip["number_votes"] is None
+        assert not (out / "number_cache.json").exists()
+
 
 class TestPreviewClip:
     """--rawdir 认人预览片段：窗口夹取、路径组装、ffmpeg 参数、失败容错。"""
@@ -994,34 +1028,285 @@ class TestReadNumber:
 
 
 class TestApplyNumberReading:
-    """apply_number_reading：>20 新调用拒绝、缓存命中零调用、失败不写缓存。"""
+    """apply_number_reading：闸按裁图张数计、迁移后缓存命中零调用、失败不写缓存。"""
 
-    def _entries(self, n: int) -> list[dict[str, Any]]:
-        """造 n 条 OK 候选（crop 非空）。"""
-        return [
-            {"key": f"a.mp4#{i}.0", "status": "OK", "crop": "c.jpg", "number_guess": None}
-            for i in range(n)
-        ]
+    def _entries(self, outdir: Path, n: int, crops_per_goal: int = 1) -> list[dict[str, Any]]:
+        """造 n 条 OK 候选（真实裁图文件，逐张噪点图 → md5 互异，crops 多裁字段齐全）。"""
+        entries: list[dict[str, Any]] = []
+        idx: int = 0
+        for i in range(n):
+            names: list[str] = []
+            for _ in range(crops_per_goal):
+                name = f"c{idx}.jpg"
+                arr = np.random.default_rng(idx).integers(0, 256, (100, 100, 3), dtype=np.uint8)
+                Image.fromarray(arr).save(outdir / name)
+                names.append(name)
+                idx += 1
+            entries.append(
+                {
+                    "key": f"a.mp4#{i}.0",
+                    "status": "OK",
+                    "crop": names[0],
+                    "crops": names,
+                    "number_guess": None,
+                    "number_votes": None,
+                }
+            )
+        return entries
 
     def test_over_20_fresh_rejected(self, tmp_path: Path) -> None:
         # Arrange / Act / Assert：21 张新识别 > 20 → 显式失败（spec：先问立哥）
         with pytest.raises(ExternalApiError, match="问立哥"):
-            apply_number_reading(self._entries(21), tmp_path)
+            apply_number_reading(self._entries(tmp_path, 21), tmp_path)
+
+    def test_gate_counts_crops_not_goals(self, tmp_path: Path) -> None:
+        # Arrange：5 球 × 3 裁 = 15 张互异裁图（多帧投票后额度按张数计）
+        entries = self._entries(tmp_path, 5, crops_per_goal=3)
+        # Act / Assert：15 > 10 → 闸拒绝
+        with pytest.raises(ExternalApiError, match="问立哥"):
+            apply_number_reading(entries, tmp_path, max_reads=10)
 
     def test_cache_hit_no_http(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Arrange：缓存已有结果；load_token 打桩（预检不碰真凭证）
-        monkeypatch.setattr("crop_scorers.load_token", lambda force=False: "tok")
+        # Arrange：旧 goal key 缓存（迁移重键后应命中）；裁图用旧 schema（无 crops 字段）
+        crop = tmp_path / "c.jpg"
+        Image.new("RGB", (100, 100), (30, 30, 30)).save(crop)
         save_number_cache(
             tmp_path / "number_cache.json",
             {"a.mp4#0.0": {"number": "21", "color": "黑", "confidence": "high"}},
         )
-        entries = self._entries(1)
+
+        def _no_token(force: bool = False) -> str:
+            raise RuntimeError("不应调用 load_token（全缓存命中零新调用）")
+
+        monkeypatch.setattr("crop_scorers.load_token", _no_token)
+        entries: list[dict[str, Any]] = [
+            {"key": "a.mp4#0.0", "status": "OK", "crop": "c.jpg", "number_guess": None}
+        ]
         # Act
         n_fresh, tokens = apply_number_reading(entries, tmp_path)
-        # Assert：零新调用，number_guess 从缓存补齐
+        # Assert：零新调用，旧 goal key 迁移到 md5 后命中，number_guess 从缓存补齐
         assert n_fresh == 0
         assert tokens == 0
         assert entries[0]["number_guess"]["number"] == "21"
+        assert entries[0]["number_votes"][0]["source"] == "cache"
+        cache = load_number_cache(tmp_path / "number_cache.json")
+        assert file_md5(crop) in cache  # 迁移重键落盘
+        assert "a.mp4#0.0" in cache  # 旧键保留一轮
+
+    def test_fresh_reads_voted_and_cached_by_md5(self, tmp_path: Path) -> None:
+        # Arrange：1 球 3 裁，假 reader 按文件名给票：7 high / 7 low / 21 low
+        entries = self._entries(tmp_path, 1, crops_per_goal=3)
+        answers = {
+            "c0.jpg": (NumberGuess("7", "黑", None, "high"), 100, ""),
+            "c1.jpg": (NumberGuess("7", "黑", None, "low"), 100, ""),
+            "c2.jpg": (NumberGuess("21", "黑", None, "low"), 100, ""),
+        }
+        calls: list[str] = []
+
+        def fake_reader(path: Path, key: str) -> tuple[NumberGuess | None, int, str]:
+            calls.append(path.name)
+            return answers[path.name]
+
+        # Act
+        n_fresh, tokens = apply_number_reading(entries, tmp_path, reader=fake_reader)
+        # Assert：同号 ≥2 → 采纳 7；3 张全发新调用；缓存键 = 裁图 md5
+        assert n_fresh == 3
+        assert tokens == 300
+        assert calls == ["c0.jpg", "c1.jpg", "c2.jpg"]
+        assert entries[0]["number_guess"]["number"] == "7"
+        assert [v["source"] for v in entries[0]["number_votes"]] == ["fresh"] * 3
+        cache = load_number_cache(tmp_path / "number_cache.json")
+        assert set(cache) == {file_md5(tmp_path / n) for n in ("c0.jpg", "c1.jpg", "c2.jpg")}
+
+    def test_cache_only_zero_calls(self, tmp_path: Path) -> None:
+        # Arrange：跳票模式 + 空缓存；reader 被调用即炸（证明零新调用）
+        entries = self._entries(tmp_path, 1, crops_per_goal=3)
+
+        def forbidden_reader(path: Path, key: str) -> tuple[NumberGuess | None, int, str]:
+            raise AssertionError("跳票模式不应发起任何调用")
+
+        # Act
+        n_fresh, tokens = apply_number_reading(
+            entries, tmp_path, cache_only=True, reader=forbidden_reader
+        )
+        # Assert：无票可投 → number_guess None，逐张记 skipped，不落缓存文件
+        assert n_fresh == 0
+        assert tokens == 0
+        assert entries[0]["number_guess"] is None
+        assert [v["source"] for v in entries[0]["number_votes"]] == ["skipped"] * 3
+        assert not (tmp_path / "number_cache.json").exists()
+
+    def test_cache_only_votes_from_existing_cache(self, tmp_path: Path) -> None:
+        # Arrange：跳票模式；3 裁中 2 张已有缓存票（7 high + 7 low），第 3 张未命中
+        entries = self._entries(tmp_path, 1, crops_per_goal=3)
+        cache = {
+            file_md5(tmp_path / "c0.jpg"): {"number": "7", "confidence": "high"},
+            file_md5(tmp_path / "c1.jpg"): {"number": "7", "confidence": "low"},
+        }
+        save_number_cache(tmp_path / "number_cache.json", cache)
+
+        def forbidden_reader(path: Path, key: str) -> tuple[NumberGuess | None, int, str]:
+            raise AssertionError("跳票模式不应发起任何调用")
+
+        # Act
+        n_fresh, _ = apply_number_reading(
+            entries, tmp_path, cache_only=True, reader=forbidden_reader
+        )
+        # Assert：同号 ≥2 → 采纳 7；第 3 张 skipped；零新调用
+        assert n_fresh == 0
+        assert entries[0]["number_guess"]["number"] == "7"
+        assert [v["source"] for v in entries[0]["number_votes"]] == [
+            "cache",
+            "cache",
+            "skipped",
+        ]
+
+    def test_reader_error_not_cached_and_vote_continues(self, tmp_path: Path) -> None:
+        # Arrange：3 裁中第 2 张识别失败（网络错误），其余两票同号 7
+        entries = self._entries(tmp_path, 1, crops_per_goal=3)
+        answers = {
+            "c0.jpg": (NumberGuess("7", None, None, "high"), 100, ""),
+            "c1.jpg": (None, 0, "网络错误: boom"),
+            "c2.jpg": (NumberGuess("7", None, None, "low"), 100, ""),
+        }
+
+        def fake_reader(path: Path, key: str) -> tuple[NumberGuess | None, int, str]:
+            return answers[path.name]
+
+        # Act
+        n_fresh, _ = apply_number_reading(entries, tmp_path, reader=fake_reader)
+        # Assert：失败张不写缓存（下次重跑重试）、记 error；余下两票同号 ≥2 → 采纳 7
+        assert n_fresh == 3
+        assert entries[0]["number_guess"]["number"] == "7"
+        assert [v["source"] for v in entries[0]["number_votes"]] == ["fresh", "error", "fresh"]
+        cache = load_number_cache(tmp_path / "number_cache.json")
+        assert file_md5(tmp_path / "c1.jpg") not in cache
+
+
+class TestVoteNumberGuess:
+    """众数投票规则（scorer-reid spec 写死）：同号≥2 采纳 / 单票 high 采纳 low 归 None /
+    全不同取唯一 high / None 票不参与计数 / 全 None 归 None+low。"""
+
+    def _g(self, number: str | None, conf: str = "high") -> NumberGuess:
+        return NumberGuess(number=number, color=None, name_text=None, confidence=conf)
+
+    def test_majority_adopts(self) -> None:
+        # Arrange / Act：7 两票（含 low）+ 21 一票
+        got = vote_number_guess([self._g("7", "low"), self._g("21"), self._g("7", "low")])
+        # Assert：同号 ≥2 采纳该号（返回首张同号票原样）
+        assert got is not None
+        assert got.number == "7"
+
+    def test_single_high_adopts(self) -> None:
+        # Arrange / Act / Assert
+        got = vote_number_guess([self._g("7")])
+        assert got is not None
+        assert got.number == "7"
+        assert got.confidence == "high"
+
+    def test_single_low_discards(self) -> None:
+        # Arrange / Act / Assert：单票 low → 归 None+low
+        got = vote_number_guess([self._g("7", "low")])
+        assert got is not None
+        assert got.number is None
+        assert got.confidence == "low"
+
+    def test_none_votes_not_counted(self) -> None:
+        # Arrange / Act：[7, null, null] → 有效票=1，走单票路径（high 采纳）
+        got = vote_number_guess([self._g("7"), self._g(None), self._g(None)])
+        # Assert
+        assert got is not None
+        assert got.number == "7"
+
+    def test_all_different_unique_high_wins(self) -> None:
+        # Arrange / Act：7 low / 21 high / 33 low 全不同 → 取唯一 high
+        got = vote_number_guess([self._g("7", "low"), self._g("21"), self._g("33", "low")])
+        # Assert
+        assert got is not None
+        assert got.number == "21"
+
+    def test_all_different_multiple_highs_discards(self) -> None:
+        # Arrange / Act / Assert：两个 high → 不采，归 None+low
+        got = vote_number_guess([self._g("7"), self._g("21")])
+        assert got is not None
+        assert got.number is None
+        assert got.confidence == "low"
+
+    def test_all_none_returns_none_low(self) -> None:
+        # Arrange / Act / Assert：有效票=0 → None+low
+        got = vote_number_guess([self._g(None), self._g(None, "low")])
+        assert got is not None
+        assert got.number is None
+        assert got.confidence == "low"
+
+    def test_empty_returns_none(self) -> None:
+        # Arrange / Act / Assert：无票（全失败/全跳票）→ None（调用方置空 number_guess）
+        assert vote_number_guess([]) is None
+
+
+class TestMigrateNumberCache:
+    """旧 goal key → crops[0] 裁图 md5 重键：旧键保留、幂等、查不到 INFO、缺失 WARNING。"""
+
+    def _entry(self, key: str, crops: list[str]) -> dict[str, Any]:
+        return {"key": key, "status": "OK", "crop": crops[0], "crops": crops}
+
+    def test_rekey_keeps_old_key_and_idempotent(self, tmp_path: Path) -> None:
+        # Arrange
+        crop = tmp_path / "c.jpg"
+        Image.new("RGB", (50, 50), (1, 2, 3)).save(crop)
+        md5: str = file_md5(crop)
+        cache = {"a.mp4#2.0": {"number": "7", "confidence": "high"}}
+        entries = [self._entry("a.mp4#2.0", ["c.jpg"])]
+        # Act
+        migrated, changed = migrate_number_cache(cache, entries, tmp_path)
+        # Assert：md5 新键重键成功，旧 goal key 保留一轮（spec：迁移是重键不是删除）
+        assert changed is True
+        assert migrated[md5]["number"] == "7"
+        assert migrated["a.mp4#2.0"]["number"] == "7"
+        # 幂等：二次执行零变化
+        again, changed2 = migrate_number_cache(migrated, entries, tmp_path)
+        assert changed2 is False
+        assert again == migrated
+
+    def test_unknown_key_kept_with_info(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Arrange：旧 key 在当前 run entries 查不到（删球/子集重跑）
+        cache = {"ghost.mp4#1.0": {"number": "7"}}
+        # Act
+        with caplog.at_level(logging.INFO, logger="crop_scorers"):
+            migrated, changed = migrate_number_cache(cache, [], tmp_path)
+        # Assert：原样保留 + INFO，不删不改
+        assert migrated == cache
+        assert changed is False
+        assert any(
+            "原样保留" in r.getMessage() and r.levelno == logging.INFO for r in caplog.records
+        )
+
+    def test_missing_crop_warns_and_keeps(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Arrange：entry 查得到但 crops[0] 文件缺失，算不出 md5
+        cache = {"a.mp4#2.0": {"number": "7"}}
+        entries = [self._entry("a.mp4#2.0", ["ghost.jpg"])]
+        # Act
+        with caplog.at_level(logging.WARNING, logger="crop_scorers"):
+            migrated, changed = migrate_number_cache(cache, entries, tmp_path)
+        # Assert：WARNING + 保留原 key，不炸
+        assert migrated == cache
+        assert changed is False
+        assert any(
+            "crops[0]" in r.getMessage() and r.levelno == logging.WARNING for r in caplog.records
+        )
+
+    def test_md5_keys_untouched(self, tmp_path: Path) -> None:
+        # Arrange：已是 md5 的键不迁移（幂等前提）
+        cache = {"0" * 32: {"number": "7"}}
+        # Act
+        migrated, changed = migrate_number_cache(cache, [], tmp_path)
+        # Assert
+        assert migrated == cache
+        assert changed is False
 
 
 def _moving_persons(frames: int, *, skip_frames: tuple[int, ...] = ()) -> list[tuple[Box, ...]]:

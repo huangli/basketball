@@ -24,9 +24,11 @@ t0/cx/cy，goals 锚点与其 dt=0 匹配）最近的轨迹 = 进球轨迹；沿
 往回放找最后一个"球心严格落在某人框内"的轨迹点 → 该人框 = 投篮者（最后持球者）；
 整轨无持球点 → 取轨迹起点时刻的最近人框；轨迹不存在/端点离锚点太远 → SKIP。
 SKIP 球无投篮者定位但仍切预览片段（立哥凭视频手选）。
-号码识别（--read-numbers，spec T7，2026-08-08 立哥拍板启用）：K3 读裁图背号
-（复用 vlm_filter 的 load_token/crop_to_b64/重试口径），结果落 number_cache.json
-幂等不重复扣额度。
+号码识别（--read-numbers，2026-08-09 升级多帧投票，scorer-reid spec §数据契约）：
+对每张 crops 逐张调 K3 读背号（复用 vlm_filter 的 load_token/crop_to_b64/重试口径），
+多帧众数投票压单帧误读；number_cache.json 键 = 裁图文件 md5（旧 goal key 自动迁移
+重键、旧键保留一轮由人清理），幂等不重复扣额度；--numbers-cache-only 跳票模式
+零新调用（旧数据重跑回填用）。
 轨迹选帧多裁（--best-crops，默认 3，scorer-cluster spec §数据契约，2026-08-09）：
 定位成功后以定位帧人框为种子，向前后逐帧 IoU≥0.3 链同一人框（窗口 = 定位帧前后
 各 2s，5fps 即各 ≤10 帧，越界/链断即停）；链上帧逐帧读图算质量分（归一化框面积
@@ -37,12 +39,15 @@ SKIP 球无投篮者定位但仍切预览片段（立哥凭视频手选）。
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import math
 import re
 import sys
 import time
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,6 +140,9 @@ NUMBER_PROMPT: str = (
     "背对镜头但模糊、正面无号码等看不清的情况：number 给 null、confidence 给 low。"
 )
 
+# ---- 号码缓存键（scorer-reid spec §数据契约：key = 裁图文件 md5，跨球/重跑复用） ----
+MD5_CHUNK_BYTES: int = 1 << 20  # md5 分块读取大小（1MB，与 cluster_scorers 同口径）
+
 STATUS_OK: str = "OK"
 STATUS_SKIP: str = "SKIP"
 
@@ -195,6 +203,122 @@ def number_guess_from_dict(data: Any) -> NumberGuess | None:  # noqa: ANN401 JSO
         name_text = None
     confidence: str = "high" if data.get("confidence") == "high" else "low"
     return NumberGuess(number=number, color=color, name_text=name_text, confidence=confidence)
+
+
+def file_md5(path: Path) -> str:
+    """计算文件 md5（分块读取；仅作缓存键，非安全用途）。
+
+    Args:
+        path: 文件路径。
+
+    Returns:
+        32 位十六进制 md5。
+    """
+    digest = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as f:
+        while chunk := f.read(MD5_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+_MD5_KEY_RE: re.Pattern[str] = re.compile(r"[0-9a-f]{32}")
+
+
+def _entry_crops(entry: dict[str, Any]) -> list[str]:
+    """取 entry 的裁图文件名列表：优先 crops（多裁），旧数据无则回退单 crop。
+
+    Args:
+        entry: _process_goal 产出的候选记录（或旧 schema 记录）。
+
+    Returns:
+        非空裁图文件名列表（保持质量降序）；无裁图返回空列表。
+    """
+    crops: Any = entry.get("crops")
+    if isinstance(crops, list):
+        names: list[str] = [c for c in crops if isinstance(c, str) and c]
+        if names:
+            return names
+    crop: Any = entry.get("crop")
+    return [crop] if isinstance(crop, str) and crop else []
+
+
+def vote_number_guess(guesses: list[NumberGuess]) -> NumberGuess | None:
+    """多帧读号众数投票（scorer-reid spec §数据契约，规则写死勿自行变更）。
+
+    number=None 的票（K3 看不清属合法返回）不参与计数，仅在有号码的票中投票：
+    同号 ≥2 张 → 采纳该号；有效票 =1 → conf=high 采纳、conf=low 归 None+low；
+    有效票 ≥2 且全不同 → 取唯一 conf=high 者（多个 high 不采）；其余（含有效票
+    =0）→ number=None、confidence=low。
+
+    Args:
+        guesses: 逐张读号结果（仅含成功识别的票；识别失败/跳票/裁图缺失不在其中）。
+
+    Returns:
+        投票结果（采纳时返回该票原样，含 color/name_text）；guesses 为空返回 None
+        （调用方把 number_guess 置空，区别于"有票但未采纳"的 None+low）。
+    """
+    if not guesses:
+        return None
+    valid: list[NumberGuess] = [g for g in guesses if g.number is not None]
+    if not valid:
+        return NumberGuess(number=None, color=None, name_text=None, confidence="low")
+    counts: Counter[str] = Counter(g.number for g in valid if g.number is not None)
+    top_number, top_count = counts.most_common(1)[0]  # 并列按首次出现序（稳定可测）
+    if top_count >= 2:
+        return next(g for g in valid if g.number == top_number)
+    if len(valid) == 1:
+        single: NumberGuess = valid[0]
+        if single.confidence == "high":
+            return single
+        return NumberGuess(number=None, color=None, name_text=None, confidence="low")
+    highs: list[NumberGuess] = [g for g in valid if g.confidence == "high"]
+    if len(highs) == 1:
+        return highs[0]
+    return NumberGuess(number=None, color=None, name_text=None, confidence="low")
+
+
+def migrate_number_cache(
+    cache: dict[str, dict[str, Any]], entries: list[dict[str, Any]], outdir: Path
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """旧 goal key 号码缓存重键为 crops[0] 裁图 md5（scorer-reid spec §数据契约）。
+
+    规则（写死）：旧 goal key → 当前 run entries 反查该球 crops[0] 文件算 md5 重键
+    （零新 API 调用；迁移是重键不是删除——旧键保留一轮，实跑无误后由人清理）；
+    旧 key 在当前 run entries 查不到（删球/子集重跑）→ 原样保留记 INFO；crops[0]
+    文件缺失算不出 md5 → 记 WARNING 保留原 key，不炸整批；已是 md5 的键不动。
+    幂等：二次执行零变化（changed=False）。
+
+    Args:
+        cache: load_number_cache 产物（不改入参，返回新 dict）。
+        entries: 当前 run 候选记录（反查 goal key → crops[0] 用）。
+        outdir: 输出目录（裁图所在）。
+
+    Returns:
+        (迁移后缓存, 是否有变化)。
+    """
+    by_key: dict[str, dict[str, Any]] = {
+        str(e["key"]): e for e in entries if isinstance(e.get("key"), str)
+    }
+    migrated: dict[str, dict[str, Any]] = dict(cache)
+    changed: bool = False
+    for key, value in cache.items():
+        if _MD5_KEY_RE.fullmatch(key):
+            continue
+        entry: dict[str, Any] | None = by_key.get(key)
+        if entry is None:
+            logger.info("号码缓存迁移: 旧键在当前 run 无对应进球，原样保留: %s", key)
+            continue
+        crops: list[str] = _entry_crops(entry)
+        crop_path: Path | None = outdir / crops[0] if crops else None
+        if crop_path is None or not crop_path.is_file():
+            logger.warning("号码缓存迁移: crops[0] 裁图缺失，保留原键: %s (%s)", key, crop_path)
+            continue
+        md5_key: str = file_md5(crop_path)
+        if md5_key not in migrated:
+            migrated[md5_key] = value
+            changed = True
+            logger.info("号码缓存迁移: %s → md5:%s（旧键保留一轮）", key, md5_key)
+    return migrated, changed
 
 
 def parse_number_answer(raw: str) -> NumberGuess | None:
@@ -262,6 +386,11 @@ def save_number_cache(path: Path, results: dict[str, dict[str, Any]]) -> None:
     atomic_write_json(path, payload, what="number_cache.json")
 
 
+# 单次号码识别注入点：(裁图路径, 进球键) → (guess, tokens, err)。测试注入假 reader
+# （不碰网络/凭证）；生产默认 None → apply_number_reading 内部用 httpx + read_number。
+NumberReader = Callable[[Path, str], "tuple[NumberGuess | None, int, str]"]
+
+
 def read_number(
     client: httpx.Client,
     *,
@@ -277,7 +406,7 @@ def read_number(
     Args:
         client: httpx 客户端（trust_env=False，直连不走代理）。
         crop_path: 投篮者裁图路径。
-        key: 进球键（日志/缓存用）。
+        key: 进球键（日志用；缓存键是裁图 md5，由调用方管理）。
 
     Returns:
         (NumberGuess, total_tokens, 错误摘要)；成功 err=""；失败 guess=None
@@ -342,73 +471,160 @@ def read_number(
     return None, 0, last_err
 
 
-def apply_number_reading(
-    entries: list[dict[str, Any]], outdir: Path, max_reads: int = MAX_NUMBER_READS_PER_RUN
-) -> tuple[int, int]:
-    """--read-numbers 主流程：对 OK 裁图逐张识别（缓存命中不重复扣额度）。
+def _vote_record(
+    crop: str, md5: str | None, source: str, guess: NumberGuess | None
+) -> dict[str, Any]:
+    """组装 number_votes 逐张摘要（source: cache/fresh/skipped/missing/error）。"""
+    return {
+        "crop": crop,
+        "md5": md5,
+        "source": source,
+        "number": guess.number if guess is not None else None,
+        "confidence": guess.confidence if guess is not None else None,
+    }
 
-    结果写入每条 entry 的 number_guess 字段；缓存落 <outdir>/number_cache.json
-    （每张识别后原子落盘，断点续跑）。单张失败记 ERROR 继续不炸整批（不写缓存，
-    下次重跑重试）。新调用 >max_reads 拒绝执行（默认 20；spec：>20 球须先问立哥，
-    立哥批准后可用 --max-reads 显式放宽）。
+
+def apply_number_reading(
+    entries: list[dict[str, Any]],
+    outdir: Path,
+    max_reads: int = MAX_NUMBER_READS_PER_RUN,
+    *,
+    cache_only: bool = False,
+    reader: NumberReader | None = None,
+) -> tuple[int, int]:
+    """--read-numbers 主流程：逐张裁图读号 + 多帧众数投票（缓存命中不重复扣额度）。
+
+    每张 crops（旧数据回退单 crop）各读一次号，vote_number_guess 众数投票后写入
+    entry 的 number_guess（结构不变，消费方零改动）与 number_votes（逐张摘要，
+    调试可追溯）。缓存键 = 裁图文件 md5；旧 goal key 缓存先迁移重键（零新调用）。
+    单张失败记 ERROR 继续不炸整批（不写缓存，下次重跑重试）。
+
+    两种模式（scorer-reid spec §数据契约，写死）：
+    - 全量模式（默认）：缓存未命中的裁图发起新调用；新调用 >max_reads 拒绝执行
+      （默认 20；spec：超额须先问立哥，批准后 --max-reads 显式放宽）。
+    - 跳票模式（cache_only，CLI --numbers-cache-only）：缓存未命中跳过不读、
+      只用已有票投票，零新调用、不要求凭证（旧数据重跑回填用）。
 
     Args:
-        entries: _process_goal 产出的候选记录（原地补 number_guess）。
+        entries: _process_goal 产出的候选记录（原地补 number_guess/number_votes）。
         outdir: 输出目录（裁图与缓存所在）。
-        max_reads: 单次运行允许的最大新识别张数。
+        max_reads: 单次运行允许的最大新识别张数（全量模式闸）。
+        cache_only: True = 跳票模式。
+        reader: 单次读号注入点（测试用）；None = 生产默认（httpx + K3）。
 
     Returns:
         (本次新识别张数, 本次总 token 用量)。
 
     Raises:
-        ExternalApiError: 凭证缺失 / 超 max_reads 张新调用。
+        ExternalApiError: 凭证缺失 / 超 max_reads 张新调用（全量模式）。
+        BasketballPipelineError: reader 契约破坏（err 为空但 guess=None）。
     """
-    targets: list[dict[str, Any]] = [e for e in entries if e["status"] == STATUS_OK and e["crop"]]
+    targets: list[dict[str, Any]] = [
+        e for e in entries if e["status"] == STATUS_OK and _entry_crops(e)
+    ]
     if not targets:
         return 0, 0
     cache_path: Path = outdir / "number_cache.json"
     cache: dict[str, dict[str, Any]] = load_number_cache(cache_path)
-    fresh: list[dict[str, Any]] = [e for e in targets if e["key"] not in cache]
-    if len(fresh) > max_reads:
-        raise ExternalApiError(
-            f"本轮需新识别 {len(fresh)} 张（>{max_reads}），"
-            "spec 规定须先问立哥；确认后用 --max-reads 显式放宽（缓存幂等）"
-        )
-    try:
-        load_token()  # 凭证预检：缺凭证尽早显式失败
-    except RuntimeError as exc:
-        raise ExternalApiError(f"K3 凭证不可用: {exc}") from exc
-    total_tokens: int = 0
-    with httpx.Client(trust_env=False) as client:  # trust_env=False：直连，不走代理
-        for e in fresh:
-            guess, tokens, err = read_number(client, crop_path=outdir / e["crop"], key=e["key"])
-            total_tokens += tokens
-            if err:
-                logger.error("号码识别失败（下次重跑重试）: %s: %s", e["key"], err)
-                continue
-            if guess is None:  # 防御：err 为空必有 guess（read_number 契约），逻辑错误显式失败
-                raise BasketballPipelineError(f"号码识别契约破坏: {e['key']} err 为空但 guess=None")
-            cache[e["key"]] = {
-                **asdict(guess),
-                "usage": {"total_tokens": tokens},
-                "model": K3_MODEL,
-                "ts": datetime.now(UTC).isoformat(),
-            }
-            save_number_cache(cache_path, cache)
-            logger.info(
-                "号码识别: %s → number=%s color=%s name=%s conf=%s（%d tokens）",
-                e["key"],
-                guess.number,
-                guess.color,
-                guess.name_text,
-                guess.confidence,
-                tokens,
-            )
-    n_fresh: int = len(fresh)
+    cache, migrated_changed = migrate_number_cache(cache, entries, outdir)
+    if migrated_changed:
+        save_number_cache(cache_path, cache)  # 迁移持久化（跳票模式同样落盘）
+
+    # 逐张预算缓存键：裁图缺失记 WARNING 跳过（不算票也不算新调用）
+    plans: list[tuple[dict[str, Any], list[tuple[str, str | None]]]] = []
     for e in targets:
-        cached: dict[str, Any] | None = cache.get(e["key"])
-        guess = number_guess_from_dict(cached) if cached is not None else None
-        e["number_guess"] = asdict(guess) if guess is not None else None
+        items: list[tuple[str, str | None]] = []
+        for name in _entry_crops(e):
+            path: Path = outdir / name
+            if not path.is_file():
+                logger.warning("读号裁图缺失，跳过该张: %s (%s)", path, e["key"])
+                items.append((name, None))
+                continue
+            items.append((name, file_md5(path)))
+        plans.append((e, items))
+
+    actual_reader: NumberReader | None = reader
+    http_client: httpx.Client | None = None
+    if not cache_only:
+        planned: set[str] = {
+            md5 for _e, items in plans for _n, md5 in items if md5 is not None and md5 not in cache
+        }
+        if len(planned) > max_reads:
+            raise ExternalApiError(
+                f"本轮需新识别 {len(planned)} 张（>{max_reads}），"
+                "spec 规定须先问立哥；确认后用 --max-reads 显式放宽（缓存幂等）"
+            )
+        if planned and actual_reader is None:
+            try:
+                load_token()  # 凭证预检：缺凭证尽早显式失败
+            except RuntimeError as exc:
+                raise ExternalApiError(f"K3 凭证不可用: {exc}") from exc
+            http_client = httpx.Client(trust_env=False)  # trust_env=False：直连，不走代理
+
+            def actual_reader(crop_path: Path, key: str) -> tuple[NumberGuess | None, int, str]:
+                if http_client is None:  # 防御：构建后立即赋值，不应触发
+                    raise BasketballPipelineError("读号客户端未构建（逻辑错误）")
+                return read_number(http_client, crop_path=crop_path, key=key)
+
+    n_fresh: int = 0
+    total_tokens: int = 0
+    try:
+        for e, items in plans:
+            guesses: list[NumberGuess] = []
+            votes_summary: list[dict[str, Any]] = []
+            for name, md5 in items:
+                if md5 is None:
+                    votes_summary.append(_vote_record(name, None, "missing", None))
+                    continue
+                cached: dict[str, Any] | None = cache.get(md5)
+                if cached is not None:
+                    guess = number_guess_from_dict(cached)
+                    if guess is None:  # 防御：load_number_cache 已过滤非 dict，不应触发
+                        raise BasketballPipelineError(f"号码缓存条目无法归一: md5:{md5}")
+                    guesses.append(guess)
+                    votes_summary.append(_vote_record(name, md5, "cache", guess))
+                    continue
+                if cache_only:
+                    votes_summary.append(_vote_record(name, md5, "skipped", None))
+                    continue
+                if actual_reader is None:  # 防御：planned 非空必已构建/注入
+                    raise BasketballPipelineError("读号器未构建（planned 与 reader 逻辑不一致）")
+                guess, tokens, err = actual_reader(outdir / name, e["key"])
+                n_fresh += 1
+                total_tokens += tokens
+                if err:
+                    logger.error("号码识别失败（下次重跑重试）: %s %s: %s", e["key"], name, err)
+                    votes_summary.append(_vote_record(name, md5, "error", None))
+                    continue
+                if guess is None:  # 防御：err 为空必有 guess（read_number 契约）
+                    raise BasketballPipelineError(
+                        f"号码识别契约破坏: {e['key']} {name} err 为空但 guess=None"
+                    )
+                cache[md5] = {
+                    **asdict(guess),
+                    "usage": {"total_tokens": tokens},
+                    "model": K3_MODEL,
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+                save_number_cache(cache_path, cache)
+                logger.info(
+                    "号码识别: %s %s → number=%s color=%s name=%s conf=%s（%d tokens）",
+                    e["key"],
+                    name,
+                    guess.number,
+                    guess.color,
+                    guess.name_text,
+                    guess.confidence,
+                    tokens,
+                )
+                guesses.append(guess)
+                votes_summary.append(_vote_record(name, md5, "fresh", guess))
+            voted: NumberGuess | None = vote_number_guess(guesses)
+            e["number_guess"] = asdict(voted) if voted is not None else None
+            e["number_votes"] = votes_summary
+    finally:
+        if http_client is not None:
+            http_client.close()
     return n_fresh, total_tokens
 
 
@@ -1145,6 +1361,7 @@ def _process_goal(
         "clip": "",
         "team_guess": None,
         "number_guess": None,
+        "number_votes": None,
         "votes": 0,
         "total_votes": 0,
     }
@@ -1237,7 +1454,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--read-numbers",
         action="store_true",
-        help="K3 号码识别（可选；结果落 <out>/number_cache.json 幂等不重复扣额度）",
+        help="K3 号码识别（可选；逐张 crops 读号+众数投票，结果落 <out>/number_cache.json "
+        "幂等不重复扣额度）",
+    )
+    parser.add_argument(
+        "--numbers-cache-only",
+        action="store_true",
+        help="跳票模式（配合 --read-numbers）：缓存未命中的裁图跳过不读、只用已有票投票，"
+        "零新调用（旧数据重跑回填用）",
     )
     parser.add_argument(
         "--max-reads",
@@ -1301,8 +1525,15 @@ def main(argv: list[str] | None = None) -> int:
             missing_errors += int(had_missing)
 
         if args.read_numbers:
-            n_fresh, total_tokens = apply_number_reading(entries, args.out, args.max_reads)
-            logger.info("号码识别完成: 新识别 %d 张，本次 %d tokens", n_fresh, total_tokens)
+            n_fresh, total_tokens = apply_number_reading(
+                entries, args.out, args.max_reads, cache_only=args.numbers_cache_only
+            )
+            logger.info(
+                "号码识别完成%s: 新识别 %d 张，本次 %d tokens",
+                "（跳票模式）" if args.numbers_cache_only else "",
+                n_fresh,
+                total_tokens,
+            )
 
         out_json: Path = args.out / "scorer_candidates.json"
         atomic_write_json(
