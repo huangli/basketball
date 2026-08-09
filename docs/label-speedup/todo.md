@@ -1,15 +1,17 @@
-# todo：标注页提效（同组看一判全 + 默认 2 倍速）
+# todo：标注页提效（同组看一判全 + 默认有效 2 倍速）
 
 依据 `docs/label-speedup/spec.md` / `plan.md`（review01 修订后版本）。
 
-## Task 1：F2 默认 2 倍速
+## Task 1：F2 倍速控制（默认有效 2x）
 
-- [x] `_HTML`：`show(i)` 设 `v.playbackRate = 2` 并同步 `#speed` 文本
+- [x] `_HTML`：`show(i)` 显式 `v.playbackRate = 1`（页面 1x = 有效 2x，
+      片段已烘焙 2x）并同步 `#speed` 文本
 - [x] 页头加 `<button id="speed">`（与 sound 同款 button）+ 按键提示行加 `S=倍速`
-- [x] S 键 1x/2x 切换并同步显示
-- [x] 回归断言：生成 html 含 `playbackRate = 2`
+- [x] S 键页面 1x/2x（= 有效 2x/4x）切换并同步显示
+- [x] 回归断言：生成 html 含 `playbackRate = 1`
 - [x] 关口：ruff format / check --fix / pytest -q 全绿（273 passed）
 - [x] 实施补充：W 切视角换 src 会重置倍速，toggleWide 保留当前倍速
+- [x] 口径修正：初版页面默认 2x（有效 4x），立哥验收后拍板回改 1x（review03）
 
 ## Task 2：F1 同组看一判全
 
@@ -34,5 +36,5 @@
 - [x] 用批次 3 events_index 重新生成 label.html（session 保持 20260722_3，
       保住立哥 localStorage 标注记录）
 - [x] 实施复审，写 review02.md（review01.md = 实施前文档审查，已存档）
-- [ ] 立哥页面实操验收：组内 J → 确认 → 跳过；S 键切速
-- [ ] commit（只 add 本功能文件）
+- [x] 立哥页面实操验收：组内 J → 确认 → 跳过；S 键切速（2026-08-09 无痕窗口验收通过）
+- [x] commit（只 add 本功能文件；代码 54ebb54，文档收尾随验收回填一并提交）

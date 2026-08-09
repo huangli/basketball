@@ -134,7 +134,7 @@ small { color: #999; }
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未标</button>
   <button class="nav" id="sound">声音开/关</button>
-  <button class="nav" id="speed">倍速：2x</button>
+  <button class="nav" id="speed">倍速：1x</button>
   <button class="nav" id="wide">筐区视角 (W)</button>
   <button id="export">导出 goals.json</button>
   <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）</small>
@@ -171,7 +171,9 @@ function show(i) {
   const e = EVENTS[cur];
   wide = true;
   v.src = e.clip_wide || e.clip;
-  v.playbackRate = 2;
+  // 片段本身已烘焙 2x（gen_review_clips.SPEED=2.0），页面 1x = 有效 2x；
+  // S 键加到页面 2x = 有效 4x（2026-08-09 立哥定：默认保持有效 2x）
+  v.playbackRate = 1;
   v.play().catch(() => {});
   localStorage.setItem(POSKEY, String(cur));
   const [done, goals, pracs] = stats();

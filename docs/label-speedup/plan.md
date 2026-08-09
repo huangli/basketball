@@ -1,19 +1,21 @@
-# plan：标注页提效（同组看一判全 + 默认 2 倍速）
+# plan：标注页提效（同组看一判全 + 默认有效 2 倍速）
 
 依据 `docs/label-speedup/spec.md`。全部改动在 `scripts/gen_label_page.py`
 （JS 模板）+ `tests/test_gen_label_page.py` + 一个 `work/` 下一次性回放脚本。
 
 ## 步骤
 
-### Step 1：F2 默认 2 倍速（小，先做）
+### Step 1：F2 倍速控制（小，先做）
 
 - `_HTML` 模板（raw string，JS 文案可放心用 `\n` 字面量，勿改回普通三引号）：
-  - `show(i)` 内 `v.src` 设置后加 `v.playbackRate = 2;` 并同步 `#speed` 文本
-    （否则 S 键切 1x 后跳片，显示与实际不符）
+  - `show(i)` 内 `v.src` 设置后显式 `v.playbackRate = 1;` 并同步 `#speed` 文本
+    （片段已烘焙 2x，页面 1x = 有效 2x；2026-08-09 立哥拍板默认保持有效 2x，
+    初版"页面 2x = 有效 4x"验收后回改）
   - 页头加一个与"声音"同款的 `<button id="speed">`（sound 控件实为 button，
-    非 span，保持样式一致），显示"倍速：2x"；按键提示行加 `S=倍速`
+    非 span，保持样式一致），显示"倍速：1x"；按键提示行加 `S=倍速`
   - keydown 加 `s` 键：`v.playbackRate = v.playbackRate === 2 ? 1 : 2`，同步更新显示
-- `tests/test_gen_label_page.py` 加回归断言：生成 html 含 `playbackRate = 2`
+  - 边界：toggleWide 换 src 会重置倍速，保留当前值而非强制默认
+- `tests/test_gen_label_page.py` 加回归断言：生成 html 含 `playbackRate = 1`
 - 关口：ruff + pytest
 
 ### Step 2：F1 同组看一判全
@@ -61,7 +63,7 @@ Step 1 → Step 2 → Step 3 → Step 4，顺序执行。Step 1/2 可合一个 c
 
 ## 验收关口
 
-- [ ] ruff format / check --fix / pytest -q 全绿
-- [ ] node --check 生成页语法通过
-- [ ] 回放：跳过 ≥8 且真球误标 = 0
-- [ ] 立哥页面实操验收
+- [x] ruff format / check --fix / pytest -q 全绿（274 passed）
+- [x] node --check 生成页语法通过
+- [x] 回放：跳过 15 ≥ 8 且 51 球覆盖断言 PASS（review02/03）
+- [x] 立哥页面实操验收（2026-08-09 无痕窗口）

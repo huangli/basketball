@@ -172,8 +172,9 @@ def test_build_html_export_has_same_rally_confirm() -> None:
 def test_build_html_defaults_double_speed_with_s_toggle() -> None:
     # Arrange / Act
     html = build_html([_event()], "s")
-    # Assert：默认 2 倍速 + S 键切换 + 页头倍速控件（label-speedup F2）
-    assert "v.playbackRate = 2;" in html
+    # Assert：页面默认 1x（片段已烘焙 2x，有效 2x）+ S 键切换 + 页头倍速控件
+    # （label-speedup F2；2026-08-09 立哥定：默认保持有效 2x，S 加到 4x）
+    assert "v.playbackRate = 1;" in html
     assert 'id="speed"' in html
     assert 'k === "s"' in html
 
