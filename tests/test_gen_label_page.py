@@ -169,8 +169,28 @@ def test_build_html_export_has_same_rally_confirm() -> None:
     assert '多个进球：\n"' not in html
 
 
-def test_groups_skips_events_missing_fields(caplog: pytest.LogCaptureFixture) -> None:
-    # Arrange：缺 anchor_t0 / fid / key 的事件各一 + 一条合法重叠对
+def test_build_html_defaults_double_speed_with_s_toggle() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：默认 2 倍速 + S 键切换 + 页头倍速控件（label-speedup F2）
+    assert "v.playbackRate = 2;" in html
+    assert 'id="speed"' in html
+    assert 'k === "s"' in html
+
+
+def test_build_html_has_same_rally_skip_confirm() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：组内新判 J 后弹确认框，同组未标注成员可一键标 F 跳过
+    # （label-speedup F1；仅提示不强制，已标注成员不覆盖）
+    assert "疑似同回合组" in html
+    assert "其余标 F" in html
+    assert "const isNew = !marks[e.key];" in html
+
+
+def test_groups_skips_events_missing_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:  # Arrange：缺 anchor_t0 / fid / key 的事件各一 + 一条合法重叠对
     events = [
         {"fid": "f1", "key": "f1#e0"},  # 缺 anchor_t0
         {"anchor_t0": 1.0, "key": "f1#e1"},  # 缺 fid

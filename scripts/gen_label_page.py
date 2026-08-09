@@ -134,9 +134,10 @@ small { color: #999; }
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未标</button>
   <button class="nav" id="sound">声音开/关</button>
+  <button class="nav" id="speed">倍速：2x</button>
   <button class="nav" id="wide">筐区视角 (W)</button>
   <button id="export">导出 goals.json</button>
-  <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 ←/→=翻页（默认全景）</small>
+  <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）</small>
   <small>进度与位置自动存，刷新回到上次位置</small>
 </div>
 <video id="v" autoplay loop muted playsinline></video>
@@ -170,6 +171,7 @@ function show(i) {
   const e = EVENTS[cur];
   wide = true;
   v.src = e.clip_wide || e.clip;
+  v.playbackRate = 2;
   v.play().catch(() => {});
   localStorage.setItem(POSKEY, String(cur));
   const [done, goals, pracs] = stats();
@@ -185,19 +187,38 @@ function show(i) {
     grpEl.textContent = "";
   }
   document.getElementById("sound").textContent = v.muted ? "声音：关" : "声音：开";
+  document.getElementById("speed").textContent = "倍速：" + v.playbackRate + "x";
   document.getElementById("wide").textContent = "筐区视角 (W)";
 }
 function toggleWide() {
   const e = EVENTS[cur];
   if (!e.clip_wide) return;
   wide = !wide;
+  const rate = v.playbackRate;  // 换 src 会重置倍速，保留用户当前选择
   v.src = wide ? e.clip_wide : e.clip;
+  v.playbackRate = rate;
   v.play().catch(() => {});
+  document.getElementById("speed").textContent = "倍速：" + rate + "x";
   document.getElementById("wide").textContent = wide ? "筐区视角 (W)" : "全景视角 (W)";
 }
 function mark(r, scorer) {
   const e = EVENTS[cur];
+  const isNew = !marks[e.key];
   marks[e.key] = scorer ? { r, scorer } : { r };
+  // 同组看一判全（label-speedup F1）：新判进球且成组时，提示把同组未标注
+  // 成员标 F 跳过；已标注成员一律不覆盖，重复按 J 不再弹框
+  if (r === "goal" && e.grp && isNew) {
+    const rest = EVENTS.filter(x => x.grp === e.grp && x.key !== e.key && !marks[x.key]);
+    if (rest.length && confirm(
+      "该事件属疑似同回合组 " + e.grp + "（共 " + e.grp_size +
+      " 个，还有 " + rest.length + " 个未标注）。\n" +
+      "若刚才看到的入网画面就是这一组的全部内容，可把其余 " + rest.length +
+      " 个标为“不是进球”并跳过。\n\n" +
+      "确定 = 其余标 F 并跳到下一个未标注事件\n" +
+      "取消 = 不动，稍后逐条看")) {
+      for (const x of rest) marks[x.key] = { r: "no" };
+    }
+  }
   save();
   let nxt = EVENTS.findIndex((x, idx) => idx > cur && !marks[x.key]);
   if (nxt < 0) nxt = EVENTS.findIndex(x => !marks[x.key]);
@@ -263,6 +284,10 @@ document.addEventListener("keydown", (ev) => {
   else if (k === "p") mark("practice");
   else if (k === "f") mark("no");
   else if (k === "w") toggleWide();
+  else if (k === "s") {
+    v.playbackRate = v.playbackRate === 2 ? 1 : 2;
+    document.getElementById("speed").textContent = "倍速：" + v.playbackRate + "x";
+  }
   else if (ev.key === "ArrowLeft") show(cur - 1);
   else if (ev.key === "ArrowRight") show(cur + 1);
 });
