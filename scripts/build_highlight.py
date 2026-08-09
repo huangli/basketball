@@ -5,11 +5,12 @@
 输出尺寸按场次素材比例注入（--out，默认 1440x1080 对应 4:3 素材，
 16:9 素材用 1920x1080），缩放保持宽高比、不足处黑边补齐不压扁；
 100fps 素材入网后 2 秒半速慢放（slowmo=true 时两段拼接）。
-同参数 concat 直接重封装。产物：output/<场次>/个人_<标签>_进球合集.mp4。
+同参数 concat 直接重封装。产物：output/<场次>/<队伍>_<姓名>_进球合集.mp4。
 
 输入：--goals 指定的 goals.json（status=confirmed 记录；schema 损坏抛 SchemaError）；
     --roster 指定的 roster.json（可选，校验走 scripts/roster.py，必须 confirmed=true）
-输出：output/<场次>/个人_<标签>_进球合集.mp4 或 队伍_<队别>_进球集锦.mp4
+输出：output/<场次>/<队伍>_<姓名>_进球合集.mp4（roster 路径；姓名为空回退标签）
+    或 个人_<标签>_进球合集.mp4（无 roster 旧路径）或 队伍_<队别>_进球集锦.mp4
 依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）、
     scripts/roster.py（format_key/validate_roster/resolve_scorer，spec M3 契约）
 用法:
@@ -23,7 +24,7 @@
 ①无 roster 无过滤=全员现状不变；②无 roster 给 --scorer=旧 goals.scorer 精确
 匹配+0 命中 WARNING 提示改用 --roster；③有 roster 无过滤=全归属球（未归属
 WARNING 跳过）；④--scorer 经 roster.resolve_scorer 解析（tag|name），输出名用
-解析后 tag；⑤--team 出 队伍_{team}_进球集锦.mp4；⑥--scorer+--team 互斥报错
+{team}_{name or tag}；⑤--team 出 队伍_{team}_进球集锦.mp4；⑥--scorer+--team 互斥报错
 退出 1；⑦无 roster 给 --team 报错退出 1；⑧--team 便服 报错退出 1；
 --roster 未 confirmed=true 拒收退出 1。
 """
@@ -169,7 +170,7 @@ def select_goals(
 
     Returns:
         (选中记录, 输出文件名主体)，主体形如 ``个人_全员_进球合集`` /
-        ``个人_黑21_进球合集`` / ``队伍_黑_进球集锦``。
+        ``地平线_大斌_进球合集`` / ``队伍_地平线_进球集锦``。
 
     Raises:
         BasketballPipelineError: ⑥--scorer+--team 互斥；⑦无 roster 给 --team；
@@ -193,7 +194,7 @@ def select_goals(
         return selected, f"队伍_{team}_进球集锦"
 
     if roster is not None and scorer:
-        # ④：roster 内解析 tag|name，输出名用解析后 tag
+        # ④：roster 内解析 tag|name，输出名用 {team}_{name or tag}
         player = resolve_scorer(roster, scorer)
         if player is None:
             raise BasketballPipelineError(
@@ -204,7 +205,8 @@ def select_goals(
             for g in goals
             if roster.assignments.get(format_key(g["file"], float(g["anchor_time"]))) == player.tag
         ]
-        return selected, f"个人_{player.tag}_进球合集"
+        display: str = player.name or player.tag
+        return selected, f"{player.team}_{display}_进球合集"
 
     if roster is not None:
         # ③：全归属球；未归属 WARNING 跳过（SKIP 球允许未归属，不阻塞）

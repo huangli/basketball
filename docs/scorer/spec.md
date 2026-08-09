@@ -9,7 +9,7 @@
 ## Objective
 
 批次 1 已验收 17 个 confirmed 进球，批次 2（185 事件）标注在即。
-要出 `个人_XX_进球合集.mp4` 和 `队伍_XX_进球集锦.mp4`，缺进球者归属。
+要出 `<队伍>_<姓名>_进球合集.mp4`（2026-08-09 起新命名，姓名为空回退标签）和 `队伍_XX_进球集锦.mp4`，缺进球者归属。
 约束（AGENTS.md 已定）：命名用标签不用真名、roster 按场次隔离且需立哥确认、跨场次不合并。
 
 机器做三件事（全部可选降级，立哥确认是终裁）：
@@ -63,7 +63,8 @@ scripts/
   gen_scorer_page.py   新：认人确认页 scorer.html（独立于 gen_label_page.py；
                        默认输出 <scorer_candidates.json 同目录>/scorer.html）
   build_highlight.py   改：--roster/--team 参数 + 按 --team/--scorer 分支取名
-                       （队伍_/个人_ 前缀）+ 过滤逻辑分叉
+                       （分队集锦 队伍_{team}_进球集锦.mp4；个人合集
+                       {队伍}_{姓名}_进球合集.mp4，姓名空回退 tag）+ 过滤逻辑分叉
 work/20260722/scorers/ → 裁图、scorer_candidates.json、number_cache.json
 work/20260722/roster.json → 归属结果（立哥确认后由页面导出）
 tests/                 → 纯函数单测（合成 mot_cache/goals，不碰真帧/网络）

@@ -215,16 +215,28 @@ class TestSelectGoalsTruthTable:
         goals = [_goal(), _goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0)]
         # Act
         selected, stem = select_goals(goals, _roster(), "大斌", "")
-        # Assert：输出名用解析后 tag（不用 --scorer 原值）
+        # Assert：输出名用 队伍_姓名（不用 --scorer 原值/tag）
         assert [g["file"] for g in selected] == ["a.MP4"]
-        assert stem == "个人_黑21_进球合集"
+        assert stem == "地平线_大斌_进球合集"
 
     def test_branch4_scorer_resolved_by_tag(self) -> None:
         # Arrange / Act：tag 直接命中
         selected, stem = select_goals([_goal()], _roster(), "黑21", "")
         # Assert
         assert len(selected) == 1
-        assert stem == "个人_黑21_进球合集"
+        assert stem == "地平线_大斌_进球合集"
+
+    def test_branch4_name_empty_falls_back_to_tag(self) -> None:
+        # Arrange / Act：name 空串时输出名回退 tag
+        selected, stem = select_goals(
+            [_goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0)],
+            _roster(),
+            "白22",
+            "",
+        )
+        # Assert
+        assert len(selected) == 1
+        assert stem == "半截篮_白22_进球合集"
 
     def test_branch4_scorer_not_in_roster_raises(self) -> None:
         # Arrange / Act / Assert
