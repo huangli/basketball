@@ -26,7 +26,7 @@ from typing import Any
 from errors import SchemaError
 
 # 合法分队值（spec §roster.json schema；便服球员只进全员/个人合集，spec Open Q3）
-VALID_TEAMS: tuple[str, ...] = ("黑", "白", "便服")
+VALID_TEAMS: tuple[str, ...] = ("地平线", "半截篮", "便服")
 
 # assignments 键格式：<file>#<t:.1f>（file 可含任意字符除 # 结尾的时间部分，t 必须恰为一位小数）
 _KEY_PATTERN: re.Pattern[str] = re.compile(r"^(?P<file>.+)#(?P<t>-?\d+(?:\.\d+)?)$")

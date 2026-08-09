@@ -14,7 +14,7 @@ from roster import Player, Roster, fid_of, format_key, resolve_scorer, validate_
 _PATH = "work/20260722/roster.json"
 
 
-def _player(tag: str = "黑21", name: str = "", team: str = "黑") -> dict[str, str]:
+def _player(tag: str = "黑21", name: str = "", team: str = "地平线") -> dict[str, str]:
     """构造一条合法 player 记录。"""
     return {"tag": tag, "name": name, "team": team}
 
@@ -24,7 +24,7 @@ def _roster_data(**over: object) -> dict[str, object]:
     base: dict[str, object] = {
         "session": "20260722",
         "confirmed": True,
-        "players": [_player(), _player(tag="白22", team="白")],
+        "players": [_player(), _player(tag="白22", team="半截篮")],
         "assignments": {"a.mp4#4.1": "黑21"},
     }
     base.update(over)
@@ -152,7 +152,7 @@ class TestResolveScorer:
             session="s",
             confirmed=True,
             players=(
-                Player(tag="黑21", name="大斌", team="黑"),
+                Player(tag="黑21", name="大斌", team="地平线"),
                 Player(tag="灰T恤-A", name="", team="便服"),
             ),
             assignments={},

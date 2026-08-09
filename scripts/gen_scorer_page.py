@@ -52,9 +52,17 @@ CLIP_MATCH_MAX_DT_SEC: float = 4.0
 STATUS_OK: str = "OK"
 STATUS_SKIP: str = "SKIP"
 
-TEAM_BLACK: str = "黑"
-TEAM_WHITE: str = "白"
+TEAM_BLACK: str = "地平线"  # 黑队队名（黑/蓝球衣；2026-08-09 立哥定队名）
+TEAM_WHITE: str = "半截篮"  # 白队队名
 TEAM_CASUAL: str = "便服"
+# 标签前缀 → 队名（顺序即优先级；蓝色27 归地平线系立哥 2026-08-09 口径）
+_TEAM_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("黑", TEAM_BLACK),
+    ("蓝", TEAM_BLACK),
+    ("白", TEAM_WHITE),
+)
+# team_guess 合法值：crop_scorers 颜色分队产出的是颜色（黑/白/便服），与队名不同命名空间
+TEAM_GUESS_VALUES: tuple[str, ...] = ("黑", "白", "便服")
 
 _HTML = """<!DOCTYPE html>
 <html lang="zh">
@@ -67,9 +75,10 @@ body { font-family: sans-serif; background: #111; color: #eee; margin: 16px; }
 button { font-size: 18px; padding: 10px 18px; margin: 4px; border-radius: 8px;
          border: 0; cursor: pointer; }
 button.sel { outline: 3px solid #fc3; }
-.team-黑 { background: #222; color: #fff; border: 1px solid #666; }
-.team-白 { background: #eee; color: #111; }
+.team-地平线 { background: #222; color: #fff; border: 1px solid #666; }
+.team-半截篮 { background: #eee; color: #111; }
 .team-便服 { background: #777; color: #fff; }
+.teamlabel { color: #aaa; margin-right: 6px; }
 .nav { background: #444; color: #fff; }
 #skip { background: #7a5c00; color: #fff; }
 #accept { background: #2c9e4b; color: #fff; }
@@ -121,23 +130,35 @@ function save() {
 }
 function teamOfTag(tag) {
   // 与 Python 端 team_of_tag 同规则：标签前缀定队，其余便服
-  if (tag.startsWith("黑")) return "黑";
-  if (tag.startsWith("白")) return "白";
+  if (tag.startsWith("黑") || tag.startsWith("蓝")) return "地平线";
+  if (tag.startsWith("白")) return "半截篮";
   return "便服";
 }
 function nDone() { return ITEMS.filter(it => marks[it.key]).length; }
 function renderPlayers() {
+  // 按队分行（地平线/半截篮/便服），找人不用扫全名单（2026-08-09 立哥要求）
   const box = document.getElementById("players");
   box.innerHTML = "";
-  PLAYERS.forEach((p, idx) => {
-    const b = document.createElement("button");
-    b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
-      (p.name ? "=" + p.name : "");
-    b.className = "team-" + p.team;
-    if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
-    b.onclick = () => assign(p.tag);
-    box.appendChild(b);
-  });
+  const numbered = PLAYERS.map((p, idx) => [p, idx]);
+  for (const tm of ["地平线", "半截篮", "便服"]) {
+    const row = numbered.filter(([p]) => p.team === tm);
+    if (!row.length) continue;
+    const div = document.createElement("div");
+    const lab = document.createElement("span");
+    lab.textContent = tm + "：";
+    lab.className = "teamlabel";
+    div.appendChild(lab);
+    for (const [p, idx] of row) {
+      const b = document.createElement("button");
+      b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
+        (p.name ? "=" + p.name : "");
+      b.className = "team-" + p.team;
+      if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
+      b.onclick = () => assign(p.tag);
+      div.appendChild(b);
+    }
+    box.appendChild(div);
+  }
 }
 function show(i) {
   if (!ITEMS.length) return;
@@ -258,21 +279,20 @@ show(start >= 0 ? start : 0);
 
 
 def team_of_tag(tag: str) -> str:
-    """按标签前缀推定队别：黑*/白* 归队，其余（灰T恤-A 等）归便服。
+    """按标签前缀推定队别：黑*/蓝*→地平线、白*→半截篮，其余（灰T恤-A 等）归便服。
 
     页面导出自动补录名单外标签时用同一规则（JS teamOfTag 与本文档同步，
-    改规则须两端一起改）。
+    改规则须两端一起改）。蓝色27 归地平线系 2026-08-09 立哥口径。
 
     Args:
         tag: 球员标签，如 ``黑21`` / ``白-熊志鹏`` / ``灰T恤-A``。
 
     Returns:
-        "黑" / "白" / "便服"。
+        "地平线" / "半截篮" / "便服"。
     """
-    if tag.startswith(TEAM_BLACK):
-        return TEAM_BLACK
-    if tag.startswith(TEAM_WHITE):
-        return TEAM_WHITE
+    for prefix, team in _TEAM_PREFIXES:
+        if tag.startswith(prefix):
+            return team
     return TEAM_CASUAL
 
 
@@ -362,11 +382,7 @@ def _validate_candidates(data: Any, path: str) -> list[dict[str, Any]]:  # noqa:
             raise SchemaError(f"{path}: 第{i}条候选 crop 不是 str")
         if not isinstance(c.get("clip", ""), str):
             raise SchemaError(f"{path}: 第{i}条候选 clip 不是 str")
-        if c.get("team_guess") is not None and c["team_guess"] not in (
-            TEAM_BLACK,
-            TEAM_WHITE,
-            TEAM_CASUAL,
-        ):
+        if c.get("team_guess") is not None and c["team_guess"] not in TEAM_GUESS_VALUES:
             raise SchemaError(f"{path}: 第{i}条候选 team_guess 非法: {c['team_guess']!r}")
         if c.get("number_guess") is not None and not isinstance(c["number_guess"], dict):
             raise SchemaError(f"{path}: 第{i}条候选 number_guess 不是对象")
@@ -376,23 +392,73 @@ def _validate_candidates(data: Any, path: str) -> list[dict[str, Any]]:  # noqa:
 def match_players_by_number(
     players: list[Player], number: str | None, color: str | None
 ) -> list[Player]:
-    """号码+颜色匹配名单：tag 含颜色字且含独立号码数字（号码前后非数字）。
+    """号码匹配名单：号码唯一优先，颜色作消解提示（容忍 K3 颜色误读）。
 
-    "黑"+"21" 命中 黑21-大斌 / 黑21-王敏龙（同号多人 → 调用方判歧义）；
-    "蓝"+"27" 命中 蓝色27；"2" 不会误中 "黑21"（数字边界防子串误配）。
+    立哥 2026-08-09 确认同场号码极少重复，故：
+    - 号码在名单中唯一 → 直接命中（不看颜色：颜色误读不该挡掉正确号码）；
+    - 同号多人 → 用颜色进一步过滤，滤后唯一则命中、滤后为空或仍多个 → 歧义
+      （返回全部候选，调用方判歧义）；
+    - "2" 不会误中 "黑21"（数字边界防子串误配）。
 
     Args:
         players: 球员名单（--players 或已有 roster 的 players）。
-        number: K3 读出的号码字符串；None 不参与匹配。
-        color: K3 读出的颜色（黑/白/蓝/其他）；"其他"或 None 不参与匹配。
+        number: K3 读出的号码字符串；None 直接无匹配。
+        color: K3 读出的颜色（黑/白/蓝/其他），仅作同号消解提示。
 
     Returns:
-        命中的 Player 列表（0/1/N 个）。
+        命中的 Player 列表（0/1/N 个；N>1 表示歧义）。
     """
-    if not number or not color or color == "其他":
+    if not number:
         return []
     pat: re.Pattern[str] = re.compile(rf"(?<!\d){re.escape(number)}(?!\d)")
-    return [p for p in players if color in p.tag and pat.search(p.tag)]
+    by_num: list[Player] = [p for p in players if pat.search(p.tag)]
+    if len(by_num) <= 1:
+        return by_num
+    if color and color != "其他":
+        by_col: list[Player] = [p for p in by_num if color in p.tag]
+        if by_col:
+            return by_col
+    return by_num
+
+
+def _edit_distance_le1(a: str, b: str) -> bool:
+    """两字符串是否相等或只差 1 个字符（增/删/改）——K3 印名误读容差（大秋≈大斌）。"""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    if len(a) > len(b):
+        a, b = b, a
+    i = j = 0
+    skipped = False
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            j += 1
+    return True
+
+
+def match_players_by_name(players: list[Player], name_text: str | None) -> list[Player]:
+    """球衣印名匹配名单：精确或差 1 字符（K3 误读容差），只看非空 name。
+
+    Args:
+        players: 球员名单。
+        name_text: K3 读出的印名文本；None/空串无匹配。
+
+    Returns:
+        命中的 Player 列表（0/1/N 个；N>1 表示歧义）。
+    """
+    if not name_text or not name_text.strip():
+        return []
+    t: str = name_text.strip()
+    return [p for p in players if p.name and _edit_distance_le1(t, p.name)]
 
 
 def _confirmed_goals(data: Any, goals_path: str) -> list[dict[str, Any]]:  # noqa: ANN401
@@ -550,7 +616,7 @@ def build_entries(
         clip: str = str(cand.get("clip", "")) if cand is not None else ""
         if not clip and events is not None:
             clip = match_clip(events, file, anchor, index_dir, out_dir)
-        # 号码预填：恰匹配一名球员才预填；多人同号 → 歧义不预填
+        # 预填：号码唯一匹配；同号歧义时用印名消解；无号码则印名直配
         number_guess: dict[str, Any] | None = cand.get("number_guess") if cand is not None else None
         prefill_tag: str = ""
         prefill_note: str = ""
@@ -558,6 +624,15 @@ def build_entries(
             matches: list[Player] = match_players_by_number(
                 players, number_guess.get("number"), number_guess.get("color")
             )
+            name_matches: list[Player] = match_players_by_name(
+                players, number_guess.get("name_text")
+            )
+            if not matches:
+                matches = name_matches
+            elif len(matches) > 1 and name_matches:
+                narrowed: list[Player] = [p for p in matches if p in name_matches]
+                if narrowed:
+                    matches = narrowed
             if len(matches) == 1:
                 prefill_tag = matches[0].tag
             elif len(matches) > 1:

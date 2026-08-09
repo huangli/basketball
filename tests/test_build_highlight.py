@@ -132,13 +132,13 @@ def test_parse_argv_roster_team(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         sys,
         "argv",
-        ["build_highlight.py", "--goals", "g.json", "--roster", "r.json", "--team", "黑"],
+        ["build_highlight.py", "--goals", "g.json", "--roster", "r.json", "--team", "地平线"],
     )
     # Act
     _, _, _, _, _, roster, team = parse_argv()
     # Assert
     assert roster == "r.json"
-    assert team == "黑"
+    assert team == "地平线"
 
 
 def test_scale_pad_filter_uses_given_dims() -> None:
@@ -151,8 +151,8 @@ def test_scale_pad_filter_uses_given_dims() -> None:
 
 def _roster(
     players: tuple[Player, ...] = (
-        Player(tag="黑21", name="大斌", team="黑"),
-        Player(tag="白22", name="", team="白"),
+        Player(tag="黑21", name="大斌", team="地平线"),
+        Player(tag="白22", name="", team="半截篮"),
         Player(tag="灰T恤-A", name="", team="便服"),
     ),
     assignments: dict[str, str] | None = None,
@@ -235,20 +235,20 @@ class TestSelectGoalsTruthTable:
         # Arrange：a.MP4→黑21（黑），b.MP4→白22（白）
         goals = [_goal(), _goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0)]
         # Act
-        selected, stem = select_goals(goals, _roster(), "", "黑")
+        selected, stem = select_goals(goals, _roster(), "", "地平线")
         # Assert
         assert [g["file"] for g in selected] == ["a.MP4"]
-        assert stem == "队伍_黑_进球集锦"
+        assert stem == "队伍_地平线_进球集锦"
 
     def test_branch6_scorer_team_mutually_exclusive(self) -> None:
         # Arrange / Act / Assert
         with pytest.raises(BasketballPipelineError, match="互斥"):
-            select_goals([_goal()], _roster(), "大斌", "黑")
+            select_goals([_goal()], _roster(), "大斌", "地平线")
 
     def test_branch7_team_without_roster_raises(self) -> None:
         # Arrange / Act / Assert
         with pytest.raises(BasketballPipelineError, match="无法分队"):
-            select_goals([_goal()], None, "", "黑")
+            select_goals([_goal()], None, "", "地平线")
 
     def test_branch8_team_casual_raises(self) -> None:
         # Arrange / Act / Assert：便服不进分队合集（有/无 roster 都报错）

@@ -19,6 +19,7 @@ from gen_scorer_page import (
     build_html,
     main,
     match_clip,
+    match_players_by_name,
     match_players_by_number,
     merge_assignments,
     parse_players,
@@ -79,8 +80,8 @@ class TestTeamOfTag:
 
     def test_prefix_teams(self) -> None:
         # Arrange / Act / Assert
-        assert team_of_tag("黑21") == "黑"
-        assert team_of_tag("白-熊志鹏") == "白"
+        assert team_of_tag("黑21") == "地平线"
+        assert team_of_tag("白-熊志鹏") == "半截篮"
         assert team_of_tag("灰T恤-A") == "便服"
 
 
@@ -92,15 +93,15 @@ class TestParsePlayers:
         players = parse_players("黑21=大斌,白-熊志鹏=熊志鹏,白-小陈=小陈")
         # Assert
         assert players == [
-            Player(tag="黑21", name="大斌", team="黑"),
-            Player(tag="白-熊志鹏", name="熊志鹏", team="白"),
-            Player(tag="白-小陈", name="小陈", team="白"),
+            Player(tag="黑21", name="大斌", team="地平线"),
+            Player(tag="白-熊志鹏", name="熊志鹏", team="半截篮"),
+            Player(tag="白-小陈", name="小陈", team="半截篮"),
         ]
 
     def test_name_optional_and_empty_spec(self) -> None:
         # Arrange / Act / Assert
         assert parse_players("") == []
-        assert parse_players("黑21") == [Player(tag="黑21", name="", team="黑")]
+        assert parse_players("黑21") == [Player(tag="黑21", name="", team="地平线")]
 
     def test_missing_tag_raises(self) -> None:
         # Arrange / Act / Assert
@@ -184,9 +185,9 @@ class TestMatchPlayersByNumber:
     def _players() -> list[Player]:
         """本场名单（含两个黑21，供歧义分支）。"""
         return [
-            Player(tag="黑21-大斌", name="大斌", team="黑"),
-            Player(tag="黑21-王敏龙", name="王敏龙", team="黑"),
-            Player(tag="白-熊志鹏", name="熊志鹏", team="白"),
+            Player(tag="黑21-大斌", name="大斌", team="地平线"),
+            Player(tag="黑21-王敏龙", name="王敏龙", team="地平线"),
+            Player(tag="白-熊志鹏", name="熊志鹏", team="半截篮"),
             Player(tag="蓝色27", name="", team="便服"),
             Player(tag="赛文21", name="", team="便服"),
         ]
@@ -194,27 +195,60 @@ class TestMatchPlayersByNumber:
     def test_single_match(self) -> None:
         # Arrange / Act
         got = match_players_by_number(self._players(), "21", "黑")
-        # Assert：两个黑21 都中（调用方判歧义）
+        # Assert：三个 21 中颜色滤掉赛文21，剩两个黑21（调用方判歧义）
         assert [p.tag for p in got] == ["黑21-大斌", "黑21-王敏龙"]
+
+    def test_unique_number_ignores_color_misread(self) -> None:
+        # Arrange / Act / Assert：27 唯一，颜色误读为黑也命中蓝色27
+        assert [p.tag for p in match_players_by_number(self._players(), "27", "黑")] == ["蓝色27"]
 
     def test_blue_color_match(self) -> None:
         # Arrange / Act / Assert
         assert [p.tag for p in match_players_by_number(self._players(), "27", "蓝")] == ["蓝色27"]
 
-    def test_color_char_required(self) -> None:
-        # Arrange：赛文21 含 21 但不含黑/白/蓝 → 不中
+    def test_wrong_color_falls_back_to_ambiguous(self) -> None:
+        # Arrange：三个 21 用白色过滤为空 → 回退歧义全集（不放过潜在误杀）
         # Act / Assert
-        assert match_players_by_number(self._players(), "21", "白") == []
+        got = match_players_by_number(self._players(), "21", "白")
+        assert [p.tag for p in got] == ["黑21-大斌", "黑21-王敏龙", "赛文21"]
 
     def test_digit_boundary_no_substring(self) -> None:
         # Arrange / Act / Assert：号码 "2" 不误中 "黑21"
         assert match_players_by_number(self._players(), "2", "黑") == []
 
-    def test_none_or_other_color_no_match(self) -> None:
-        # Arrange / Act / Assert
+    def test_none_number_no_match(self) -> None:
+        # Arrange / Act / Assert：无号码不参与匹配
         assert match_players_by_number(self._players(), None, "黑") == []
-        assert match_players_by_number(self._players(), "21", None) == []
-        assert match_players_by_number(self._players(), "21", "其他") == []
+
+    def test_same_number_no_color_is_ambiguous(self) -> None:
+        # Arrange / Act / Assert：同号无颜色提示 → 返回全部候选（歧义）
+        got = match_players_by_number(self._players(), "21", None)
+        assert len(got) == 3
+
+
+class TestMatchPlayersByName:
+    """印名模糊匹配：精确或差 1 字符（K3 误读容差），只看非空 name。"""
+
+    def _players(self) -> list:
+        return [
+            Player(tag="黑21-大斌", name="大斌", team="地平线"),
+            Player(tag="黑21-王敏龙", name="王敏龙", team="地平线"),
+            Player(tag="蓝色27", name="", team="便服"),
+        ]
+
+    def test_exact_name_match(self) -> None:
+        # Arrange / Act / Assert
+        assert [p.tag for p in match_players_by_name(self._players(), "大斌")] == ["黑21-大斌"]
+
+    def test_one_char_misread_match(self) -> None:
+        # Arrange / Act / Assert：K3 把"大斌"读成"大秋"（差 1 字符）仍命中
+        assert [p.tag for p in match_players_by_name(self._players(), "大秋")] == ["黑21-大斌"]
+
+    def test_no_match_and_empty(self) -> None:
+        # Arrange / Act / Assert：无关文本与空值不中
+        assert match_players_by_name(self._players(), "杭州60岁") == []
+        assert match_players_by_name(self._players(), "") == []
+        assert match_players_by_name(self._players(), None) == []
 
 
 class TestNumberPrefill:
@@ -233,7 +267,7 @@ class TestNumberPrefill:
 
     def test_unique_number_match_prefills(self) -> None:
         # Arrange：名单只有一个 黑21
-        players = [Player(tag="黑21-大斌", name="大斌", team="黑")]
+        players = [Player(tag="黑21-大斌", name="大斌", team="地平线")]
         # Act
         entries = build_entries(
             [_goal()], [self._candidate_with_number("21", "黑")], None, "", "", players
@@ -245,8 +279,8 @@ class TestNumberPrefill:
     def test_ambiguous_same_number_no_prefill(self) -> None:
         # Arrange：两个黑21 → 歧义
         players = [
-            Player(tag="黑21-大斌", name="大斌", team="黑"),
-            Player(tag="黑21-王敏龙", name="王敏龙", team="黑"),
+            Player(tag="黑21-大斌", name="大斌", team="地平线"),
+            Player(tag="黑21-王敏龙", name="王敏龙", team="地平线"),
         ]
         # Act
         entries = build_entries(
@@ -258,7 +292,7 @@ class TestNumberPrefill:
 
     def test_no_number_no_prefill(self) -> None:
         # Arrange：K3 没读出号码
-        players = [Player(tag="黑21-大斌", name="大斌", team="黑")]
+        players = [Player(tag="黑21-大斌", name="大斌", team="地平线")]
         # Act
         entries = build_entries(
             [_goal()], [self._candidate_with_number(None, "黑")], None, "", "", players
@@ -346,7 +380,7 @@ class TestBuildHtml:
     def test_inlines_items_players_session(self) -> None:
         # Arrange
         entries = build_entries([_goal()], [_candidate()], None, "", "")
-        players = [Player(tag="黑21", name="大斌", team="黑")]
+        players = [Player(tag="黑21", name="大斌", team="地平线")]
         # Act
         html = build_html(entries, players, "20260722", {}, {})
         # Assert
@@ -442,7 +476,7 @@ class TestMain:
                 {
                     "session": "s",
                     "confirmed": True,
-                    "players": [{"tag": "黑21", "name": "大斌", "team": "黑"}],
+                    "players": [{"tag": "黑21", "name": "大斌", "team": "地平线"}],
                     "assignments": {"a.mp4#4.1": "黑21"},
                 },
                 ensure_ascii=False,
