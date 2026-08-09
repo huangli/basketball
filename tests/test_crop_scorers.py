@@ -1,9 +1,11 @@
-"""crop_scorers.py 单元测试（轨迹法定位 + 颜色分队 + 预览片段）。
+"""crop_scorers.py 单元测试（轨迹法定位 + 颜色分队 + 预览片段 + 轨迹选帧多裁）。
 
 覆盖：mot_cache schema 校验、轨迹窗口取帧、进球轨迹选择（端点距候选锚点最近/
 超界 SKIP/无锚点退时间最近）、持球点回放判定、无持球起点回退、无轨迹/无人 SKIP、
 candidates 锚点索引匹配、裁图外扩 20% 且短边 ≥400px、颜色三分类（近阈归便服）、
-预览片段参数与失败容错、CLI 端到端（合成 goals + mot_cache + 帧图，不碰真实素材）。
+预览片段参数与失败容错、CLI 端到端（合成 goals + mot_cache + 帧图，不碰真实素材）、
+轨迹选帧多裁（人框 IoU 链 链上/链断/多人/越界、质量分排序、≥0.5s 去重、
+crops/crop_scores 契约与 SKIP 无多裁字段）。
 """
 
 from __future__ import annotations
@@ -14,19 +16,23 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 import pytest
 from PIL import Image
 
 from crop_scorers import (
     MotCache,
     NumberGuess,
+    _crop_name_ranked,
     _try_cut_preview,
     apply_number_reading,
     classify_team,
     crop_and_save,
     cut_preview_clip,
+    drop_opposite_team,
     expand_box,
     find_held_box,
+    frame_quality,
     load_candidates_index,
     load_mot_cache,
     load_number_cache,
@@ -35,11 +41,15 @@ from crop_scorers import (
     match_anchor_xy,
     number_guess_from_dict,
     parse_number_answer,
+    pick_best_frames,
     preview_window,
     read_number,
     save_number_cache,
+    score_chain_frames,
     select_goal_track,
     start_nearest_box,
+    team_of_box,
+    trace_person,
     track_window_dets,
 )
 from errors import BasketballPipelineError, ExternalApiError, SchemaError
@@ -1012,3 +1022,381 @@ class TestApplyNumberReading:
         assert n_fresh == 0
         assert tokens == 0
         assert entries[0]["number_guess"]["number"] == "21"
+
+
+def _moving_persons(frames: int, *, skip_frames: tuple[int, ...] = ()) -> list[tuple[Box, ...]]:
+    """构造逐帧人框序列：A 框 (0,0,100,200) 每帧右移 10px（相邻 IoU≈0.82 链上），
+    B 框固定远处 (800,0,900,200) 作干扰；skip_frames 里的帧无人（空帧）。"""
+    persons: list[tuple[Box, ...]] = []
+    for fi in range(frames):
+        if fi in skip_frames:
+            persons.append(())
+        else:
+            persons.append((Box(fi * 10, 0, fi * 10 + 100, 200), Box(800, 0, 900, 200)))
+    return persons
+
+
+class TestTracePerson:
+    """人框 IoU 链：窗口内前后链接、链断即停、多人选 IoU 最大框、越界夹取。"""
+
+    def test_chains_both_directions(self) -> None:
+        # Arrange：30 帧，种子帧 15，A 框平滑移动
+        persons = tuple(_moving_persons(30))
+        seed_box = Box(150, 0, 250, 200)
+        # Act
+        chain = trace_person(persons, 15, seed_box)
+        # Assert：窗口 ±2s（5fps 各 10 帧）→ 帧 5..25 共 21 项，全程链上 A 框
+        assert len(chain) == 21
+        assert [fi for fi, _ in chain] == list(range(5, 26))
+        assert all(box.x1 == fi * 10 for fi, box in chain)
+
+    def test_window_limited_to_2s_each_side(self) -> None:
+        # Arrange：60 帧缓存，种子帧 30（两侧都不触边界）
+        persons = tuple(_moving_persons(60))
+        # Act
+        chain = trace_person(persons, 30, Box(300, 0, 400, 200))
+        # Assert：严格 ±10 帧
+        assert len(chain) == 21
+        assert chain[0][0] == 20
+        assert chain[-1][0] == 40
+
+    def test_clamped_at_cache_start(self) -> None:
+        # Arrange：种子帧 2，向后只链 2 帧即到缓存起点（越界即停）
+        persons = tuple(_moving_persons(30))
+        # Act
+        chain = trace_person(persons, 2, Box(20, 0, 120, 200))
+        # Assert：帧 0..12
+        assert [fi for fi, _ in chain] == list(range(13))
+
+    def test_empty_frame_breaks_chain(self) -> None:
+        # Arrange：帧 12 无人 → 向后链到 13 即停，向前不受影响
+        persons = tuple(_moving_persons(30, skip_frames=(12,)))
+        # Act
+        chain = trace_person(persons, 15, Box(150, 0, 250, 200))
+        # Assert：帧 13..25
+        assert [fi for fi, _ in chain] == list(range(13, 26))
+
+    def test_iou_drop_breaks_chain(self) -> None:
+        # Arrange：帧 20 起 A 框瞬移远处（IoU≈0）→ 向前链到 19 即停
+        persons = _moving_persons(30)
+        persons[20] = (Box(800, 400, 900, 600),)
+        persons[21] = (Box(800, 400, 900, 600),)
+        # Act
+        chain = trace_person(tuple(persons), 15, Box(150, 0, 250, 200))
+        # Assert：帧 5..19
+        assert [fi for fi, _ in chain] == list(range(5, 20))
+
+    def test_multi_person_picks_max_iou(self) -> None:
+        # Arrange：每帧有远处干扰框 B，且列表顺序 B 在前（排除"取第一个"的巧合）
+        persons = tuple((boxes[1], boxes[0]) for boxes in _moving_persons(30))
+        # Act
+        chain = trace_person(persons, 15, Box(150, 0, 250, 200))
+        # Assert：始终链平滑移动的 A 框，不跳 B
+        assert len(chain) == 21
+        assert all(box.x1 == fi * 10 for fi, box in chain)
+
+    def test_only_seed_when_no_persons(self) -> None:
+        # Arrange：除种子外全程无人
+        persons: tuple[tuple[Box, ...], ...] = ((),) * 30
+        seed_box = Box(0, 0, 100, 200)
+        # Act
+        chain = trace_person(persons, 15, seed_box)
+        # Assert：只含种子帧
+        assert chain == [(15, seed_box)]
+
+    def test_seed_out_of_range_raises(self) -> None:
+        # Arrange：种子帧越界属逻辑错误
+        persons = tuple(_moving_persons(10))
+        # Act / Assert：显式失败不静默
+        with pytest.raises(BasketballPipelineError, match="种子帧越界"):
+            trace_person(persons, 10, Box(0, 0, 100, 200))
+        with pytest.raises(BasketballPipelineError, match="种子帧越界"):
+            trace_person(persons, -1, Box(0, 0, 100, 200))
+
+
+def _noise_image(width: int = 1000, height: int = 800, seed: int = 42) -> Image.Image:
+    """构造随机噪点图（Laplacian 方差高，模拟清晰帧）。"""
+    arr = np.random.default_rng(seed).integers(0, 256, (height, width, 3), dtype=np.uint8)
+    return Image.fromarray(arr)
+
+
+class TestFrameQuality:
+    """质量分 = 归一化框面积 × Laplacian 方差：清晰 > 模糊，大框 > 小框。"""
+
+    def test_noise_beats_flat(self) -> None:
+        # Arrange
+        box = Box(100, 100, 300, 400)
+        flat = Image.new("RGB", (1000, 800), (128, 128, 128))
+        # Act / Assert：纯色图方差 0，噪点图 > 0
+        assert frame_quality(flat, box) == 0.0
+        assert frame_quality(_noise_image(), box) > 0.0
+
+    def test_bigger_box_higher_score(self) -> None:
+        # Arrange：同一张噪点图，清晰度均匀 → 面积大的分高
+        img = _noise_image()
+        # Act
+        small = frame_quality(img, Box(100, 100, 200, 250))
+        large = frame_quality(img, Box(100, 100, 400, 550))
+        # Assert
+        assert large > small > 0.0
+
+    def test_box_outside_image_returns_zero(self) -> None:
+        # Arrange：框完全在图外，夹取后退化
+        img = Image.new("RGB", (200, 200), (0, 0, 0))
+        # Act / Assert
+        assert frame_quality(img, Box(500, 500, 600, 600)) == 0.0
+
+
+class TestScoreChainFrames:
+    """链上帧读图打分：帧图缺失/损坏记 WARNING 跳过，不炸。"""
+
+    def _framesdir(self, tmp_path: Path, fid: str, frames: list[int]) -> Path:
+        """在 tmp 下给指定帧号落纯色帧图。"""
+        framesdir = tmp_path / "frames"
+        (framesdir / fid).mkdir(parents=True)
+        for fi in frames:
+            Image.new("RGB", (1000, 800), (20, 20, 20)).save(
+                framesdir / fid / f"f_{fi + 1:05d}.jpg"
+            )
+        return framesdir
+
+    def test_missing_frame_skipped(self, tmp_path: Path) -> None:
+        # Arrange：链 3 帧，只有帧 0/2 的图
+        framesdir = self._framesdir(tmp_path, "v", [0, 2])
+        chain = [(0, Box(0, 0, 100, 200)), (1, Box(10, 0, 110, 200)), (2, Box(20, 0, 120, 200))]
+        # Act
+        scored = score_chain_frames(chain, framesdir, "v")
+        # Assert：帧 1 跳过，其余保留链序
+        assert [fi for fi, _, _, _ in scored] == [0, 2]
+
+    def test_flat_frames_score_zero(self, tmp_path: Path) -> None:
+        # Arrange
+        framesdir = self._framesdir(tmp_path, "v", [0, 1])
+        chain = [(0, Box(0, 0, 100, 200)), (1, Box(10, 0, 110, 200))]
+        # Act
+        scored = score_chain_frames(chain, framesdir, "v")
+        # Assert：纯色图清晰度 0 → 全 0 分（仍入选，由 pick 层去重）；
+        # 深色纯色图 team=黑（V<45 占比达标）
+        assert len(scored) == 2
+        assert all(score == 0.0 for _, _, score, _ in scored)
+        assert all(team == "黑" for _, _, _, team in scored)
+
+
+class TestTeamOfBox:
+    """整帧图 + 人框直接分队（串人守卫的数据源）。"""
+
+    def test_black_box(self) -> None:
+        # Arrange：全黑图
+        img = Image.new("RGB", (200, 400), (10, 10, 10))
+        # Act / Assert
+        assert team_of_box(img, Box(0, 0, 200, 400)) == "黑"
+
+    def test_white_box(self) -> None:
+        # Arrange：全白图
+        img = Image.new("RGB", (200, 400), (255, 255, 255))
+        # Act / Assert
+        assert team_of_box(img, Box(0, 0, 200, 400)) == "白"
+
+    def test_degenerate_box_returns_casual(self) -> None:
+        # Arrange：框完全出界
+        img = Image.new("RGB", (200, 400), (10, 10, 10))
+        # Act / Assert：退化框不瞎猜
+        assert team_of_box(img, Box(500, 500, 600, 600)) == "便服"
+
+
+class TestDropOppositeTeam:
+    """串人守卫：剔与种子明确相反（黑↔白）的帧，便服一律保留。"""
+
+    def _scored(self, items: list[tuple[int, str]]) -> list[tuple[int, Box, float, str]]:
+        return [(fi, Box(0, 0, 100, 200), 1.0, t) for fi, t in items]
+
+    def test_black_seed_drops_white(self) -> None:
+        # Arrange：种子帧 0=黑，帧 5=白，帧 10=便服
+        scored = self._scored([(0, "黑"), (5, "白"), (10, "便服")])
+        # Act
+        kept = drop_opposite_team(scored, 0)
+        # Assert：白帧被剔，便服保留
+        assert [fi for fi, _, _, _ in kept] == [0, 10]
+
+    def test_white_seed_drops_black(self) -> None:
+        # Arrange / Act
+        kept = drop_opposite_team(self._scored([(0, "黑"), (5, "白")]), 5)
+        # Assert
+        assert [fi for fi, _, _, _ in kept] == [5]
+
+    def test_casual_seed_no_filter(self) -> None:
+        # Arrange：种子为便服（不自信）→ 不过滤
+        scored = self._scored([(0, "便服"), (5, "白"), (10, "黑")])
+        # Act / Assert
+        assert drop_opposite_team(scored, 0) == scored
+
+    def test_seed_missing_no_filter(self) -> None:
+        # Arrange：种子帧不在 scored（帧图不可读）→ 不过滤
+        scored = self._scored([(5, "白"), (10, "黑")])
+        # Act / Assert
+        assert drop_opposite_team(scored, 0) == scored
+
+
+class TestPickBestFrames:
+    """质量选帧 top N：降序、≥0.5s（帧差 ≥3）去重、容量边界。"""
+
+    def _scored(self, items: list[tuple[int, float]]) -> list[tuple[int, Box, float, str]]:
+        """由 (frame_idx, score) 列表构造打分序列（框与 team 随意，不参与排序）。"""
+        return [(fi, Box(0, 0, 100, 200), s, "便服") for fi, s in items]
+
+    def test_descending_by_score(self) -> None:
+        # Arrange：帧距都够，纯按分排
+        scored = self._scored([(0, 1.0), (10, 9.0), (20, 5.0)])
+        # Act
+        picked = pick_best_frames(scored, 3)
+        # Assert
+        assert [fi for fi, _, _, _ in picked] == [10, 20, 0]
+
+    def test_spacing_dedup(self) -> None:
+        # Arrange：分降序帧 10/11/12/13/20；帧差 <3（<0.5s）的被去重
+        scored = self._scored([(10, 9.0), (11, 8.0), (12, 7.0), (13, 6.0), (20, 5.0)])
+        # Act
+        picked = pick_best_frames(scored, 5)
+        # Assert：11、12 距 10 太近被去重；13（差 3=0.6s）与 20 入选
+        assert [fi for fi, _, _, _ in picked] == [10, 13, 20]
+
+    def test_tie_breaks_by_frame_order(self) -> None:
+        # Arrange：同分 → 帧索引小者优先（稳定可测）
+        scored = self._scored([(8, 0.0), (2, 0.0), (5, 0.0)])
+        # Act
+        picked = pick_best_frames(scored, 3)
+        # Assert
+        assert [fi for fi, _, _, _ in picked] == [2, 5, 8]
+
+    def test_n_larger_than_candidates_returns_all(self) -> None:
+        # Arrange / Act
+        picked = pick_best_frames(self._scored([(0, 1.0), (10, 2.0)]), 5)
+        # Assert
+        assert len(picked) == 2
+
+    def test_empty_returns_empty(self) -> None:
+        # Arrange / Act / Assert
+        assert pick_best_frames([], 3) == []
+
+    def test_n_less_than_one_raises(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(ValueError, match="n ≥ 1"):
+            pick_best_frames(self._scored([(0, 1.0)]), 0)
+
+
+class TestCropNameRanked:
+    """多裁命名：rank 1 主名兼容，rank≥2 追加 _q{rank}。"""
+
+    def test_rank1_keeps_main_name(self) -> None:
+        # Arrange / Act / Assert
+        assert _crop_name_ranked("a_video", 2.0, 1) == "a_video_t2.0.jpg"
+
+    def test_rank2_appends_suffix(self) -> None:
+        # Arrange / Act / Assert
+        assert _crop_name_ranked("a_video", 2.0, 2) == "a_video_t2.0_q2.jpg"
+        assert _crop_name_ranked("a_video", 2.0, 3) == "a_video_t2.0_q3.jpg"
+
+
+class TestCliMultiCrop:
+    """CLI 端到端多裁：crops/crop_scores 契约、质量降序、SKIP 无多裁字段、--best-crops。"""
+
+    def test_multi_crop_contract(self, tmp_path: Path) -> None:
+        # Arrange：复用端到端合成场景（a_video OK 球 9 帧 + b_video SKIP 球）
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+            ]
+        )
+        # Assert
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        ok, skip = payload["candidates"]
+        # OK 球：crops 质量降序（全 0 分按帧序）、crop = crops[0]、三张裁图落盘
+        assert ok["crop"] == "a_video_t2.0.jpg"
+        assert ok["crops"] == ["a_video_t2.0.jpg", "a_video_t2.0_q2.jpg", "a_video_t2.0_q3.jpg"]
+        assert ok["crop_scores"] == [0.0, 0.0, 0.0]
+        for name in ok["crops"]:
+            assert (out / name).is_file()
+        # SKIP 球：无 crops/crop_scores 字段（向后兼容：消费方只看 crop）
+        assert skip["status"] == "SKIP"
+        assert "crops" not in skip
+        assert "crop_scores" not in skip
+
+    def test_quality_best_frame_is_rank1(self, tmp_path: Path) -> None:
+        # Arrange：帧 0 为暗色噪点图（清晰高分且 team=黑，与种子帧同队不被守卫剔除），
+        # 其余纯色（0 分）→ 帧 0 应为 rank1
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+        dark_noise = np.random.default_rng(42).integers(0, 40, (800, 1000, 3), dtype=np.uint8)
+        Image.fromarray(dark_noise).save(framesdir / "a_video" / "f_00001.jpg")
+        # Act
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+            ]
+        )
+        # Assert
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        ok = payload["candidates"][0]
+        assert ok["crop_scores"][0] > 0.0
+        assert ok["crop_scores"] == sorted(ok["crop_scores"], reverse=True)
+        assert len(ok["crops"]) == len(ok["crop_scores"]) == 3
+
+    def test_best_crops_arg_limits_count(self, tmp_path: Path) -> None:
+        # Arrange / Act：--best-crops 2
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+                "--best-crops",
+                "2",
+            ]
+        )
+        # Assert
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        ok = payload["candidates"][0]
+        assert ok["crops"] == ["a_video_t2.0.jpg", "a_video_t2.0_q2.jpg"]
+        assert not (out / "a_video_t2.0_q3.jpg").exists()
+
+    def test_best_crops_zero_rejected(self, tmp_path: Path) -> None:
+        # Arrange / Act / Assert：--best-crops 0 → CLI 显式失败（SystemExit 2）
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    "--goals",
+                    str(goals),
+                    "--detectdir",
+                    str(detectdir),
+                    "--framesdir",
+                    str(framesdir),
+                    "--out",
+                    str(out),
+                    "--best-crops",
+                    "0",
+                ]
+            )

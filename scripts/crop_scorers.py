@@ -27,6 +27,11 @@ SKIP 球无投篮者定位但仍切预览片段（立哥凭视频手选）。
 号码识别（--read-numbers，spec T7，2026-08-08 立哥拍板启用）：K3 读裁图背号
 （复用 vlm_filter 的 load_token/crop_to_b64/重试口径），结果落 number_cache.json
 幂等不重复扣额度。
+轨迹选帧多裁（--best-crops，默认 3，scorer-cluster spec §数据契约，2026-08-09）：
+定位成功后以定位帧人框为种子，向前后逐帧 IoU≥0.3 链同一人框（窗口 = 定位帧前后
+各 2s，5fps 即各 ≤10 帧，越界/链断即停）；链上帧逐帧读图算质量分（归一化框面积
+× Laplacian 方差），取 top N 且入选帧间隔 ≥0.5s 去重；entry 落 crops（质量降序）
+与 crop_scores，crop = crops[0] 保持向后兼容，rank≥2 文件名追加 _q2/_q3 后缀。
 """
 
 from __future__ import annotations
@@ -43,12 +48,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import cv2
 import httpx
 import numpy as np
 from PIL import Image
 
 from errors import BasketballPipelineError, ExternalApiError, SchemaError
-from geom import Box
+from geom import Box, iou
 from mot_candidates import Detection, Track, euclidean, run_mot
 from pipe_common import (
     atomic_write_json,
@@ -89,6 +95,12 @@ _EPS: float = 1e-9  # 浮点窗口边界的容差
 CROP_EXPAND: float = 0.2  # 人框外扩比例（每维放大到 1.2 倍，即每侧 10%）
 CROP_MIN_SHORT_SIDE: int = 400  # 短边下限（像素），不足等比放大（号码识别可读性下限）
 JPEG_QUALITY: int = 95  # 裁图保存质量（认人目检用，不省这点体积）
+
+# ---- 轨迹选帧多裁参数（scorer-cluster spec §数据契约，2026-08-09） ----
+TRACE_WINDOW_SEC: float = 2.0  # 选帧窗口 = 定位帧前后各 2s（5fps 即各 ≤10 帧），越界即停
+TRACE_MIN_IOU: float = 0.3  # 帧间人框 IoU 下限，低于即视为链断停链
+CROP_MIN_SPACING_SEC: float = 0.5  # 入选帧最小间隔（同人连续帧裁剪近乎重复，无信息增量）
+DEFAULT_BEST_CROPS: int = 3  # --best-crops 默认值（每球最多裁图张数）
 
 # ---- 认人预览片段参数（--rawdir 给定时逐球现切，与进球锚点严格对齐） ----
 PREVIEW_BEFORE_SEC: float = 4.0  # 窗口 = 锚点前 4s（与剪辑规格一致）
@@ -662,6 +674,67 @@ def locate_scorer(
     return LocateResult(STATUS_OK, "start_fallback", det.frame_idx, box, track.length, len(tracks))
 
 
+def _best_iou_box(boxes: tuple[Box, ...], ref: Box) -> Box | None:
+    """在候选框中取与 ref IoU 最大者；该帧无人或最大 IoU < TRACE_MIN_IOU 返回 None。
+
+    Args:
+        boxes: 某一帧的全部人框。
+        ref: 参照框（上一链上框）。
+
+    Returns:
+        IoU 最大的人框；不达标返回 None（调用方视为链断）。
+    """
+    if not boxes:
+        return None
+    best: Box = max(boxes, key=lambda b: iou(b, ref))
+    if iou(best, ref) < TRACE_MIN_IOU:
+        return None
+    return best
+
+
+def trace_person(
+    persons: tuple[tuple[Box, ...], ...], seed_frame: int, seed_box: Box
+) -> list[tuple[int, Box]]:
+    """以定位帧人框为种子向前后逐帧链同一人框（IoU≥TRACE_MIN_IOU，链断即停）。
+
+    窗口 = 定位帧前后各 TRACE_WINDOW_SEC（5fps 即各 ≤10 帧），越出 mot_cache
+    覆盖边界即停。每帧取与上一链上框 IoU 最大的人框续链（贴身对抗链错人的
+    残余风险由认人页预览片段视频终裁兜底，spec §数据契约）。
+
+    Args:
+        persons: 全量 persons 缓存（按帧索引，load_mot_cache 产物）。
+        seed_frame: 定位帧索引（链的种子，必含在返回序列中）。
+        seed_box: 定位帧上的投篮者人框。
+
+    Returns:
+        (frame_idx, box) 序列，按 frame_idx 升序；至少含种子帧一项。
+
+    Raises:
+        BasketballPipelineError: seed_frame 越出 persons 覆盖范围（逻辑错误显式失败）。
+    """
+    if not 0 <= seed_frame < len(persons):
+        raise BasketballPipelineError(
+            f"trace_person 种子帧越界: seed_frame={seed_frame} frames={len(persons)}"
+        )
+    span: int = round(TRACE_WINDOW_SEC * SAMPLE_FPS)
+    chain: dict[int, Box] = {seed_frame: seed_box}
+    last: Box = seed_box
+    for fi in range(seed_frame - 1, max(-1, seed_frame - span - 1), -1):
+        nxt: Box | None = _best_iou_box(persons[fi], last)
+        if nxt is None:
+            break
+        chain[fi] = nxt
+        last = nxt
+    last = seed_box
+    for fi in range(seed_frame + 1, min(len(persons), seed_frame + span + 1)):
+        nxt = _best_iou_box(persons[fi], last)
+        if nxt is None:
+            break
+        chain[fi] = nxt
+        last = nxt
+    return sorted(chain.items())
+
+
 def expand_box(box: Box, ratio: float, width: int, height: int) -> tuple[int, int, int, int]:
     """人框按比例外扩并裁剪到图像边界（每维放大 1+ratio 倍，即每侧 ratio/2）。
 
@@ -707,6 +780,109 @@ def crop_and_save(img_path: Path, box: Box, out_path: Path) -> None:
         crop.save(out_path, "JPEG", quality=JPEG_QUALITY)
 
 
+def frame_quality(img: Image.Image, box: Box) -> float:
+    """质量分 = 归一化框面积 × 框内灰度 Laplacian 方差（仅相对排序有意义）。
+
+    框先夹取到图像边界；夹取后退化为空框返回 0.0（防御，正常 mot_cache 框不触发）。
+
+    Args:
+        img: 帧图（与 box 同坐标系）。
+        box: 人框（未外扩，评投篮者本体的面积与清晰度）。
+
+    Returns:
+        质量分；面积按整帧占比归一，Laplacian 方差刻画清晰度。
+    """
+    x1: int = max(0, box.x1)
+    y1: int = max(0, box.y1)
+    x2: int = min(img.width, box.x2)
+    y2: int = min(img.height, box.y2)
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    arr = np.asarray(img.crop((x1, y1, x2, y2)).convert("L"))
+    sharpness: float = float(cv2.Laplacian(arr, cv2.CV_64F).var())
+    area_norm: float = ((x2 - x1) * (y2 - y1)) / (img.width * img.height)
+    return area_norm * sharpness
+
+
+def score_chain_frames(
+    chain: list[tuple[int, Box]], framesdir: Path, fid: str
+) -> list[tuple[int, Box, float, str]]:
+    """链上帧逐帧读图算质量分与队伍；帧图缺失/解码失败记 WARNING 跳过该帧（不炸整球）。
+
+    Args:
+        chain: trace_person 产物（frame_idx 升序）。
+        framesdir: 帧图根目录。
+        fid: 视频主名（帧路径映射用）。
+
+    Returns:
+        (frame_idx, box, score, team) 序列（保持链序，未按分排序）；跳过的帧不在其中。
+        team 由 team_of_box 在已开图像上直算（串人守卫用，零额外解码）。
+    """
+    scored: list[tuple[int, Box, float, str]] = []
+    for fi, box in chain:
+        path: Path = _frame_path(framesdir, fid, fi)
+        try:
+            with Image.open(path) as im:
+                rgb = im.convert("RGB")
+                score: float = frame_quality(rgb, box)
+                team: str = team_of_box(rgb, box)
+        except (OSError, ValueError) as exc:  # 文件缺失/损坏属业务可预期，跳过该帧
+            logger.warning("链上帧图不可读，跳过该帧: %s: %s", path, exc)
+            continue
+        scored.append((fi, box, score, team))
+    return scored
+
+
+def pick_best_frames(
+    scored: list[tuple[int, Box, float, str]], n: int
+) -> list[tuple[int, Box, float, str]]:
+    """按质量分降序贪心取 top n，入选帧间隔 ≥CROP_MIN_SPACING_SEC 去重。
+
+    质量分并列时按帧索引升序优先（稳定可测）；间隔按 5fps 帧差折算（0.5s=2.5 帧，
+    即帧差 ≥3 才入选）。
+
+    Args:
+        scored: score_chain_frames 产物（team 字段不参与排序，原样透传）。
+        n: 最多入选帧数（--best-crops）。
+
+    Returns:
+        入选 (frame_idx, box, score, team)，按质量分降序；scored 为空返回空列表。
+
+    Raises:
+        ValueError: n < 1（参数错误显式失败）。
+    """
+    if n < 1:
+        raise ValueError(f"pick_best_frames 要求 n ≥ 1，实际 {n}")
+    picked: list[tuple[int, Box, float, str]] = []
+    for item in sorted(scored, key=lambda it: (-it[2], it[0])):
+        if len(picked) >= n:
+            break
+        if all(abs(item[0] - sel[0]) / SAMPLE_FPS >= CROP_MIN_SPACING_SEC - _EPS for sel in picked):
+            picked.append(item)
+    return picked
+
+
+def _team_from_crop(crop_img: Image.Image) -> str:
+    """躯干主色分队核心逻辑（黑/白/便服）；采样区与阈值同 spec §颜色分队判据 M4。"""
+    hsv = crop_img.convert("HSV")
+    x1: int = round(hsv.width * 0.2)
+    x2: int = round(hsv.width * 0.8)
+    y1: int = round(hsv.height * 0.25)
+    y2: int = round(hsv.height * 0.6)
+    arr = np.asarray(hsv.crop((x1, y1, x2, y2)), dtype=np.uint8)
+    if arr.size == 0:
+        return TEAM_CASUAL  # 采样区退化（极小裁图）不瞎猜
+    sat = arr[..., 1].astype(np.int16)
+    val = arr[..., 2].astype(np.int16)
+    black_frac: float = float(np.mean(val < TH_BLACK))
+    white_frac: float = float(np.mean((val > TH_WHITE) & (sat < TH_SAT)))
+    if black_frac >= MIN_BLACK_FRACTION and black_frac >= white_frac:
+        return TEAM_BLACK
+    if white_frac >= MIN_WHITE_FRACTION:
+        return TEAM_WHITE
+    return TEAM_CASUAL
+
+
 def classify_team(crop_path: Path) -> str:
     """按躯干主色分队：黑 / 白 / 便服（spec §颜色分队判据 M4）。
 
@@ -720,23 +896,62 @@ def classify_team(crop_path: Path) -> str:
         "黑" / "白" / "便服"。
     """
     with Image.open(crop_path) as im:
-        hsv = im.convert("HSV")
-        x1: int = round(hsv.width * 0.2)
-        x2: int = round(hsv.width * 0.8)
-        y1: int = round(hsv.height * 0.25)
-        y2: int = round(hsv.height * 0.6)
-        arr = np.asarray(hsv.crop((x1, y1, x2, y2)), dtype=np.uint8)
-    if arr.size == 0:
-        return TEAM_CASUAL  # 采样区退化（极小裁图）不瞎猜
-    sat = arr[..., 1].astype(np.int16)
-    val = arr[..., 2].astype(np.int16)
-    black_frac: float = float(np.mean(val < TH_BLACK))
-    white_frac: float = float(np.mean((val > TH_WHITE) & (sat < TH_SAT)))
-    if black_frac >= MIN_BLACK_FRACTION and black_frac >= white_frac:
-        return TEAM_BLACK
-    if white_frac >= MIN_WHITE_FRACTION:
-        return TEAM_WHITE
-    return TEAM_CASUAL
+        return _team_from_crop(im)
+
+
+def team_of_box(img: Image.Image, box: Box) -> str:
+    """整帧图 + 人框直接分队（多裁串人守卫用，省去裁图落盘再读）。
+
+    Args:
+        img: 帧图（与 box 同坐标系）。
+        box: 人框（未外扩）。
+
+    Returns:
+        "黑" / "白" / "便服"；框夹取后退化为空归"便服"（不瞎猜）。
+    """
+    x1: int = max(0, box.x1)
+    y1: int = max(0, box.y1)
+    x2: int = min(img.width, box.x2)
+    y2: int = min(img.height, box.y2)
+    if x2 <= x1 or y2 <= y1:
+        return TEAM_CASUAL
+    return _team_from_crop(img.crop((x1, y1, x2, y2)))
+
+
+_OPPOSITE_TEAM: dict[str, str] = {TEAM_BLACK: TEAM_WHITE, TEAM_WHITE: TEAM_BLACK}
+
+
+def drop_opposite_team(
+    scored: list[tuple[int, Box, float, str]], seed_frame: int
+) -> list[tuple[int, Box, float, str]]:
+    """剔除与种子帧队伍明确相反（黑↔白）的链上帧（IoU 链串人守卫）。
+
+    种子为"便服"（判定不自信）或种子帧不在 scored（帧图不可读）时不过滤；
+    "便服"帧一律保留（近阈混杂可能是同一人）。
+
+    Args:
+        scored: score_chain_frames 产物（frame_idx, box, score, team）。
+        seed_frame: 定位帧索引（其 team 为基准）。
+
+    Returns:
+        过滤后的序列（保持原序）；被剔帧记 INFO 日志。
+    """
+    seed_team: str | None = next((t for fi, _b, _s, t in scored if fi == seed_frame), None)
+    opposite: str | None = _OPPOSITE_TEAM.get(seed_team or "")
+    if opposite is None:
+        return scored
+    kept: list[tuple[int, Box, float, str]] = []
+    dropped: list[int] = []
+    for item in scored:
+        if item[3] == opposite:
+            dropped.append(item[0])
+        else:
+            kept.append(item)
+    if dropped:
+        logger.info(
+            "串人守卫: 种子帧=%d team=%s，剔除 %s 队帧 %s", seed_frame, seed_team, opposite, dropped
+        )
+    return kept
 
 
 def _confirmed_goals(data: Any, goals_path: str) -> list[dict[str, Any]]:  # noqa: ANN401
@@ -780,6 +995,23 @@ def _frame_path(framesdir: Path, fid: str, frame_idx: int) -> Path:
 def _crop_name(fid: str, anchor_sec: float) -> str:
     """裁图文件名：<fid>_t<anchor:.1f>.jpg（同 fid 多球靠锚点区分）。"""
     return f"{fid}_t{anchor_sec:.1f}.jpg"
+
+
+def _crop_name_ranked(fid: str, anchor_sec: float, rank: int) -> str:
+    """多裁文件名：rank 1 = 主名（向后兼容），rank≥2 主名去后缀追加 _q{rank}。
+
+    Args:
+        fid: 视频主名。
+        anchor_sec: 进球锚点（秒）。
+        rank: 质量排名（1 起）。
+
+    Returns:
+        裁图文件名；rank=2/3 如 <fid>_t<anchor:.1f>_q2.jpg。
+    """
+    name: str = _crop_name(fid, anchor_sec)
+    if rank <= 1:
+        return name
+    return f"{name.removesuffix('.jpg')}_q{rank}.jpg"
 
 
 def preview_window(anchor_sec: float) -> tuple[float, float]:
@@ -877,8 +1109,14 @@ def _process_goal(
     outdir: Path,
     rawdir: Path | None = None,
     anchor_xy: tuple[int, int] | None = None,
+    best_crops: int = DEFAULT_BEST_CROPS,
 ) -> tuple[dict[str, Any], bool]:
-    """处理单个 confirmed 球：切预览片段（--rawdir 时，SKIP 球也切）→ 定位 → 裁图 → 颜色分队。
+    """处理单个 confirmed 球：切预览片段（--rawdir 时，SKIP 球也切）→ 定位 → 多裁 → 颜色分队。
+
+    多裁（scorer-cluster spec §数据契约）：定位 OK 后 trace_person 链同一人框 →
+    链上帧算质量分 → pick_best_frames 取 top best_crops（≥0.5s 去重）→ 逐张裁图。
+    entry 落 crops（质量降序文件名）与 crop_scores，crop = crops[0] 保持向后兼容；
+    crops/crop_scores 只在 status=OK 时存在，SKIP 条目不含这两个字段。
 
     Args:
         goal: confirmed 记录。
@@ -888,6 +1126,7 @@ def _process_goal(
         rawdir: 原片目录；None 表示不切预览片段。
         anchor_xy: 候选锚点 (cx, cy)（--candidates 匹配产物）；None 时轨迹选择
             退化为端点时间最近。
+        best_crops: 每球最多裁图张数（--best-crops）。
 
     Returns:
         (候选记录, 是否发生素材缺失错误)。素材缺失（cache/帧图/原片不存在、
@@ -942,20 +1181,36 @@ def _process_goal(
         entry["reason"] = "missing_frame"
         return entry, True
 
-    crop_name: str = _crop_name(fid, anchor)
-    crop_and_save(frame_path, result.box, outdir / crop_name)
-    team: str = classify_team(outdir / crop_name)
+    # 轨迹选帧多裁：定位帧人框为种子链同一人框，按质量分取 top best_crops（≥0.5s 去重）
+    chain: list[tuple[int, Box]] = trace_person(cache.persons, result.frame_idx, result.box)
+    scored: list[tuple[int, Box, float, str]] = score_chain_frames(chain, framesdir, fid)
+    scored = drop_opposite_team(scored, result.frame_idx)  # 串人守卫：剔黑↔白明确相反帧
+    picked: list[tuple[int, Box, float, str]] = pick_best_frames(scored, best_crops)
+    if not picked:  # 防御：定位帧 is_file 已过但解码失败 → 回退定位帧单裁（裁图报错由下层抛出）
+        picked = [(result.frame_idx, result.box, 0.0, TEAM_CASUAL)]
+    crops: list[str] = []
+    crop_scores: list[float] = []
+    for rank, (fi, box, score, _team) in enumerate(picked, start=1):
+        name: str = _crop_name_ranked(fid, anchor, rank)
+        crop_and_save(_frame_path(framesdir, fid, fi), box, outdir / name)
+        crops.append(name)
+        crop_scores.append(round(score, 4))
+    team: str = classify_team(outdir / crops[0])
     entry["status"] = STATUS_OK
-    entry["crop"] = crop_name
+    entry["crop"] = crops[0]
+    entry["crops"] = crops
+    entry["crop_scores"] = crop_scores
     entry["team_guess"] = team
     logger.info(
-        "定位 OK: %s 帧=%d 轨长=%d/%d %steam=%s",
+        "定位 OK: %s 帧=%d 轨长=%d/%d %steam=%s 多裁=%d/%d",
         entry["key"],
         result.frame_idx,
         result.votes,
         result.total_votes,
         "(起点回退) " if result.reason == "start_fallback" else "",
         team,
+        len(crops),
+        len(chain),
     )
     return entry, clip_failed
 
@@ -990,7 +1245,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=MAX_NUMBER_READS_PER_RUN,
         help="单次运行最大新识别张数（默认 %(default)s；立哥批准后显式放宽）",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--best-crops",
+        type=int,
+        default=DEFAULT_BEST_CROPS,
+        help="每球最多裁图张数（默认 %(default)s；轨迹选帧按质量分取 top N，≥0.5s 去重）",
+    )
+    ns = parser.parse_args(argv)
+    if ns.best_crops < 1:
+        parser.error("--best-crops 须 ≥ 1")
+    return ns
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1025,7 +1289,13 @@ def main(argv: list[str] | None = None) -> int:
                         format_key(goal["file"], float(goal["anchor_time"])),
                     )
             entry, had_missing = _process_goal(
-                goal, args.detectdir, args.framesdir, args.out, args.rawdir, anchor_xy
+                goal,
+                args.detectdir,
+                args.framesdir,
+                args.out,
+                args.rawdir,
+                anchor_xy,
+                args.best_crops,
             )
             entries.append(entry)
             missing_errors += int(had_missing)
