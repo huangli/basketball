@@ -1,27 +1,50 @@
 # plan：标注页同球双 J 自动识别
 
-## 步骤
+## Overview
 
-1. **读代码定口径**：读 `scripts/gen_label_page.py`（事件数据流、卡片渲染、导出逻辑）与 `scripts/gen_review_clips.py`（`CLIP_BEFORE_SEC = 2.0` / `CLIP_AFTER_SEC = 4.0`），确认 events_index 每条事件可用的字段（fid、anchor_t0、clip 路径等），窗口口径从 gen_review_clips 常量引用，不复制数字。近似口径取 `[anchor_t0 − CLIP_BEFORE_SEC, anchor_t0 + CLIP_AFTER_SEC]`——实际片段左界相对事件首候选（比 anchor 更早），events_index 无事件跨度字段，故左界为保守子集：重叠判定偏严、可能漏组但绝不误并，一期可接受。
-2. **分组函数**：新增纯函数（放 `gen_label_page.py` 或 `pipe_common.py`，视复用性定；倾向 gen_label_page 本地，一期只有它用）：
-   - 输入：同 fid 事件列表（anchor_t0 升序）
-   - 规则：相邻事件窗口 [anchor−前窗, anchor+后窗] 重叠即同组（传递闭包：A 叠 B、B 叠 C 则 ABC 同组）
-   - 输出：组号（无重叠事件组号为 None）
-3. **页面呈现**：同组卡片加同色左边框（组号→颜色轮换 4 色足够）+ 标签"疑似同回合（组 N，共 M 个）"。不改动现有 J/P/F 按键逻辑与断点续标。
-4. **导出校验**：导出按钮逻辑加前置检查——同组 ≥2 个 J 时弹确认（列出组内事件时间与缩略信息），选"同一球"则阻止导出并提示立哥把多余的 J 改判；选"两个球"则放行。选择不持久化（每次导出都问，防误记）。
-5. **测试**：
-   - 单测：分组函数覆盖——无重叠、两两重叠、传递闭包三事件、跨 fid 不混组、单事件
-   - 回放验证脚本（`work/` 下一次性）：对批次 3 events_index（全部 234 事件）跑分组，断言：① 8 组同球对全部命中同组；② 0 误分组——批次 3 鉴定过的真两球（203918/203928、205204/205158）与 42 个独立球不得被并入多事件组（断言清单见 spec 实测账目）
-   - 现有测试全绿
-6. **提交**：lint/format/test 关口过后按逻辑单元 commit。
+标注页（gen_label_page.py）增加"疑似同回合"分组能力：同 fid 内审核窗口重叠的事件分组标色提示，导出 goals 时同组 ≥2 个 J 弹确认。机器只提示不自动删，判定权在人。一期仅同文件，跨文件留二期。
 
-## 风险与对策
+## Architecture Decisions
 
-- **窗口口径漂移**：gen_review_clips 窗口参数若未来调整，分组规则须跟随——实现时从同一常量取值，并在注释中写明耦合关系。
-- **同名常量误引**：`gen_review_clips.py` 与 `gen_label_page.py` 均有 `CLIP_BEFORE_SEC/CLIP_AFTER_SEC` 但值不同（审核窗口前2后4 vs 导出剪辑前4后2）——import 时写全模块路径或 as 别名，禁止 `from x import CLIP_BEFORE_SEC` 裸引。
-- **传递闭包误并**：同文件密集事件（训练时段）可能连成大组——可接受（提示性质，不阻断），导出确认框按组列出即立哥可判。
-- **回放验证不过**：若 8 组有漏命中，查该组 anchor 差是否超窗口——超则窗口口径取错，回步骤 1。
+- **分组函数放 gen_label_page.py 本地**：一期只有它用，不进 pipe_common.py（避免过早抽象）
+- **窗口口径近似取 `[anchor_t0 − CLIP_BEFORE_SEC, anchor_t0 + CLIP_AFTER_SEC]`**：实际片段左界相对事件首候选（比 anchor 更早），events_index 无事件跨度字段；左界为保守子集——重叠判定偏严、可能漏组但绝不误并，一期可接受
+- **分组结果在 Python 侧生成页面时内联进事件数据**：页面 JS 只做呈现与导出检查，不在 JS 里重算分组（单一事实源）
+- **导出确认选择不持久化**：每次导出都问，防误记
+- **常量引用写全模块路径**：gen_review_clips 与 gen_label_page 有同名不同值的 CLIP_BEFORE_SEC/CLIP_AFTER_SEC（审核窗口前2后4 vs 导出剪辑前4后2），禁止裸 from-import
 
-## 验收
+## Task List
 
-- spec 成功标准三条逐条核对，结果记入 review01.md。
+### Phase 1：分组逻辑与验证（先证明规则对）
+
+- [ ] Task 1：分组纯函数 + 单测
+- [ ] Task 2：批次 3 回放验证（8 组全命中、0 误分组）
+
+### Checkpoint：分组规则可信
+
+- [ ] 单测 5 用例全过；回放断言全过；失败则回 Task 1 修口径，**不进入 Phase 2**
+
+### Phase 2：标注页呈现与导出校验
+
+- [ ] Task 3：同组卡片视觉分组 + "疑似同回合"标签（可与 Task 4 并行）
+- [ ] Task 4：导出前置确认框（可与 Task 3 并行）
+
+### Checkpoint：功能完整
+
+- [ ] 生成的 label.html 分组标记与确认框人工点开核对通过
+
+### Phase 3：关口与交付
+
+- [ ] Task 5：lint/format/test 关口 + commit
+
+## Risks and Mitigations
+
+| 风险 | 影响 | 对策 |
+|---|---|---|
+| 窗口口径漂移（gen_review_clips 参数未来调整） | 中 | 从同一常量取值，注释写明耦合 |
+| 同名常量误引（两模块 CLIP_* 值不同） | 高 | import 写全模块路径或 as 别名；review 时专项检查 |
+| 传递闭包误并（训练时段密集事件连成大组） | 低 | 提示性质不阻断；导出确认框按组列出由人判 |
+| 回放漏命中（anchor 差超窗口） | 中 | 说明口径取错，回 Task 1 修正，不动 UI |
+
+## Open Questions
+
+- 无（跨文件同球识别、自动合并均已明确划到二期/非目标）

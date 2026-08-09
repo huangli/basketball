@@ -1,11 +1,87 @@
 # todo：标注页同球双 J 自动识别
 
-- [ ] 1. 读 gen_label_page.py / gen_review_clips.py，确认事件字段与窗口口径常量
-- [ ] 2. 实现分组纯函数（同 fid、窗口重叠、传递闭包）
-- [ ] 3. 标注页同组卡片视觉分组 + "疑似同回合"标签
-- [ ] 4. 导出前置校验：同组 ≥2 J 弹确认（同一球阻止 / 两个球放行）
-- [ ] 5. 分组函数单测（5 个用例：无重叠/两两重叠/传递闭包/跨 fid/单事件）
-- [ ] 6. 批次 3 回放验证：8 组同球对全命中、0 误分组
-- [ ] 7. `ruff format && ruff check --fix && pytest -q` 全绿（--fix 后复核 diff）
-- [ ] 8. commit
-- [ ] 9. 下一生产批次观察双 J 是否 ≤1 例，结果回填本文件与 review
+## Task 1：分组纯函数 + 单测
+
+**Description：** 在 `scripts/gen_label_page.py` 新增纯函数：输入同 fid 事件列表（anchor_t0 升序），相邻事件窗口 `[anchor_t0 − CLIP_BEFORE_SEC, anchor_t0 + CLIP_AFTER_SEC]`（常量引自 gen_review_clips，写全模块路径）重叠即同组，传递闭包合并；输出每事件组号（无重叠为 None）。
+
+**Acceptance criteria：**
+- [ ] 无重叠事件各自独立（组号 None）
+- [ ] 两两重叠归同组；传递闭包三事件（A 叠 B、B 叠 C）同组
+- [ ] 跨 fid 事件绝不混组；单事件输入正常返回
+
+**Verification：**
+- [ ] `python -m pytest tests/test_gen_label_page.py -q` 新增 5 用例全过
+
+**Dependencies：** None
+**Files likely touched：** `scripts/gen_label_page.py`、`tests/test_gen_label_page.py`
+**Estimated scope：** S（1-2 文件）
+
+## Task 2：批次 3 回放验证
+
+**Description：** `work/` 下一次性脚本：对 `work/20260722/review_batch3/events_index.json`（全部 234 事件）跑 Task 1 分组函数，对照 `20260722地平线/goals_20260722_3.json`（61 J 原始导出）断言。脚本注释须注明：两条跨文件反例（203918/203928、205204/205158）在"仅同 fid"规则下由构造保证不并，0 误分组的真正考验是同文件 42 个独立球——防二期做跨文件时误读该断言含义。
+
+**Acceptance criteria：**
+- [ ] 8 组同球对全部命中同组（200730/200854/201604/201718/203946/204746/205942/210152，anchor 差 2.3~4.2s）
+- [ ] 0 误分组：真两球（203918/203928、205204/205158）与 42 个独立球不被并入多事件组
+
+**Verification：**
+- [ ] 回放脚本运行输出两组断言全 PASS（脚本落 `work/`，不入库）
+
+**Dependencies：** Task 1
+**Files likely touched：** `work/dedup_replay_check.py`（一次性，豁免 rules.md）
+**Estimated scope：** XS（1 文件）
+
+## Checkpoint：Task 1-2 完成 = 分组规则可信，失败回 Task 1，不进 Phase 2
+
+## Task 3：同组卡片视觉分组
+
+**Description：** gen_label_page.py 生成页面时把 Task 1 的组号内联进事件数据；同组事件加同色标识（组号→4 色轮换）+ 标签"疑似同回合（组 N，共 M 个）"。注意现行标注页是单事件翻页器（show(i) 一次一事件，无卡片网格），标识落点（进度行/verdict 区/video 容器边框）以实现时页面结构为准。不动 J/P/F 按键逻辑与断点续标。
+
+**Acceptance criteria：**
+- [ ] 同组事件可一眼识别（同色标识 + 组标签，落点不限）
+- [ ] 无组事件页面呈现与现状一致（无回归）
+- [ ] 断点续标（刷新回到上次位置）功能不受影响
+
+**Verification：**
+- [ ] 用批次 3 events_index 重新生成 label.html，人工打开核对 200730 等组呈现
+- [ ] `pytest -q` 全绿
+
+**Dependencies：** Task 1（Checkpoint 通过后开工）
+**Files likely touched：** `scripts/gen_label_page.py`、`tests/test_gen_label_page.py`
+**Estimated scope：** M（页面模板 + 测试）
+
+## Task 4：导出前置确认框
+
+**Description：** 导出 goals 的 JS 逻辑（exportGoals）加前置检查：同组 ≥2 个 J 时 confirm() 列出组内事件时间与文件名，"同一球"→ 阻止导出并提示改判；"两个球"→ 放行。选择不持久化，每次导出都问。
+
+**Acceptance criteria：**
+- [ ] 同组 2 J 弹确认且两条路径行为正确（阻止/放行）
+- [ ] 同组 1 J 或无组时不弹窗，导出行为与现状一致
+- [ ] 导出 JSON 结构与现行 schema 完全一致（file/anchor_time/clip_start/clip_end/status/scorer）
+
+**Verification：**
+- [ ] 人工在重新生成的 label.html 上构造同组 2 J 场景核对弹窗
+- [ ] `pytest -q` 全绿
+
+**Dependencies：** Task 1（Checkpoint 通过后开工；可与 Task 3 并行）
+**Files likely touched：** `scripts/gen_label_page.py`
+**Estimated scope：** S（页面内 JS）
+
+## Task 5：关口与交付
+
+**Description：** 全量质量关口与提交。
+
+**Acceptance criteria：**
+- [ ] `ruff format scripts tests && ruff check --fix scripts tests && pytest -q` 全绿（--fix 后复核 diff）
+- [ ] spec 成功标准逐条核对结果回填 review
+
+**Verification：**
+- [ ] 关口命令输出全绿；commit 完成
+
+**Dependencies：** Task 2、3、4 全部完成
+**Files likely touched：** 无新增
+**Estimated scope：** XS
+
+## 生产观察（下一批次）
+
+- [ ] 下一生产批次同球双 J ≤1 例，结果回填本文件与 review
