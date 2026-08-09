@@ -11,7 +11,8 @@
       work/<场次>/review*/events_index.json（新增场次素材跑完
       gen_review_clips --keep-clips 后零参数直接生成本场标注页）
 输出：同目录 label.html
-依赖：仅标准库
+依赖：标准库 + scripts/ 内模块（gen_review_clips 的窗口常量经全模块路径引用，
+      其 import 链 extract_frames/pipe_common 均为标准库、无模块级副作用）
 典型调用：
     python scripts/gen_label_page.py                      # 自动取最新索引
     python scripts/gen_label_page.py --index work/20260722/review_v3/events_index.json
@@ -122,7 +123,8 @@ small { color: #999; }
 </head>
 <body>
 <div id="bar">
-  <span id="prog"></span> <span class="badge" id="verdict"></span><br>
+  <span id="prog"></span> <span class="badge" id="verdict"></span>
+  <span class="badge" id="grp"></span><br>
   <button id="goal">进球 (J)</button>
   <button id="prac">进球但不收 (P)</button>
   <button id="no">不是 (F)</button>
@@ -173,6 +175,13 @@ function show(i) {
     `第 ${cur + 1}/${EVENTS.length} 个 | 已标 ${done}` +
     `（进球 ${goals} 不收 ${pracs}） | ${e.key} t=${e.anchor_t0}s`;
   document.getElementById("verdict").textContent = e.verdict || "";
+  const grpEl = document.getElementById("grp");
+  if (e.grp) {
+    grpEl.textContent = `疑似同回合（组 ${e.grp}，共 ${e.grp_size} 个）`;
+    grpEl.style.color = ["#fc3", "#3cf", "#f6c", "#6f6"][e.grp % 4];
+  } else {
+    grpEl.textContent = "";
+  }
   document.getElementById("sound").textContent = v.muted ? "声音：关" : "声音：开";
   document.getElementById("wide").textContent = "筐区视角 (W)";
 }
@@ -197,6 +206,23 @@ function jumpUnmarked() {
   show(n >= 0 ? n : cur);
 }
 function exportGoals() {
+  // 疑似同回合组多 J 前置检查（dedup-same-goal：机器只提示，判定权在人；
+  // 每次导出都问，选择不持久化）
+  const byGrp = {};
+  for (const e of EVENTS) {
+    if (!e.grp) continue;
+    const m = marks[e.key];
+    if (m && m.r === "goal") (byGrp[e.grp] = byGrp[e.grp] || []).push(e);
+  }
+  const issues = Object.entries(byGrp).filter(([, es]) => es.length >= 2);
+  if (issues.length) {
+    const lines = issues.map(([g, es]) =>
+      "组" + g + " " + es[0].src_file + "：" +
+      es.map(e => "t=" + e.anchor_t0 + "s").join(" 与 "));
+    const msg = "以下疑似同回合的组标了多个进球：\n" + lines.join("\n") +
+      "\n\n确定 = 确实是两个球（照导出）\n取消 = 是同一球（返回，把多余的进球改判）";
+    if (!confirm(msg)) return;
+  }
   const goals = [];
   for (const e of EVENTS) {
     const m = marks[e.key];
@@ -253,15 +279,32 @@ show(start >= 0 ? start : 0);
 def build_html(events: list[dict[str, Any]], session: str) -> str:
     """把事件列表渲染为自包含标注页 HTML。
 
+    疑似同回合分组（assign_same_rally_groups）在此注入：成组事件内联数据
+    加 grp（组号）/ grp_size（组大小）字段，页面据以显示"疑似同回合"标签，
+    导出时同组多进球弹确认（机器只提示，判定权在人）。
+
     Args:
-        events: events_index.json 中的事件列表（原样内联进页面）。
+        events: events_index.json 中的事件列表（复制后加 grp 字段内联，
+            不改调用方原 dict）。
         session: 场次名（页面标题与 localStorage 键后缀）。
 
     Returns:
         label.html 全文。
     """
+    groups: dict[str, int] = assign_same_rally_groups(events)
+    sizes: dict[int, int] = {}
+    for g in groups.values():
+        sizes[g] = sizes.get(g, 0) + 1
+    enriched: list[dict[str, Any]] = []
+    for e in events:
+        item: dict[str, Any] = dict(e)
+        g: int | None = groups.get(e.get("key"))
+        if g is not None:
+            item["grp"] = g
+            item["grp_size"] = sizes[g]
+        enriched.append(item)
     return (
-        _HTML.replace("__EVENTS__", json.dumps(events, ensure_ascii=False))
+        _HTML.replace("__EVENTS__", json.dumps(enriched, ensure_ascii=False))
         .replace("__SESSION__", session)
         .replace("__BEFORE__", str(CLIP_BEFORE_SEC))
         .replace("__AFTER__", str(CLIP_AFTER_SEC))

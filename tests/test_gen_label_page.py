@@ -10,6 +10,8 @@ import os
 import pathlib
 from typing import Any
 
+import pytest
+
 from gen_label_page import assign_same_rally_groups, build_html, find_latest_index
 
 
@@ -130,3 +132,51 @@ def test_groups_two_separate_groups_numbered_in_order() -> None:
     groups = assign_same_rally_groups(events)
     # Assert
     assert groups == {"f1#e0": 1, "f1#e1": 1, "f1#e2": 2, "f1#e3": 2}
+
+
+def test_build_html_injects_group_fields_for_overlapping_events() -> None:
+    # Arrange：同 fid 两事件窗口重叠（anchor 差 3s）
+    events = [_event("f1#e0", anchor_t0=1.0), _event("f1#e1", anchor_t0=4.0)]
+    # Act
+    html = build_html(events, "s")
+    # Assert：组号与组大小内联进事件数据，页面含组标签元素
+    assert '"grp": 1' in html
+    assert '"grp_size": 2' in html
+    assert 'id="grp"' in html
+    assert "疑似同回合" in html
+    # 且不改调用方原 dict（无副作用）
+    assert "grp" not in events[0] and "grp" not in events[1]
+
+
+def test_build_html_ungrouped_events_have_no_grp_field() -> None:
+    # Arrange：单事件不成组
+    # Act
+    html = build_html([_event()], "s")
+    # Assert：内联事件数据无 grp 字段（带冒号限定 JSON 字段形式，
+    # 排除模板里 getElementById("grp") 的固有子串）
+    assert '"grp":' not in html
+
+
+def test_build_html_export_has_same_rally_confirm() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：导出前置确认框（同组多进球时 confirm 拦截）
+    assert "confirm(" in html
+    assert "确实是两个球" in html
+
+
+def test_groups_skips_events_missing_fields(caplog: pytest.LogCaptureFixture) -> None:
+    # Arrange：缺 anchor_t0 / fid / key 的事件各一 + 一条合法重叠对
+    events = [
+        {"fid": "f1", "key": "f1#e0"},  # 缺 anchor_t0
+        {"anchor_t0": 1.0, "key": "f1#e1"},  # 缺 fid
+        {"fid": "f1", "anchor_t0": 1.0},  # 缺 key
+        _event("f1#e2", anchor_t0=1.0),
+        _event("f1#e3", anchor_t0=3.0),
+    ]
+    # Act
+    with caplog.at_level("WARNING", logger="gen_label_page"):
+        groups = assign_same_rally_groups(events)
+    # Assert：残缺事件跳过并记 WARNING，合法事件正常成组
+    assert groups == {"f1#e2": 1, "f1#e3": 1}
+    assert caplog.text.count("跳过同回合分组") == 3
