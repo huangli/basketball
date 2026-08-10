@@ -47,7 +47,7 @@
 
 ## 工作流约定
 
-- **方案主文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配，先读它再动手）；对外需求文档 `docs/2026-07-28-goal-autotriage-requirements.md`
+- **方案主文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配，先读它再动手）；对外需求文档 `docs/2026-07-28-goal-autotriage-requirements.md`；**经验教训速查 `docs/经验教训.md`**（历次实测结论与已证伪方向集中索引，动手新方向前先查）
 - 中间产物放 `work\`（frames / detect / <场次>/），成品放 `output\<场次>\`；旧 v1 产物已归档 `archive/work_legacy/`（gitignore）
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
 - **检测流水线**（详见主文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，疑似同回合分组与倍速控制等提效功能见 `docs/dedup-same-goal/`、`docs/label-speedup/`）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**事件级 K3 判定已下线**（2026-08-01 立哥定，对照账见主文档 §4 批次 2）
