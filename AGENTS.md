@@ -50,14 +50,15 @@
 - **方案主文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配，先读它再动手）；对外需求文档 `docs/2026-07-28-goal-autotriage-requirements.md`；**经验教训速查 `docs/经验教训.md`**（历次实测结论与已证伪方向集中索引，动手新方向前先查）
 - 中间产物放 `work\`（frames / detect / <场次>/），成品放 `output\<场次>\`；旧 v1 产物已归档 `archive/work_legacy/`（gitignore）
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
-- **检测流水线**（详见主文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，疑似同回合分组与倍速控制等提效功能见 `docs/dedup-same-goal/`、`docs/label-speedup/`）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**事件级 K3 判定已下线**（2026-08-01 立哥定，对照账见主文档 §4 批次 2）
+- **检测流水线**（详见主文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，疑似同回合分组与倍速控制等提效功能见 `docs/dedup-same-goal/`、`docs/label-speedup/`）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**新场次用 `run_session.py <素材目录> --session <场次ID>` 一键串联至双页面生成（切批/断点续跑/尺寸探测注入；标注与合集合成仍手工），标注前先开 triage.html 缩略图墙批量预否低质候选（只能否不能是，与标注页共享标注记录），见 `docs/batch-speedup/`**；**事件级 K3 判定已下线**（2026-08-01 立哥定，对照账见主文档 §4 批次 2）
 - **文档自审（强制）**：创建或修改 `docs/` 下文档（含各功能子文件夹四件套）、`AGENTS.md`、`rules.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
 - 进球归属：个人合集需标进球者；立哥人工标注（当前），照片库自动认人（待立哥供照）
 
-## 当前状态（2026-08-09；20260722 场次全量闭环）
+## 当前状态（2026-08-10；20260722 场次全量闭环）
 
 - **三批次总账：300 视频全量跑完，103 confirmed 进球**（17 + 35 + 51），全部经立哥合集验收；批次明细、去重鉴定、系统性发现见主文档 §4
 - **合集口径（2026-08-08 立哥定）**：不出全员总合集；分队合集按队伍出但依赖认人（批次 2/3 未标 scorer），立哥暂不认人——要分队合集时先跑认人流程
 - **认人流程（已固化）**：crop_scorers.py（轨迹法定位+多裁选帧+串人守卫+颜色分队预填；--read-numbers 多帧众数投票读号）→（可选）cluster_scorers.py（聚类仅分组预填不终裁，定稿 **CLIP `--linkage complete --threshold 0.15`**；OSNet 后端备用不推荐）→ gen_scorer_page.py（确认页，--clusters 簇级选人+逐球覆盖，--players-file 注入名单，裁图仅辅助、视频为终裁）→ 立哥确认导出 roster.json → build_highlight.py --roster/--scorer/--team 出合集；参数与标定细节见 `docs/scorer/`、`docs/scorer-cluster/`、`docs/scorer-reid/`
 - **机器裁判方向终结（已证伪）**：K3 事件级判定、豆包视频模型慢放判定均撞"盲区像素证据弱"同一堵墙；**架构定位 = 机器排序 + 人裁判**；自动剔除长期关闭（0 漏检宣称需 299 独立正样本 ≈15 场次，NO 只排序不剔除）
+- **跑批提效已交付（2026-08-10，待立哥实操验收）**：batch-speedup 两件套——①triage.html 缩略图墙扫尾（每事件锚点 ±0.4s 三帧、只能否不能是、与标注页共享标注记录，批次 3 回放 234/234 零降级）；②run_session.py 一键跑批（探测尺寸注入/切批 50/断点续跑/故障即停，dry-run 可审计）；补已跑场次素材用 `--force --fids 新文件`；四件套与边界记录在 `docs/batch-speedup/`
 - 待办：球员照片库待立哥新增（到手后可上人脸识别预填）；新比赛素材待立哥加入
