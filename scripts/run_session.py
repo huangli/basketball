@@ -443,6 +443,8 @@ def build_stage_plan(
                     str(events_index),
                     "--session",
                     session_dir.name,
+                    "--hoops",
+                    str(hoops),
                 ),
             ),
         )

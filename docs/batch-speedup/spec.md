@@ -28,8 +28,14 @@ dedup + label-speedup 已把标注侧砍一刀（同组跳过 + 有效 2x）。�
   **该映射做单点公共函数**，新脚本不另写魔数 5）。每事件取该帧及其 ±2 帧
   （±0.4s；钳位到 [1, 帧数]；缺帧降级为可用帧并记 WARNING，不崩；
   anchor_t0 按 0.1s 存储的 ±1 帧舍入误差在 ±2 帧窗口内可吸收）
-- 用 PIL 生成 480px 宽缩略图落 `<review_dir>/thumbs/`
-- 生成 `triage.html` 网格墙：每卡片 = 3 帧横排 + 事件信息（key、
+- 用 PIL 生成缩略图落 `<review_dir>/thumbs/`：**默认筐区裁剪**——`--hoops`
+  传入 detect_hoops 产物后，以事件锚点（筐/球静止点，帧图像素坐标）为中心
+  裁帧宽 40% 的 16:9 窗口、640px 落盘（2026-08-11 批次 3 实测：全景 480px
+  缩略图球仅几像素无法判读，筐区裁剪后入网瞬间清晰可辨，验收反馈修复）；
+  锚点缺失事件降级全景 480px（等比不裁不切）并记降级清单；不传 --hoops
+  整页全景降级
+- 生成 `triage.html` 网格墙：每卡片 = 锚点帧（入网瞬间）100% 宽大图主判 +
+  ±0.4s 两帧小图参考 + 事件信息（key、
   anchor_t0、src_file、疑似同回合组标签复用 assign_same_rally_groups；
   缺 fid/anchor_t0/key 的残次事件跳过 + WARNING + 结尾汇总，与
   assign_same_rally_groups 同款口径）

@@ -8,17 +8,22 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 from typing import Any
 
 import pytest
 from PIL import Image
 
+from errors import BasketballPipelineError
 from gen_triage_page import (
+    CROP_WIDTH,
     build_event_thumbs,
     build_html,
     derive_session,
     frame_indices,
+    load_anchors,
+    make_thumbnail,
     safe_name,
 )
 
@@ -205,6 +210,134 @@ def test_build_event_thumbs_does_not_mutate_input(tmp_path: pathlib.Path) -> Non
     assert "thumbs" not in events[0]
 
 
+# ---------- make_thumbnail：筐区裁剪模式 ----------
+
+
+def test_make_thumbnail_crop_mode_centers_on_anchor(tmp_path: pathlib.Path) -> None:
+    # Arrange：96×54 帧图，anchor 正中
+    src = tmp_path / "f.jpg"
+    Image.new("RGB", (96, 54), (10, 20, 30)).save(src, "JPEG")
+    dst = tmp_path / "t.jpg"
+    # Act
+    mode = make_thumbnail(src, dst, anchor=(48.0, 27.0))
+    # Assert：裁剪模式 + 落盘宽度 = CROP_WIDTH
+    assert mode == "crop"
+    with Image.open(dst) as im:
+        assert im.width == CROP_WIDTH
+
+
+def test_make_thumbnail_crop_clamps_out_of_bounds_anchor(tmp_path: pathlib.Path) -> None:
+    # Arrange：anchor 越界（负坐标，脏数据防御）
+    src = tmp_path / "f.jpg"
+    Image.new("RGB", (96, 54), (10, 20, 30)).save(src, "JPEG")
+    dst = tmp_path / "t.jpg"
+    # Act / Assert：钳位不崩，仍产裁剪图
+    assert make_thumbnail(src, dst, anchor=(-50.0, 999.0)) == "crop"
+    assert dst.is_file()
+
+
+def test_make_thumbnail_full_mode_without_anchor(tmp_path: pathlib.Path) -> None:
+    # Arrange / Act：无 anchor → 全景等比缩放（旧行为）
+    src = tmp_path / "f.jpg"
+    Image.new("RGB", (96, 54), (10, 20, 30)).save(src, "JPEG")
+    dst = tmp_path / "t.jpg"
+    assert make_thumbnail(src, dst) == "full"
+    with Image.open(dst) as im:
+        assert im.width == 480
+
+
+# ---------- load_anchors：hoops 锚点映射 ----------
+
+
+def _write_hoops(path: pathlib.Path, events: list[Any]) -> None:
+    """写最小 hoops json（detect_hoops 产物结构）。"""
+    path.write_text(json.dumps({"events": events}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_load_anchors_parses_valid_entries(tmp_path: pathlib.Path) -> None:
+    # Arrange：两合法 + 三类非法（anchor 缺失 / 形状错 / 含 bool）
+    p = tmp_path / "hoops.json"
+    _write_hoops(
+        p,
+        [
+            {"key": "f1#e0", "anchor": [931, 877]},
+            {"key": "f1#e1", "anchor": [10.5, 20.5]},
+            {"key": "f1#e2"},
+            {"key": "f1#e3", "anchor": [1]},
+            {"key": "f1#e4", "anchor": [True, 2]},
+            "garbage",
+        ],
+    )
+    # Act
+    anchors = load_anchors(p)
+    # Assert：仅合法两条进映射，非法静默跳过（降级归调用方记录）
+    assert anchors == {"f1#e0": (931.0, 877.0), "f1#e1": (10.5, 20.5)}
+
+
+def test_load_anchors_filters_non_finite(tmp_path: pathlib.Path) -> None:
+    # Arrange：Python json 默认放行 NaN/Infinity 字面量，isfinite 防御过滤
+    p = tmp_path / "hoops.json"
+    p.write_text(
+        '{"events": [{"key": "f1#e0", "anchor": [NaN, 2]},'
+        ' {"key": "f1#e1", "anchor": [1, Infinity]},'
+        ' {"key": "f1#e2", "anchor": [3, 4]}]}',
+        encoding="utf-8",
+    )
+    # Act / Assert：仅有限值条目进映射（round(nan) 会在裁剪时炸整页生成）
+    assert load_anchors(p) == {"f1#e2": (3.0, 4.0)}
+
+
+def test_load_anchors_missing_file_raises_oserror(tmp_path: pathlib.Path) -> None:
+    # Arrange / Act / Assert：文件缺失 read_json 重试后抛 OSError（main 捕获转退出码 1）
+    with pytest.raises(OSError):
+        load_anchors(tmp_path / "nope.json")
+
+
+def test_load_anchors_corrupt_json_raises_pipeline_error(tmp_path: pathlib.Path) -> None:
+    # Arrange：JSON 损坏
+    p = tmp_path / "hoops.json"
+    p.write_text("{not json", encoding="utf-8")
+    # Act / Assert：read_json 口径抛 BasketballPipelineError
+    with pytest.raises(BasketballPipelineError):
+        load_anchors(p)
+
+
+# ---------- build_event_thumbs：带锚点裁剪与降级 ----------
+
+
+def test_build_event_thumbs_with_anchors_marks_crop_mode(tmp_path: pathlib.Path) -> None:
+    # Arrange：两事件，一个有锚点一个没有
+    frames = tmp_path / "frames"
+    _make_frames(frames, "f1", [1, 2, 3, 4, 5])
+    thumbs_dir = tmp_path / "thumbs"
+    thumbs_dir.mkdir()
+    events = [_event("f1#e0", anchor_t0=0.4), _event("f1#e1", anchor_t0=0.4)]
+    # Act
+    enriched, degraded, skipped = build_event_thumbs(
+        events, frames, thumbs_dir, {"f1#e0": (48.0, 27.0)}
+    )
+    # Assert：有锚点全 crop；无锚点 full 降级 + 降级清单记录；无跳过
+    assert skipped == []
+    assert [t["mode"] for t in enriched[0]["thumbs"]] == ["crop", "crop", "crop"]
+    assert [t["mode"] for t in enriched[1]["thumbs"]] == ["full", "full", "full"]
+    assert len(degraded) == 1 and "hoops 无锚点" in degraded[0]
+
+
+def test_build_event_thumbs_marks_anchor_frame_under_clamp(tmp_path: pathlib.Path) -> None:
+    # Arrange：anchor 0.0s 低端钳位去重 → 帧 [1, 3]，锚点帧 1 在 index 0 而非中间
+    frames = tmp_path / "frames"
+    _make_frames(frames, "f1", [1, 2, 3])
+    thumbs_dir = tmp_path / "thumbs"
+    thumbs_dir.mkdir()
+    # Act
+    enriched, _, _ = build_event_thumbs([_event(anchor_t0=0.0)], frames, thumbs_dir)
+    # Assert：is_anchor 显式标记在帧 1 上（页面大图按标记取，不按位置假设）
+    assert [(t["frame"], t["is_anchor"]) for t in enriched[0]["thumbs"]] == [
+        (1, True),
+        (3, False),
+    ]
+
+
 # ---------- derive_session ----------
 
 
@@ -269,6 +402,23 @@ def test_build_html_lazy_loading_thumbs() -> None:
     html = build_html([_thumbed_event()], "s")
     # Assert：缩略图懒加载（234 事件墙一次性加载会卡爆）
     assert 'loading="lazy"' in html
+
+
+def test_build_html_anchor_frame_is_main_image() -> None:
+    # Arrange / Act
+    html = build_html([_thumbed_event()], "s")
+    # Assert：主图按 is_anchor 标记取（钳位去重时锚点项不在中间），无标记回退中间项
+    assert 'class="main"' in html
+    assert "e.thumbs.findIndex(t => t.is_anchor)" in html
+    assert '<div class="subs">' in html
+
+
+def test_build_html_full_mode_badge() -> None:
+    # Arrange / Act
+    html = build_html([_thumbed_event()], "s")
+    # Assert：全景降级事件有角标（无锚点的卡不是筐区特写，判读慎用）
+    assert "全景降级" in html
+    assert 't.mode === "full"' in html
 
 
 def test_build_html_injects_group_fields() -> None:
