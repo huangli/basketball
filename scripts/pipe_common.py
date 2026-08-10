@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 JSON_RETRY_BACKOFF_SEC: tuple[float, ...] = (0.0, 0.5, 1.0, 2.0)
 
 
+def sec_to_frame_idx(sec: float, fps: float) -> int:
+    """秒数 → 抽帧帧号（1 起）：round(sec × fps) + 1，钳位到 ≥1。
+
+    与 mot_candidates.parse_sec（sec=(idx-1)/5，f_00001 ↔ t=0）互逆；
+    供缩略图墙等按时刻定位帧图的场景使用。fps 显式传参
+    （pipe_common 被 mot_candidates 引用，反向 import 常量会成环）。
+
+    Args:
+        sec: 秒数（允许负值，钳位到帧号 1）。
+        fps: 抽帧帧率（生产为 mot_candidates.SAMPLE_FPS=5.0）。
+
+    Returns:
+        1 起的帧号。
+    """
+    return max(1, round(sec * fps) + 1)
+
+
 class RunIdFilter(logging.Filter):
     """把 run_id 注入每条日志记录，供格式串 %(run_id)s 使用。"""
 

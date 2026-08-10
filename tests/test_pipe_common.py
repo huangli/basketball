@@ -11,7 +11,21 @@ import pathlib
 import pytest
 
 from errors import SchemaError
-from pipe_common import atomic_write_json, read_json
+from pipe_common import atomic_write_json, read_json, sec_to_frame_idx
+
+
+def test_sec_to_frame_idx_mapping() -> None:
+    # Arrange / Act / Assert：与 mot_candidates.parse_sec 互逆（f_00001 ↔ t=0）
+    assert sec_to_frame_idx(0.0, 5.0) == 1
+    assert sec_to_frame_idx(6.1, 5.0) == 31
+    assert sec_to_frame_idx(0.2, 5.0) == 2
+    # 0.1s 存储精度带来的 .5 舍入在 ±2 帧窗口内可吸收，方向不限定
+    assert sec_to_frame_idx(0.1, 5.0) in (1, 2)
+
+
+def test_sec_to_frame_idx_clamps_negative() -> None:
+    # Arrange / Act / Assert：负秒数钳位到帧号 1
+    assert sec_to_frame_idx(-3.0, 5.0) == 1
 
 
 def test_atomic_write_json_roundtrip(tmp_path: pathlib.Path) -> None:
