@@ -38,7 +38,9 @@ from pipe_common import atomic_write_json, configure_logging, new_run_id, read_j
 logger = logging.getLogger(__name__)
 
 CANDIDATES_JSON: str = "work/label/candidates.json"
-RAW_GLOB: str = "archive/0_raw_videos_test/**/*_{fid}_D.MP4"  # 测试素材已归档；新场次处理时参数化
+RAW_GLOB: str = (
+    "archive/0_raw_videos_test/**/*_{fid}_D.MP4"  # 旧测试素材 2026-08-11 已删除；新场次参数化
+)
 OUT_DIR: str = "work/review"
 
 CLUSTER_GAP_SEC: float = 2.0  # 候选间隔 <= 该值归为同一事件（同进球触发候选实测间隔 <=1.7s）

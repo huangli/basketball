@@ -23,7 +23,6 @@
 ## 素材关键事实（已验证）
 
 - **素材规格不假设**：已验证过两种形态——HEVC 3840×2160 (16:9) 10-bit 59.94fps（dji_mimo 命名）与 4:3 8-bit 50/100fps；处理前必须 ffprobe 确认，脚本尺寸参数需按场次注入
-- 旧测试素材（20250419，114 文件 4:3：109 个 8-bit 50fps + 5 个 100fps）已归档 `archive/0_raw_videos_test/`，仅作回归用
 - 文件名即拍摄时间；大疆文件带 data 流和缩略图流，转码用 `-map 0:v:0 -map 0:a:0` 显式选流
 - 不删除/不修改任何原始视频文件；素材目录的增删由立哥自己操作
 
@@ -49,7 +48,7 @@
 ## 工作流约定
 
 - **方案主文档**：`docs/2026-07-26-current-goal-detection-pipeline.md`（流水线、实测指标、已证伪清单、素材适配，先读它再动手）；对外需求文档 `docs/2026-07-28-goal-autotriage-requirements.md`；**经验教训速查 `docs/经验教训.md`**（历次实测结论与已证伪方向集中索引，动手新方向前先查）
-- 中间产物放 `work\`（frames / detect / <场次>/），成品放 `output\<场次>\`；旧 v1 产物已归档 `archive/work_legacy/`（gitignore）
+- 中间产物放 `work\`（frames / detect / <场次>/），成品放 `output\<场次>\`；旧 v1 中间产物与旧测试原片已随 archive 清理删除（2026-08-11，释放 33G），`archive/` 现仅存 git 跟踪的冻结代码与文档
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
 - **检测流水线**（详见主文档）：抽帧 5fps → abdullahtarek+yolov8n 检测 → MOT 静止段+断轨重连候选 → 筐轨迹补检 → 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，疑似同回合分组与倍速控制等提效功能见 `docs/dedup-same-goal/`、`docs/label-speedup/`）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**新场次用 `run_session.py <素材目录> --session <场次ID>` 一键串联至双页面生成（切批/断点续跑/尺寸探测注入；标注与合集合成仍手工），标注前先开 triage.html 缩略图墙批量预否低质候选（只能否不能是，与标注页共享标注记录），见 `docs/batch-speedup/`**；**事件级 K3 判定已下线**（2026-08-01 立哥定，对照账见主文档 §4 批次 2）
 - **文档自审（强制）**：创建或修改 `docs/` 下文档（含各功能子文件夹四件套）、`AGENTS.md`、`rules.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过

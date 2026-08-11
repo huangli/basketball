@@ -42,7 +42,7 @@ from roster import Roster, format_key, resolve_scorer, validate_roster
 
 logger = logging.getLogger(__name__)
 
-RAW_DIR: str = "archive/0_raw_videos_test"  # 默认原片目录（旧测试素材）；新场次用 --rawdir 注入
+RAW_DIR: str = "archive/0_raw_videos_test"  # 旧测试素材 2026-08-11 已删除；新场次用 --rawdir 注入
 OUT_ROOT: str = "output"
 OUT_W: int = 1440
 OUT_H: int = 1080

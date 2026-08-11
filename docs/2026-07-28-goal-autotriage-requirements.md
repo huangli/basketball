@@ -194,7 +194,7 @@
 | 人工标注真值 | `work/20260722/goals.json` | `{session, goals:[{file, anchor_time, clip_start, clip_end, status, scorer}]}`；21 条 = 20 confirmed + 1 rejected；status 合法值见附术语 |
 | 已产出合集 | `output/20260722/个人_全员_进球合集.mp4` | 1920×1080 50fps 成品参照 |
 | 检测模型 | `models/abdullahtarek_ball.pt`（球）、`models/yolov8n.pt`（人） | 现役主力；其余两个 .pt 为已证伪留档 |
-| 旧素材回归集 | `archive/0_raw_videos_test/` | 114 文件 4:3；`work/label/` 有其验证集与 VLM 缓存 |
+| 旧素材回归集 | ~~`archive/0_raw_videos_test/`~~（2026-08-11 已删除释放磁盘，git 未跟踪不可恢复） | 114 文件 4:3；原 `work/label/` 验证集与 VLM 缓存已随 `archive/work_legacy/` 一并删除 |
 
 **覆盖边界**：上述真值只覆盖首批 50 个视频；全量 300 个视频中其余 250 个尚未处理、
 无标注。20 个 confirmed 是「进球」真值，不是「全部进球」的完备真值
