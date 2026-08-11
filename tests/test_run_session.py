@@ -199,9 +199,9 @@ class TestBuildStagePlan:
         fids = [f"dji_{i:03d}" for i in range(51)]
         # Act
         plans = self._plans(make_batches(fids, 50))
-        # Assert：51 文件切 2 批，每批 7 条命令（②-⑦，⑦ 含双页面）
+        # Assert：51 文件切 2 批，每批 6 条命令（②-⑦；triage 墙 2026-08-11 下线）
         assert [p.label for p in plans] == ["batch1", "batch2"]
-        assert all(len(p.commands) == 7 for p in plans)
+        assert all(len(p.commands) == 6 for p in plans)
         assert plans[1].fids == ("dji_050",)
         assert plans[0].candidates == pathlib.Path("work/s1/candidates_batch1.json")
         assert plans[0].hoops == pathlib.Path("work/s1/hoops_batch1.json")
@@ -223,10 +223,9 @@ class TestBuildStagePlan:
         assert "--orig 3840x2160" in stage6
         assert "--srcdir 素材目录" in stage6
         assert "--hoops" in stage6 and "hoops_batch1.json" in stage6
-        # ⑦ 双页面显式 --index/--session
+        # ⑦ 标注页显式 --index/--session（triage 墙 2026-08-11 下线，⑦ 仅 label 页）
         assert "--index" in joined[5] and "--session s1" in joined[5]
-        assert "--index" in joined[6] and "--session s1" in joined[6]
-        assert "gen_label_page.py" in joined[5] and "gen_triage_page.py" in joined[6]
+        assert "gen_label_page.py" in joined[5]
         # ② 如实标注"全场抽 + 幂等跳过"
         assert "全场抽" in plan.commands[0].note
 

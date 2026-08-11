@@ -2,11 +2,13 @@
 
 输入：原片目录（递归扫描 .mp4）、场次 ID。
 输出：work/<场次>/session_facts.json、candidates_batchK.json、hoops_batchK.json、
-    review_batchK/（含 events_index.json 与 label.html / triage.html）、
+    review_batchK/（含 events_index.json 与 label.html）、
     work/<场次>/run_session.log。
 依赖：scripts/pipe_common.py；以 subprocess 调 extract_frames / mot_candidates /
-    pilot_candidates / detect_hoops / gen_review_clips / gen_label_page /
-    gen_triage_page 七个老脚本（全部显式传参，不依赖其默认常量）。
+    pilot_candidates / detect_hoops / gen_review_clips / gen_label_page
+    六个老脚本（全部显式传参，不依赖其默认常量）。
+    （triage.html 扫尾墙已于 2026-08-11 下线：与 label.html 功能重复，立哥拍板，
+    见 docs/batch-speedup/review07.md）
 典型调用：
     python scripts/run_session.py "素材目录" --session 20260722 --dry-run
     python scripts/run_session.py "素材目录" --session 20260722 --batch-size 50
@@ -433,20 +435,6 @@ def build_stage_plan(
                     session_dir.name,
                 ),
             ),
-            StageCommand(
-                7,
-                "⑦ 扫尾墙 triage.html",
-                (
-                    sys.executable,
-                    str(SCRIPT_DIR / "gen_triage_page.py"),
-                    "--index",
-                    str(events_index),
-                    "--session",
-                    session_dir.name,
-                    "--hoops",
-                    str(hoops),
-                ),
-            ),
         )
         plans.append(
             BatchPlan(label, tuple(fids), commands, candidates, hoops, review_dir, events_index)
@@ -491,8 +479,7 @@ def _stage_done(plan: BatchPlan, cmd: StageCommand) -> bool:
         return validate_product(plan.events_index, "events")
     if cmd.stage == 7:
         label_html: Path = plan.review_dir / "label.html"
-        triage_html: Path = plan.review_dir / "triage.html"
-        return all(p.is_file() and p.stat().st_size > 0 for p in (label_html, triage_html))
+        return label_html.is_file() and label_html.stat().st_size > 0
     return False
 
 
@@ -556,7 +543,7 @@ def execute_plans(plans: list[BatchPlan], *, force: bool) -> list[str]:
 
 
 def _print_dry_run(plans: list[BatchPlan], metas: list[SourceMeta]) -> None:
-    """--dry-run：打印切批划分与每批 × 7 阶段命令清单，不执行。"""
+    """--dry-run：打印切批划分与每批 6 条（②-⑦）命令清单，不执行。"""
     first: SourceMeta = metas[0]
     logger.info(
         "DRY-RUN：共 %d 文件，%d 批；规格 %dx%d @%sfps",

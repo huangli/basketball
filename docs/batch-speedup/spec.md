@@ -19,6 +19,11 @@ dedup + label-speedup 已把标注侧砍一刀（同组跳过 + 有效 2x）。�
 
 ## F1：缩略图墙扫尾（新脚本 scripts/gen_triage_page.py）
 
+> **已下线（2026-08-11 立哥拍板）**：经两轮迭代（全景→筐区裁剪→悬停视频墙，
+> 见 review05/06）立哥实操后判定与 label.html 功能重复、省时不值，功能下线。
+> 脚本与测试已删除（git 历史留档，如需找回查 cc4195e 之前）。以下内容为
+> 历史存档，不再维护。
+
 **功能**：在人工视频标注之前，先给全部事件出一页"缩略图墙"：
 
 - 输入：`events_index.json`（事件顺序 = 筐距序，与 label.html 一致）+
@@ -97,9 +102,9 @@ dedup + label-speedup 已把标注侧砍一刀（同组跳过 + 有效 2x）。�
   --orig（按①探测注入）/--hoops/**--keep-clips**（漏了它就不产
   events_index.json 与单事件 clips，下游全部断粮——历史命令均带）
   → work/<session>/review_batchK/
-- **⑦ 标注页**：gen_label_page.py + F1 的 gen_triage_page.py，
-  两者都显式传 --index/--session（不靠父目录名推导）；同场次多批次
-  共享同一 `label_<session>` LSKEY 是既有行为（事件 key 跨批唯一，无害）
+- **⑦ 标注页**：gen_label_page.py 显式传 --index/--session（不靠父目录名
+  推导）；同场次多批次共享同一 `label_<session>` LSKEY 是既有行为
+  （事件 key 跨批唯一，无害）。（F1 triage 页 2026-08-11 下线后 ⑦ 仅此一步）
 - **批次切分**：fid 按文件名排序（= 拍摄时间序），--batch-size（默认 50）
   自动切批，批次序号 K 从 1 递增；--fids 显式指定时产物用固定名
   `candidates_adhoc.json` / `hoops_adhoc.json` / `review_adhoc/`，

@@ -1,5 +1,9 @@
 # plan：跑批提效（缩略图墙扫尾 + 一键跑批）
 
+> **注意（2026-08-11）**：F1（gen_triage_page.py / sec_to_frame_idx）已下线
+> 并删除，本文 F1 相关步骤为历史存档勿再执行；F2（run_session.py）现役。
+> 见 review07.md。
+
 依据 `docs/batch-speedup/spec.md`（review01-02 通过版）。
 新脚本 ×2（`gen_triage_page.py`、`run_session.py`）+ 公共函数 ×1 +
 测试 ×2；**不改 5 个老流水线脚本**。

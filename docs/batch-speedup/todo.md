@@ -1,5 +1,8 @@
 # todo：跑批提效（缩略图墙扫尾 + 一键跑批）
 
+> **注意（2026-08-11）**：F1（Task 1-3）已随功能下线作废，见 review07.md；
+> Task 4-6（F2 编排器）现役。
+
 依据 `docs/batch-speedup/spec.md` / `plan.md`。
 
 ## Task 1：帧号映射公共函数（plan Step 0）
