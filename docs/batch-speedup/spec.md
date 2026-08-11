@@ -35,7 +35,7 @@ dedup + label-speedup 已把标注侧砍一刀（同组跳过 + 有效 2x）。�
   锚点缺失事件降级全景 480px（等比不裁不切）并记降级清单；不传 --hoops
   整页全景降级
 - 生成 `triage.html` 网格墙：**卡片主区域 = 悬停播放的审核片段**
-  （events_index 的 clip，640px 宽 2x 慢放已烘焙，`preload="none"` +
+  （events_index 的 clip，840×840 筐区方形特写、2x 慢放已烘焙，`preload="none"` +
   poster=锚点帧缩略图，mouseenter 播放 / mouseleave 停并回开头；
   2026-08-11 立哥验收反馈"静态图判不了进网还是弹出"，视频墙才可判；
   clip 缺失事件降级纯静态卡片并记降级清单）+ ±0.4s 两帧小图参考 +

@@ -13,7 +13,8 @@
 ## 修复内容
 
 1. **卡片主区域 = 悬停播放视频**：复用 events_index.json 已有的 clip
-   字段（gen_review_clips --keep-clips 产物，640px 宽、2x 慢放已烘焙，
+   字段（gen_review_clips --keep-clips 产物，840×840 筐区方形特写、
+   2x 慢放已烘焙，
    零新计算）；`preload="none"` + poster=锚点帧裁剪缩略图（未悬停时
    仍是缩略图墙，加载快）；mouseenter 播放 / mouseleave 停并回开头，
    循环静音。
@@ -33,9 +34,9 @@
 
 ## 口径澄清
 
-- 选 clip（640px、2x 慢放）而非 clip_wide（1280px、1x）：入网瞬间
-  拉长更易判，文件小加载快；立哥此前已用同款 2x 审核片段判完 51 球，
-  判读可行性已实证
+- 选 clip（840×840 筐区方形特写、2x 慢放）而非 clip_wide（840×472 全景、
+  2x）：特写全程见筐、入网瞬间拉长更易判；立哥此前已用同款 2x 审核片段
+  判完 51 球，判读可行性已实证
 - 悬停播放依赖浏览器本地 file:// 加载 mp4（与 label.html 同形态，
   已验证可用）
 - spec.md F1 已同步视频墙口径

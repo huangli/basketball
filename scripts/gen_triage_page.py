@@ -3,9 +3,10 @@
 
 读取 gen_review_clips --keep-clips 产出的事件索引（events_index.json，事件顺序
 = 筐距序），对每事件从 work/frames/<fid>/ 取锚点帧及其 ±2 帧（±0.4s @5fps）。
-卡片主区域为悬停播放的审核片段（events_index 的 clip，640px 宽 2x 慢放已
-烘焙）——静态图判不了"进网还是弹出"（2026-08-11 立哥验收反馈），悬停播
-片段才可判；poster 用锚点帧缩略图，clip 缺失事件降级纯静态卡片。
+卡片主区域为悬停播放的审核片段（events_index 的 clip，840×840 筐区方形
+特写、2x 慢放已烘焙）——静态图判不了"进网还是弹出"（2026-08-11 立哥验收
+反馈），悬停播片段才可判；poster 用锚点帧缩略图，clip 缺失事件降级纯静态
+卡片。
 缩略图传 --hoops 时用 detect_hoops 的事件锚点（筐/球静止点，帧图像素坐标）
 裁筐区放大（帧宽 40% 窗口，640px 落盘）；锚点缺失事件降级全景。缩略图落
 <review_dir>/thumbs/，并在 <review_dir> 生成 triage.html 网格墙。墙与
@@ -237,8 +238,8 @@ def attach_clips(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """给上墙事件挂审核片段相对路径（悬停播放用），返回（增强列表, 降级清单）。
 
-    clip 取 events_index.json 的 clip 字段（640px 宽、2x 慢放已烘焙，
-    gen_review_clips --keep-clips 产物）；文件不存在或字段缺失时该事件
+    clip 取 events_index.json 的 clip 字段（840×840 筐区方形特写、2x 慢放
+    已烘焙，gen_review_clips --keep-clips 产物）；文件不存在或字段缺失时该事件
     clip 置 None（页面降级静态缩略图卡片）并记降级清单。反斜杠规范化
     为正斜杠（Windows 生成物在浏览器 URL 的兼容写法）。不改调用方原 dict。
 
@@ -331,7 +332,7 @@ function render() {
     if (m) { marked++; if (m.r === "no") nos++; }
     const card = document.createElement("div");
     card.className = "card" + (m ? " marked" : "");
-    // 有审核片段（640px、2x 慢放已烘焙）时主区域为悬停播放视频：
+    // 有审核片段（840×840 筐区方形特写、2x 慢放已烘焙）时主区域为悬停播放视频：
     // 静态图判不了入网（立哥验收反馈），悬停播片段才可判"是进网还是弹出"。
     // poster = 锚点帧缩略图（未悬停时墙仍是缩略图墙，加载快）；
     // 无 clip 的降级事件退回静态锚点帧大图。
