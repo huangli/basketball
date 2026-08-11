@@ -34,8 +34,12 @@ dedup + label-speedup 已把标注侧砍一刀（同组跳过 + 有效 2x）。�
   缩略图球仅几像素无法判读，筐区裁剪后入网瞬间清晰可辨，验收反馈修复）；
   锚点缺失事件降级全景 480px（等比不裁不切）并记降级清单；不传 --hoops
   整页全景降级
-- 生成 `triage.html` 网格墙：每卡片 = 锚点帧（入网瞬间）100% 宽大图主判 +
-  ±0.4s 两帧小图参考 + 事件信息（key、
+- 生成 `triage.html` 网格墙：**卡片主区域 = 悬停播放的审核片段**
+  （events_index 的 clip，640px 宽 2x 慢放已烘焙，`preload="none"` +
+  poster=锚点帧缩略图，mouseenter 播放 / mouseleave 停并回开头；
+  2026-08-11 立哥验收反馈"静态图判不了进网还是弹出"，视频墙才可判；
+  clip 缺失事件降级纯静态卡片并记降级清单）+ ±0.4s 两帧小图参考 +
+  事件信息（key、
   anchor_t0、src_file、疑似同回合组标签复用 assign_same_rally_groups；
   缺 fid/anchor_t0/key 的残次事件跳过 + WARNING + 结尾汇总，与
   assign_same_rally_groups 同款口径）

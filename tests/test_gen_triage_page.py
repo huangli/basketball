@@ -18,6 +18,7 @@ from PIL import Image
 from errors import BasketballPipelineError
 from gen_triage_page import (
     CROP_WIDTH,
+    attach_clips,
     build_event_thumbs,
     build_html,
     derive_session,
@@ -338,6 +339,39 @@ def test_build_event_thumbs_marks_anchor_frame_under_clamp(tmp_path: pathlib.Pat
     ]
 
 
+# ---------- attach_clips：悬停视频挂接与降级 ----------
+
+
+def test_attach_clips_links_existing_clip(tmp_path: pathlib.Path) -> None:
+    # Arrange：clip 用 Windows 反斜杠相对路径（events_index 实际形态）
+    review = tmp_path / "review"
+    (review / "clips").mkdir(parents=True)
+    (review / "clips" / "a.mp4").write_bytes(b"x")
+    e = _thumbed_event()
+    e["clip"] = "clips\\a.mp4"
+    # Act
+    enriched, degraded = attach_clips([e], review)
+    # Assert：挂正斜杠相对路径，不改原 dict
+    assert enriched[0]["clip"] == "clips/a.mp4"
+    assert degraded == []
+    assert e["clip"] == "clips\\a.mp4"
+
+
+def test_attach_clips_missing_clip_degrades(tmp_path: pathlib.Path) -> None:
+    # Arrange：clip 文件不存在 + 无 clip 字段各一
+    review = tmp_path / "review"
+    review.mkdir()
+    e1 = _thumbed_event("f1#e0")
+    e1["clip"] = "clips/ghost.mp4"
+    e2 = _thumbed_event("f1#e1")
+    e2["clip"] = ""
+    # Act
+    enriched, degraded = attach_clips([e1, e2], review)
+    # Assert：clip 置 None（页面降级静态卡片）+ 两条降级记录
+    assert [x["clip"] for x in enriched] == [None, None]
+    assert len(degraded) == 2
+
+
 # ---------- derive_session ----------
 
 
@@ -419,6 +453,29 @@ def test_build_html_full_mode_badge() -> None:
     # Assert：全景降级事件有角标（无锚点的卡不是筐区特写，判读慎用）
     assert "全景降级" in html
     assert 't.mode === "full"' in html
+
+
+def test_build_html_hover_video_when_clip_present() -> None:
+    # Arrange：带 clip 的事件
+    e = _thumbed_event()
+    e["clip"] = "clips/a.mp4"
+    # Act
+    html = build_html([e], "s")
+    # Assert：主区域为悬停播放视频（preload=none 防 234 卡抢带宽、poster 用
+    # 锚点缩略图、循环静音）；离开即停并回开头
+    assert '<video class="main" preload="none" muted loop playsinline' in html
+    assert "poster=" in html
+    assert "vid.play().catch(() => {});" in html
+    assert "vid.pause(); vid.currentTime = 0;" in html
+
+
+def test_build_html_static_fallback_without_clip() -> None:
+    # Arrange：无 clip（降级事件，_thumbed_event 默认无 clip 字段）
+    # Act
+    html = build_html([_thumbed_event()], "s")
+    # Assert：静态主图回退逻辑存在（e.clip 为空走 img 分支）
+    assert ": poster" in html  # JS 三元回退分支
+    assert "e.thumbs.findIndex(t => t.is_anchor)" in html
 
 
 def test_build_html_injects_group_fields() -> None:

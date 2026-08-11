@@ -3,10 +3,12 @@
 
 读取 gen_review_clips --keep-clips 产出的事件索引（events_index.json，事件顺序
 = 筐距序），对每事件从 work/frames/<fid>/ 取锚点帧及其 ±2 帧（±0.4s @5fps）。
-传 --hoops 时用 detect_hoops 的事件锚点（筐/球静止点）裁筐区放大（帧宽 40%
-窗口，640px 落盘）——全景缩略图球太小看不清入网，筐区裁剪才可判读（批次 3
-实测）；锚点缺失事件降级全景。缩略图落 <review_dir>/thumbs/，并在
-<review_dir> 生成 triage.html 网格墙（锚点帧大图主判、±帧小图参考）。墙与
+卡片主区域为悬停播放的审核片段（events_index 的 clip，640px 宽 2x 慢放已
+烘焙）——静态图判不了"进网还是弹出"（2026-08-11 立哥验收反馈），悬停播
+片段才可判；poster 用锚点帧缩略图，clip 缺失事件降级纯静态卡片。
+缩略图传 --hoops 时用 detect_hoops 的事件锚点（筐/球静止点，帧图像素坐标）
+裁筐区放大（帧宽 40% 窗口，640px 落盘）；锚点缺失事件降级全景。缩略图落
+<review_dir>/thumbs/，并在 <review_dir> 生成 triage.html 网格墙。墙与
 label.html 共享 localStorage（同 LSKEY、同 marks 结构），墙标"不是"的事件
 label.html 侧自动视为已标并跳过。
 
@@ -230,6 +232,41 @@ def build_event_thumbs(
     return enriched, degraded, skipped
 
 
+def attach_clips(
+    events: list[dict[str, Any]], review_dir: Path
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """给上墙事件挂审核片段相对路径（悬停播放用），返回（增强列表, 降级清单）。
+
+    clip 取 events_index.json 的 clip 字段（640px 宽、2x 慢放已烘焙，
+    gen_review_clips --keep-clips 产物）；文件不存在或字段缺失时该事件
+    clip 置 None（页面降级静态缩略图卡片）并记降级清单。反斜杠规范化
+    为正斜杠（Windows 生成物在浏览器 URL 的兼容写法）。不改调用方原 dict。
+
+    Args:
+        events: build_event_thumbs 产出的增强事件列表。
+        review_dir: events_index.json 所在目录（clip 相对路径的基准）。
+
+    Returns:
+        (enriched, degraded)。
+    """
+    enriched: list[dict[str, Any]] = []
+    degraded: list[str] = []
+    for e in events:
+        item: dict[str, Any] = dict(e)
+        clip: Any = e.get("clip")
+        rel: str | None = None
+        if isinstance(clip, str) and clip:
+            rel = clip.replace("\\", "/")
+            if not (review_dir / rel).is_file():
+                degraded.append(f"{e.get('key')}: clip 缺失 {rel}")
+                rel = None
+        else:
+            degraded.append(f"{e.get('key')}: 无 clip 字段")
+        item["clip"] = rel
+        enriched.append(item)
+    return enriched, degraded
+
+
 # 注意必须是 raw string：模板内 JS 字符串含 \n 转义（扫尾完成提示文案），
 # 普通三引号会被 Python 转义成真实换行，导致 JS 字符串跨行 SyntaxError（整页黑屏）
 _HTML = r"""<!DOCTYPE html>
@@ -244,7 +281,8 @@ body { font-family: sans-serif; background: #111; color: #eee; margin: 16px; }
         gap: 12px; }
 .card { background: #1d1d1d; border-radius: 8px; padding: 8px; }
 .card.marked { opacity: 0.55; }
-.main { width: 100%; border-radius: 4px; background: #000; margin-bottom: 4px; }
+.main { width: 100%; border-radius: 4px; background: #000; margin-bottom: 4px;
+        display: block; }
 .subs { display: flex; gap: 4px; margin-bottom: 6px; }
 .subs img { width: 24%; border-radius: 4px; background: #000; }
 button.f { font-size: 16px; padding: 6px 14px; margin-top: 6px; border-radius: 6px;
@@ -258,7 +296,8 @@ small { color: #999; }
 <body>
 <div id="bar">
   <b>缩略图墙扫尾 __SESSION__</b> <span id="prog"></span><br>
-  <small>墙只能否、不能是：拿不准一律不标，判“是”去 label.html 放视频。
+  <small>鼠标悬停卡片自动播放该事件审核片段（2x 慢放），移开即停。
+  墙只能否、不能是：拿不准一律不标，判“是”去 label.html 放视频。
   与标注页共享进度，已标事件在此只读展示（F 按钮禁用）。</small>
 </div>
 <div id="grid"></div>
@@ -292,14 +331,20 @@ function render() {
     if (m) { marked++; if (m.r === "no") nos++; }
     const card = document.createElement("div");
     card.className = "card" + (m ? " marked" : "");
-    // 锚点帧（入网瞬间）大图主判，±0.4s 帧小图参考；全景降级事件同布局仍可看。
-    // 主图按 is_anchor 标记取（钳位去重/缺帧时锚点项不在中间），无标记回退中间项
+    // 有审核片段（640px、2x 慢放已烘焙）时主区域为悬停播放视频：
+    // 静态图判不了入网（立哥验收反馈），悬停播片段才可判"是进网还是弹出"。
+    // poster = 锚点帧缩略图（未悬停时墙仍是缩略图墙，加载快）；
+    // 无 clip 的降级事件退回静态锚点帧大图。
     let mainIdx = e.thumbs.findIndex(t => t.is_anchor);
     if (mainIdx < 0) mainIdx = Math.floor(e.thumbs.length / 2);
-    const mainImg = e.thumbs.length
-      ? `<img class="main" loading="lazy" src="${esc(e.thumbs[mainIdx].src)}"` +
-        ` title="锚点帧 ${e.thumbs[mainIdx].frame}">`
-      : "";
+    const poster = e.thumbs.length ? e.thumbs[mainIdx].src : "";
+    const mainImg = e.clip
+      ? `<video class="main" preload="none" muted loop playsinline` +
+        ` src="${esc(e.clip)}"` + (poster ? ` poster="${esc(poster)}"` : "") + `></video>`
+      : poster
+        ? `<img class="main" loading="lazy" src="${esc(poster)}"` +
+          ` title="锚点帧 ${e.thumbs[mainIdx].frame}">`
+        : "";
     const subImgs = e.thumbs.filter((_, i) => i !== mainIdx).map(t =>
       `<img loading="lazy" src="${esc(t.src)}" title="帧 ${t.frame}">`).join("");
     const grp = e.grp
@@ -314,6 +359,12 @@ function render() {
       `<div class="subs">${subImgs}</div>` +
       `<div><b>${esc(e.key)}</b> t=${e.anchor_t0}s${badge}${grp}${fullBadge}<br>` +
       `<small>${esc(e.src_file)}${verdict}</small></div>`;
+    // 悬停播放：进入播、离开停并回开头；preload="none" 保证 234 卡不抢带宽
+    const vid = card.querySelector("video");
+    if (vid) {
+      card.onmouseenter = () => { vid.play().catch(() => {}); };
+      card.onmouseleave = () => { vid.pause(); vid.currentTime = 0; };
+    }
     const btn = document.createElement("button");
     btn.className = "f";
     btn.textContent = "不是 (F)";
@@ -475,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("筐区锚点 %d/%d 事件（%s）", len(anchors), len(events), args.hoops)
 
     enriched, degraded, skipped = build_event_thumbs(events, FRAMES_ROOT, thumbs_dir, anchors)
+    enriched, clip_degraded = attach_clips(enriched, review_dir)
+    degraded.extend(clip_degraded)
     html: str = build_html(enriched, session)
     out_path: Path = review_dir / "triage.html"
     with open(out_path, "w", encoding="utf-8") as f:
