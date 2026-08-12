@@ -181,6 +181,74 @@ class TestCheckFidCoverage:
         assert check_fid_coverage({"bad": 1}, ["f1"]) == ["f1"]
 
 
+class TestPostCheckStage4ZeroCandidate:
+    """④ 复核：零候选 fid 区分——缓存有效放行、缓存缺失/帧数不符报错。
+
+    2026-08-13 车百鼎批次 2/3 实录：3 个短片段算法口径真零候选（缓存正常），
+    原口径误判 fid 覆盖不足导致整批失败。
+    """
+
+    def _stage4(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        fids: list[str],
+        records: list[dict[str, Any]],
+    ) -> str | None:
+        monkeypatch.chdir(tmp_path)
+        plan = build_stage_plan(
+            pathlib.Path("素材"),
+            pathlib.Path("work/s1"),
+            3840,
+            2160,
+            [fids],
+            adhoc=False,
+        )[0]
+        plan.candidates.parent.mkdir(parents=True)
+        plan.candidates.write_text(json.dumps(records), encoding="utf-8")
+        cmd = next(c for c in plan.commands if c.stage == 4)
+        return run_session._post_check(plan, cmd)
+
+    def _fake_cache(self, fid: str, *, frames_field: int, disk_frames: int) -> None:
+        frame_dir = pathlib.Path("work/frames") / fid
+        frame_dir.mkdir(parents=True)
+        for i in range(disk_frames):
+            (frame_dir / f"f_{i:06d}.jpg").write_bytes(b"x")
+        cache = pathlib.Path(f"work/detect/{fid}_mot_cache.json")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"frames": frames_field, "balls": [], "persons": []}))
+
+    def test_legit_zero_candidate_passes(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：f2 无候选记录，但缓存有效（帧数匹配）= 真零候选
+        monkeypatch.chdir(tmp_path)
+        self._fake_cache("f2", frames_field=2, disk_frames=2)
+        # Act / Assert：WARNING 放行，不算失败
+        assert self._stage4(tmp_path, monkeypatch, ["f1", "f2"], [{"fid": "f1"}]) is None
+
+    def test_missing_cache_still_fails(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：f2 无候选记录且无缓存 = pilot 产空漏检
+        monkeypatch.chdir(tmp_path)
+        # Act
+        reason = self._stage4(tmp_path, monkeypatch, ["f1", "f2"], [{"fid": "f1"}])
+        # Assert
+        assert reason is not None and "fid 覆盖不足" in reason and "f2" in reason
+
+    def test_stale_cache_still_fails(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：缓存 frames 字段与帧目录不符 = 失效
+        monkeypatch.chdir(tmp_path)
+        self._fake_cache("f2", frames_field=99, disk_frames=2)
+        # Act
+        reason = self._stage4(tmp_path, monkeypatch, ["f1", "f2"], [{"fid": "f1"}])
+        # Assert
+        assert reason is not None and "fid 覆盖不足" in reason
+
+
 class TestBuildStagePlan:
     """dry-run 命令清单：全部显式参数、--keep-clips、--orig 注入、批次划分、adhoc 命名。"""
 

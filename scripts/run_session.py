@@ -337,6 +337,26 @@ def check_fid_coverage(records: Any, fids: list[str]) -> list[str]:  # noqa: ANN
     return [f for f in fids if f not in covered]
 
 
+def _legit_zero_candidate(fid: str) -> bool:
+    """fid 无候选记录时的兜底判定：检测缓存有效（帧数匹配）= 算法口径下真零候选。
+
+    短视频可能全程无静止段/断轨重连模式，pilot 正常产空——与"无缓存被跳过"
+    区分开（2026-08-13 车百鼎批次 2/3 实录：3 个短片段零候选触发误报）。
+
+    Returns:
+        True = 缓存存在、可读且 frames 字段与帧目录帧数一致（零候选属正常产出）。
+    """
+    cache: Path = Path(DETECT_CACHE_PATTERN.format(fid))
+    if not cache.is_file():
+        return False
+    try:
+        payload: Any = read_json(cache, what=cache.name)
+    except BasketballPipelineError, OSError:
+        return False
+    n_frames: int = len(list((FRAMES_ROOT / fid).glob("f_*.jpg")))
+    return isinstance(payload, dict) and payload.get("frames") == n_frames
+
+
 def build_stage_plan(
     srcdir: Path,
     session_dir: Path,
@@ -486,14 +506,19 @@ def _stage_done(plan: BatchPlan, cmd: StageCommand) -> bool:
 def _post_check(plan: BatchPlan, cmd: StageCommand) -> str | None:
     """阶段执行后的产物复核；返回失败原因（None = 通过）。
 
-    ④ 额外核对 fid 覆盖数 == 本批 fid 数（pilot 对无缓存 fid 只 WARNING 产空）。
+    ④ 额外核对 fid 覆盖：无候选记录的 fid 分两种——缓存有效 = 真零候选
+    （WARNING 放行）；缓存缺失/失效 = pilot 产空漏检（报错兜底）。
     """
     if cmd.stage == 4:
         if not validate_product(plan.candidates, "candidates"):
             return f"candidates 未产出或损坏: {plan.candidates}"
         missing: list[str] = check_fid_coverage(read_json(plan.candidates), list(plan.fids))
-        if missing:
-            return f"fid 覆盖不足（{len(plan.fids) - len(missing)}/{len(plan.fids)}）: {missing}"
+        hard: list[str] = [f for f in missing if not _legit_zero_candidate(f)]
+        soft: list[str] = [f for f in missing if _legit_zero_candidate(f)]
+        if soft:
+            logger.warning("%s ④ 零候选 fid（缓存正常，正常产出）: %s", plan.label, soft)
+        if hard:
+            return f"fid 覆盖不足（{len(hard)} 个无有效缓存）: {hard}"
     elif cmd.stage == 5 and not validate_product(plan.hoops, "events"):
         return f"hoops 未产出或损坏: {plan.hoops}"
     elif cmd.stage == 6 and not validate_product(plan.events_index, "events"):
