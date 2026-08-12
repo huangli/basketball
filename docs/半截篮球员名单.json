@@ -262,5 +262,18 @@
     "positions": [],
     "aliases": [],
     "note": ""
+  },
+  {
+    "tag": "半截篮-100-熊志鹏",
+    "name": "熊志鹏",
+    "team": "半截篮",
+    "number": "100",
+    "real_name": "熊志鹏",
+    "height_cm": 180,
+    "weight_kg": 78,
+    "positions": [2],
+    "jersey_size": "3XL",
+    "aliases": [],
+    "note": ""
   }
 ]
