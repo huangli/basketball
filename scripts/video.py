@@ -1,4 +1,4 @@
-"""统一入口 CLI：jinqiu / people / build 三条高频链路的 subprocess 薄封装。
+"""统一入口 CLI：score / people / build 三条高频链路的 subprocess 薄封装。
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
 输出：透传调用 run_session / crop_scorers / cluster_scorers / gen_scorer_page /
@@ -6,8 +6,8 @@
 依赖：scripts/pipe_common.py（read_json/atomic_write_json/configure_logging/new_run_id）、
     scripts/errors.py、scripts/roster.py（validate_roster）；命令拼装契约见
     docs/video-cli/spec.md（逐字照做，不改底层脚本任何行为）。
-典型调用（必须从仓库根目录运行）：
-    python scripts/video.py jinqiu <素材目录> --session 20260722
+典型调用（任意目录可运行；启动后自动 chdir 到仓库根，用户相对路径按启动目录解析）：
+    python scripts/video.py score <素材目录> --session 20260722
     python scripts/video.py people --session 20260722 --batch 1
     python scripts/video.py build --session 20260722 --all
 """
@@ -33,6 +33,7 @@ from roster import validate_roster
 logger = logging.getLogger(__name__)
 
 SCRIPT_DIR: Path = Path(__file__).resolve().parent
+REPO_ROOT: Path = SCRIPT_DIR.parent  # 仓库根（work/ 等相对路径基准；main 启动后 chdir 到此）
 WORK_ROOT: Path = Path("work")
 STATE_NAME: str = "video_cli.json"
 STATE_VERSION: int = 1
@@ -134,7 +135,7 @@ def session_dir_or_die(session: str) -> Path:
     """
     session_dir: Path = WORK_ROOT / session
     if not session_dir.is_dir():
-        raise BasketballPipelineError(f"场次目录不存在: {session_dir}（先跑 jinqiu）")
+        raise BasketballPipelineError(f"场次目录不存在: {session_dir}（先跑 score）")
     return session_dir
 
 
@@ -176,7 +177,7 @@ def resolve_rawdir(args_rawdir: str | None, state: dict[str, Any]) -> Path:
     if isinstance(srcdir, str) and srcdir:
         return Path(srcdir)
     raise BasketballPipelineError(
-        "--rawdir 未给且 video_cli.json 无 srcdir（先跑 jinqiu 或显式给 --rawdir）"
+        "--rawdir 未给且 video_cli.json 无 srcdir（先跑 score 或显式给 --rawdir）"
     )
 
 
@@ -279,7 +280,7 @@ def resolve_out_size(session_dir: Path) -> str:
     """
     facts_path: Path = session_dir / "session_facts.json"
     if not facts_path.is_file():
-        raise BasketballPipelineError(f"缺 session_facts.json: {facts_path}（先跑 jinqiu）")
+        raise BasketballPipelineError(f"缺 session_facts.json: {facts_path}（先跑 score）")
     facts: Any = read_json(facts_path, what="session_facts.json")
     if not isinstance(facts, dict) or not isinstance(facts.get("files"), dict):
         raise BasketballPipelineError(f"{facts_path}: 顶层必须是含 files 对象的事实表")
@@ -401,8 +402,8 @@ def build_people_steps(
     return steps
 
 
-def _cmd_jinqiu(args: argparse.Namespace) -> int:
-    """jinqiu：透传 run_session.py；成功后写 state（dry-run 不写）。"""
+def _cmd_score(args: argparse.Namespace) -> int:
+    """score：透传 run_session.py；成功后写 state（dry-run 不写）。"""
     cmd: list[str] = [
         sys.executable,
         str(SCRIPT_DIR / "run_session.py"),
@@ -421,7 +422,7 @@ def _cmd_jinqiu(args: argparse.Namespace) -> int:
     try:
         run_step(cmd)
     except StepFailedError as exc:
-        logger.error("jinqiu 失败: %s", exc)
+        logger.error("score 失败: %s", exc)
         return 1
     if args.dry_run:
         return 0
@@ -430,7 +431,7 @@ def _cmd_jinqiu(args: argparse.Namespace) -> int:
     state["srcdir"] = str(Path(args.srcdir).resolve())
     state["runs"].append(
         {
-            "cmd": "jinqiu",
+            "cmd": "score",
             "at": datetime.now().isoformat(timespec="seconds"),
             "argv": sys.argv[1:] if args.argv is None else args.argv,
             "exit_code": 0,
@@ -568,18 +569,18 @@ def _build_parser() -> argparse.ArgumentParser:
     """构建三级 argparse：prog → 子命令 → 各自参数。"""
     ap = argparse.ArgumentParser(
         prog="video",
-        description="半截篮统一入口：jinqiu（检测）→ people（认人）→ build（合集）",
+        description="半截篮统一入口：score（检测）→ people（认人）→ build（合集）",
     )
     sub = ap.add_subparsers(dest="command")
 
-    jq = sub.add_parser("jinqiu", help="检测链路：透传 run_session.py 至标注页生成")
-    jq.add_argument("srcdir", help="原片目录（递归扫描 .mp4）")
-    jq.add_argument("--session", required=True, help="场次 ID")
-    jq.add_argument("--batch-size", type=int, default=None, help="每批文件数（缺省透传底层默认）")
-    jq.add_argument("--fids", default="", help="逗号分隔 fid 清单（adhoc 模式）")
-    jq.add_argument("--force", action="store_true", help="忽略断点产物全部重算")
-    jq.add_argument("--dry-run", action="store_true", help="只打印不执行（不写 state）")
-    jq.set_defaults(func=_cmd_jinqiu)
+    sc = sub.add_parser("score", help="检测链路：透传 run_session.py 至标注页生成")
+    sc.add_argument("srcdir", help="原片目录（递归扫描 .mp4）")
+    sc.add_argument("--session", required=True, help="场次 ID")
+    sc.add_argument("--batch-size", type=int, default=None, help="每批文件数（缺省透传底层默认）")
+    sc.add_argument("--fids", default="", help="逗号分隔 fid 清单（adhoc 模式）")
+    sc.add_argument("--force", action="store_true", help="忽略断点产物全部重算")
+    sc.add_argument("--dry-run", action="store_true", help="只打印不执行（不写 state）")
+    sc.set_defaults(func=_cmd_score)
 
     pp = sub.add_parser("people", help="认人链路：裁图 → 聚类 → 确认页（逐批次）")
     pp.add_argument("--session", required=True, help="场次 ID")
@@ -612,14 +613,40 @@ def _build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI 入口。返回进程退出码（0=成功；1=失败；2=无子命令）。"""
+def _resolve_user_paths(args: argparse.Namespace, launch_cwd: Path) -> None:
+    """把用户传入的相对路径参数解析为绝对路径（chdir 到仓库根之前调用）。
+
+    支持从任意目录调用：main 启动后统一 chdir 到 REPO_ROOT（work/ 等相对路径
+    基准），用户给的相对路径必须先按启动目录解析，否则会被错误地相对到仓库根。
+
+    Args:
+        args: 已解析的命令行命名空间（原地修改 srcdir/rawdir/players_file）。
+        launch_cwd: 进程启动目录。
+    """
+    for attr in ("srcdir", "rawdir", "players_file"):
+        value: str | None = getattr(args, attr, None)
+        if value:
+            p: Path = Path(value)
+            setattr(args, attr, str(p if p.is_absolute() else (launch_cwd / p).resolve()))
+
+
+def main(argv: list[str] | None = None, *, relocate: bool = False) -> int:
+    """CLI 入口。返回进程退出码（0=成功；1=失败；2=无子命令）。
+
+    Args:
+        argv: 参数列表（None 取 sys.argv）。
+        relocate: True 时按启动目录解析用户相对路径参数并 chdir 到 REPO_ROOT
+            （真实命令行入口用）；测试与库内调用传 False 保持当前目录。
+    """
     parser: argparse.ArgumentParser = _build_parser()
     args: argparse.Namespace = parser.parse_args(argv)
     if args.command is None:
         parser.print_help()
         return 2
     args.argv = argv
+    if relocate:
+        _resolve_user_paths(args, Path.cwd())
+        os.chdir(REPO_ROOT)
     run_id: str = new_run_id()
     configure_logging(run_id)
     try:
@@ -633,4 +660,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # 管道/重定向时 stdout 回落 locale 编码（cp1252/GBK），打印中文 help/日志会
+    # UnicodeEncodeError（docs/经验教训.md §6）；交互控制台保持原生编码不动
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure") and not _stream.isatty():
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    raise SystemExit(main(relocate=True))

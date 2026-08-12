@@ -89,8 +89,8 @@ def _fail_recorder(
     return calls
 
 
-class TestJinqiu:
-    """jinqiu：透传 run_session 命令拼装、state 写入、dry-run 不写。"""
+class TestScore:
+    """score：透传 run_session 命令拼装、state 写入、dry-run 不写。"""
 
     def test_command_verbatim_minimal(
         self,
@@ -98,7 +98,7 @@ class TestJinqiu:
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
         # Act
-        rc = video.main(["jinqiu", "素材目录", "--session", SESSION])
+        rc = video.main(["score", "素材目录", "--session", SESSION])
         # Assert：逐字断言最小命令（无可选旗标时一个都不多传）
         assert rc == 0
         assert run_recorder[0][0] == [
@@ -116,7 +116,7 @@ class TestJinqiu:
     ) -> None:
         rc = video.main(
             [
-                "jinqiu",
+                "score",
                 "素材目录",
                 "--session",
                 SESSION,
@@ -146,7 +146,7 @@ class TestJinqiu:
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        video.main(["jinqiu", "素材目录", "--session", SESSION])
+        video.main(["score", "素材目录", "--session", SESSION])
         assert run_recorder[0][1]["PYTHONIOENCODING"] == "utf-8"
 
     def test_state_written_on_success(
@@ -157,13 +157,13 @@ class TestJinqiu:
     ) -> None:
         src = tmp_path / "素材目录"
         src.mkdir()
-        video.main(["jinqiu", str(src), "--session", SESSION])
+        video.main(["score", str(src), "--session", SESSION])
         state = json.loads((session_dir / "video_cli.json").read_text(encoding="utf-8"))
         assert state["version"] == 1
         assert state["session"] == SESSION
         assert state["srcdir"] == str(src.resolve())
         assert len(state["runs"]) == 1
-        assert state["runs"][0]["cmd"] == "jinqiu"
+        assert state["runs"][0]["cmd"] == "score"
         assert state["runs"][0]["exit_code"] == 0
 
     def test_state_runs_append_only(
@@ -174,8 +174,8 @@ class TestJinqiu:
     ) -> None:
         src = tmp_path / "素材目录"
         src.mkdir()
-        video.main(["jinqiu", str(src), "--session", SESSION])
-        video.main(["jinqiu", str(src), "--session", SESSION])
+        video.main(["score", str(src), "--session", SESSION])
+        video.main(["score", str(src), "--session", SESSION])
         state = json.loads((session_dir / "video_cli.json").read_text(encoding="utf-8"))
         assert len(state["runs"]) == 2
 
@@ -184,7 +184,7 @@ class TestJinqiu:
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        rc = video.main(["jinqiu", "素材目录", "--session", SESSION, "--dry-run"])
+        rc = video.main(["score", "素材目录", "--session", SESSION, "--dry-run"])
         assert rc == 0
         assert "--dry-run" in run_recorder[0][0]
         assert not (session_dir / "video_cli.json").exists()
@@ -193,7 +193,7 @@ class TestJinqiu:
         self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _fail_recorder(monkeypatch, fail_at=0)
-        rc = video.main(["jinqiu", "素材目录", "--session", SESSION])
+        rc = video.main(["score", "素材目录", "--session", SESSION])
         assert rc == 1
         assert not (session_dir / "video_cli.json").exists()
 
@@ -744,7 +744,7 @@ class TestMainEntry:
 
     def test_no_subcommand_exit2(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert video.main([]) == 2
-        assert "jinqiu" in capsys.readouterr().out
+        assert "score" in capsys.readouterr().out
 
     def test_session_dir_missing(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
@@ -756,3 +756,64 @@ class TestMainEntry:
         _write_json(session_dir / "video_cli.json", {"version": 99, "runs": []})
         with pytest.raises(BasketballPipelineError, match="版本"):
             video.load_state(SESSION)
+
+
+class TestRelocate:
+    """relocate=True（真实 CLI 入口）：相对路径按启动目录解析、chdir 到 REPO_ROOT。"""
+
+    def _setup(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        """构造假仓库根与独立启动目录，返回 (repo, launch)。"""
+        repo: pathlib.Path = tmp_path / "repo"
+        (repo / "work" / SESSION).mkdir(parents=True)
+        launch: pathlib.Path = tmp_path / "elsewhere"
+        launch.mkdir()
+        monkeypatch.setattr(video, "REPO_ROOT", repo)
+        monkeypatch.chdir(launch)
+        return repo, launch
+
+    def test_relative_srcdir_resolved_against_launch_cwd(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange
+        repo, launch = self._setup(tmp_path, monkeypatch)
+        # Act
+        rc = video.main(["score", "素材目录", "--session", SESSION], relocate=True)
+        # Assert：相对 srcdir 按启动目录解析为绝对路径透传；cwd 已切到仓库根
+        assert rc == 0
+        assert run_recorder[0][0][2] == str((launch / "素材目录").resolve())
+        assert pathlib.Path.cwd() == repo
+
+    def test_absolute_srcdir_unchanged(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange
+        self._setup(tmp_path, monkeypatch)
+        src: pathlib.Path = tmp_path / "绝对素材"
+        # Act
+        rc = video.main(["score", str(src), "--session", SESSION], relocate=True)
+        # Assert：绝对路径原样透传
+        assert rc == 0
+        assert run_recorder[0][0][2] == str(src)
+
+    def test_relocate_false_keeps_cwd_and_args(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange
+        _, launch = self._setup(tmp_path, monkeypatch)
+        # Act：relocate=False（测试/库内调用口径）不切目录、不解析路径
+        rc = video.main(["score", "素材目录", "--session", SESSION], relocate=False)
+        # Assert
+        assert rc == 0
+        assert run_recorder[0][0][2] == "素材目录"
+        assert pathlib.Path.cwd() == launch

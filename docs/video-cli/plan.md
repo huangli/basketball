@@ -14,7 +14,7 @@
 - run_step 统一注入 `PYTHONIOENCODING=utf-8`（子进程中文日志坑）；聚类段叠加 `HTTPS_PROXY`
 - 全程 `from __future__ import annotations`、类型标注、docstring（rules.md 风格对齐现有脚本）
 
-## Task 2：jinqiu 子命令
+## Task 2：score 子命令
 
 - 拼 `run_session.py <srcdir> --session <S> [--batch-size] [--fids] [--force] [--dry-run]`，原样透传
 - exit 0 且非 dry-run → save_state（srcdir 转绝对路径，runs 追加一条）
@@ -39,7 +39,7 @@
 
 - `python -m ruff format scripts tests && python -m ruff check --fix scripts tests && python -m pytest -q` 全绿（--fix 后复核 diff）
 - AGENTS.md 工作流约定「检测流水线」行末补一句统一入口指向（一行，不展开）
-- 命令行 smoke：`python scripts/video.py --help`、`python scripts/video.py jinqiu --help` 人工过目
+- 命令行 smoke：`python scripts/video.py --help`、`python scripts/video.py score --help` 人工过目
 
 ## 风险
 

@@ -7,14 +7,14 @@
 scripts/ 已 14 个脚本，跑场次靠翻文档记参数（run_session / crop_scorers / cluster_scorers / gen_scorer_page / build_highlight 五条命令链，参数散在 AGENTS.md 与 scorer 三件套里）。目标：一个薄入口把三条高频链路固化下来——
 
 ```
-python scripts/video.py jinqiu <素材目录> --session <场次ID> [--batch-size N] [--fids a,b,c] [--force] [--dry-run]
+python scripts/video.py score <素材目录> --session <场次ID> [--batch-size N] [--fids a,b,c] [--force] [--dry-run]
 python scripts/video.py people --session <场次ID> [--batch K] [--rawdir PATH] [--read-numbers] [--max-reads N] [--players-file PATH] [--skip-cluster] [--dry-run]
 python scripts/video.py build --session <场次ID> [--batch K] [--rawdir PATH] [--scorer X | --team T | --all] [--dry-run]
 ```
 
 **成功标准**：
 
-1. 新场次全流程只需记 `video jinqiu` →（label.html 人工标注）→ `video people` →（确认页人工）→ `video build` 四条命令（含人工环节）
+1. 新场次全流程只需记 `video score` →（label.html 人工标注）→ `video people` →（确认页人工）→ `video build` 四条命令（含人工环节）
 2. 所有子命令拼出的 subprocess 命令与现行文档定稿参数逐字一致（聚类显式 `--linkage complete --threshold 0.15`；build 尺寸按 session_facts 换算 16:9→1920x1080、4:3→1440x1080）
 3. 任意子步骤 subprocess 非零即停、exit 1、打印失败命令；`--dry-run` 只打印不执行
 4. 不改动任何现有脚本的行为；现有 pytest 全绿 + 新增单测覆盖命令拼装
@@ -23,7 +23,7 @@ python scripts/video.py build --session <场次ID> [--batch K] [--rawdir PATH] [
 
 - 不重新实现检测/认人/合成任何逻辑，纯 subprocess 薄封装（参照 run_session.py 编排器模式）
 - 不含 label.html 人工标注、不含确认页 roster 导出（浏览器人工环节，CLI 只生成页面）
-- 不注册系统命令、不改 pyproject.toml；调用形态固定 `python scripts/video.py`，须从仓库根目录运行
+- 不注册系统命令、不改 pyproject.toml；调用形态 `python scripts/video.py`（2026-08-12 起**任意目录可运行**：真实入口自动把相对路径参数按启动目录解析后 chdir 到仓库根；PowerShell profile 已装 `video` 函数别名，直接 `video score ...`）
 - 机器裁判/VLM 环节已下线，不纳入任何子命令
 
 ## 关键设计
@@ -33,10 +33,10 @@ python scripts/video.py build --session <场次ID> [--batch K] [--rawdir PATH] [
 session_facts.json 只存尺寸/fps/文件清单，**不含素材目录**，而 people/build 需要 --rawdir。故 video.py 自带状态文件 `work/<场次>/video_cli.json`：
 
 ```json
-{"version": 1, "session": "<场次ID>", "srcdir": "<素材目录绝对路径>", "updated_at": "...", "runs": [{"cmd": "jinqiu", "at": "...", "argv": [...]}]}
+{"version": 1, "session": "<场次ID>", "srcdir": "<素材目录绝对路径>", "updated_at": "...", "runs": [{"cmd": "score", "at": "...", "argv": [...]}]}
 ```
 
-- `jinqiu` 成功后写入/更新 srcdir（原子写，走 pipe_common.atomic_write_json）
+- `score` 成功后写入/更新 srcdir（原子写，走 pipe_common.atomic_write_json）
 - `people`/`build` 的 --rawdir 缺省读 state 的 srcdir；显式 --rawdir 优先；两者都没有 → 报错退出 1（不猜路径）
 - runs 只追加不覆盖（审计用，仿 run_session.log 的排障价值）
 
@@ -49,9 +49,9 @@ session_facts.json 只存尺寸/fps/文件清单，**不含素材目录**，而 
 | `goals.json`（旧布局，如 20260722） | `candidates.json` | `review/` | `scorers/` |
 | `goals_batchK.json`（K≥1，run_session 现行布局） | `candidates_batchK.json` | `review_batchK/` | `scorers_bK/` |
 
-`--batch K` 限定单批（K=1 时两种布局都试；同 K 双布局并存 → 报错退出 1，不猜）。发现阶段对配套缺失仅标注 WARNING，执行阶段跳过该批、不中断其他批次；配套检查细化到文件粒度——candidates 查 `candidates[_batchK].json`、review 查 `review[_batchK]/events_index.json`（旧布局 20260722 批次 1 的 review/ 下无此文件，属正常缺失）。
+`--batch K` 限定单批（K=1 时两种布局都试；同 K 双布局并存 → 报错退出 1，不猜）。发现阶段对配套缺失仅标注 WARNING，处置分两类：**candidates 缺失 → 执行阶段跳过该批**（裁图无锚点来源，不中断其他批次）；**events_index.json 缺失 → 仅 WARNING 降级继续**（people 第 3 段 --index 不传，页面仅失兜底视频引用）。配套检查细化到文件粒度——candidates 查 `candidates[_batchK].json`、review 查 `review[_batchK]/events_index.json`（旧布局 20260722 批次 1 的 review/ 下无此文件，属正常缺失）。
 
-### jinqiu
+### score
 
 透传 run_session.py：srcdir / --session / --batch-size / --fids / --force / --dry-run。子进程 exit 0 后写 video_cli.json（dry-run 不写；runs 记录 argv 与 exit code，部分失败语义不揣测、照实记）。
 
@@ -94,6 +94,6 @@ docs/video-cli/      本四件套
 
 ## Open Questions（已拍板）
 
-- 子命令名用拼音 jinqiu/people/build——立哥定的，不改
-- 不做 `video label`：标注页由 jinqiu 链路末端 gen_label_page 生成，人工打开，无命令可封
+- 子命令名 score/people/build——立哥定（2026-08-11 初定拼音 jinqiu，2026-08-12 改 score）
+- 不做 `video label`：标注页由 score 链路末端 gen_label_page 生成，人工打开，无命令可封
 - people 是否默认 --read-numbers：否（花 token，立哥按需显式开）
