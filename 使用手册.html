@@ -86,6 +86,7 @@
 <ul>
   <li><b>场次 ID</b> 规则：<code>日期_对手名</code>（如 <code>20260805_车百鼎</code>），之后所有命令都用它。</li>
   <li>全自动串联：探测规格 → 抽帧 → 双模型检测 → 候选挖掘 → 筐轨迹 → 切审核片段 → 生成标注页。CPU 检测约 <b>1.1 秒/帧</b>，整场要跑几个小时，挂着就行。</li>
+  <li><b>耗时实测</b>（车百鼎场次：148 个短片 / 37 分钟素材 / 4K）：抽帧约 <b>30 分钟</b>（全场只跑一次）；之后每批（约 50 个文件）约 <b>1.5～2 小时</b>；整场 3 批合计约 <b>6 小时</b>纯机器时间（本场按默认每批 50 文件切了 3 批，批数随素材量变化）。耗时与素材量成正比，建议睡前挂上。</li>
   <li>文件多会自动切批（batch1、batch2……），中断/报错后直接<b>重跑同一条命令</b>，已完成的阶段自动跳过。</li>
   <li>想先看计划不动手：加 <code>--dry-run</code>；想全部重算：加 <code>--force</code>。</li>
 </ul>
@@ -93,7 +94,7 @@
 <h3>第 2 步：标注进球 <span class="tag blue">人工</span></h3>
 <ol>
   <li>浏览器打开 <code>work\20260805_车百鼎\review_batch1\label.html</code>（每批一个，batch2、batch3 同理）。</li>
-  <li>片段自带 2 倍速烘焙，默认就是高效状态。逐条按键：</li>
+  <li>片段自带 2 倍速烘焙，默认就是高效状态。逐条按键（每批约 50 个视频标注约 <b>15～20 分钟</b>）：</li>
 </ol>
 <table>
   <tr><th>按键</th><th>含义</th><th>按键</th><th>含义</th></tr>
@@ -103,15 +104,16 @@
 </table>
 <ol start="3">
   <li>进度自动存在浏览器里，关了就下次接着标。</li>
-  <li>标完点 <b>导出</b>，下载得到 <code>goals_20260805_车百鼎.json</code>（各批导出同名，浏览器可能自动存成 <code>goals_20260805_车百鼎 (1).json</code>，以实际下载到的文件名为准再改）。</li>
-  <li><b>改名</b>（关键！）：batch1 的改成 <code>goals_batch1.json</code>、batch2 的改成 <code>goals_batch2.json</code>……放进 <code>work\20260805_车百鼎\</code> 目录。CLI 只认改名后的文件。</li>
+  <li>标完点 <b>导出</b>，下载得到 <code>goals_batch1.json</code>——<b>文件名自动带批次号</b>（batch2 页面就导出 goals_batch2.json，以此类推）。</li>
+  <li><b>移动</b>（关键！）：把它放进 <code>work\20260805_车百鼎\</code> 目录即可，无需改名。若浏览器因重名存成 <code>goals_batch1 (1).json</code>，把多余的 <code> (1)</code> 去掉——CLI 只认 <code>goals_batchK.json</code> 这个精确命名。</li>
 </ol>
+<div class="tip"><b>提示</b>2026-08-14 之前生成的旧标注页导出仍是 <code>goals_&lt;场次&gt;.json</code>（不带批次），需要人工改成 <code>goals_batchK.json</code>；新生成的页面无此问题。</div>
 
 <h3>第 3 步：认人 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
 <pre>video people --session 20260805_车百鼎 --batch 1</pre>
 <ul>
-  <li>机器自动：轨迹法定位投篮者 → 多裁选帧 → CLIP 聚类分组 → 生成确认页。</li>
-  <li>浏览器打开确认页 <code>work\20260805_车百鼎\scorers_b1\scorer.html</code>：<b>看视频终裁，裁图只是辅助</b>。簇级选人一次定一组，个别不对的逐球覆盖。</li>
+  <li>机器自动：轨迹法定位投篮者 → 多裁选帧 → CLIP 聚类分组 → 生成确认页（首批实测约 <b>3 分钟</b>，进球多的批会久一些）。</li>
+  <li>浏览器打开确认页 <code>work\20260805_车百鼎\scorers_b1\scorer.html</code>：<b>看视频终裁，裁图只是辅助</b>。簇级选人一次定一组，个别不对的逐球覆盖（约 1～2 秒/球，一批几分钟搞定）。</li>
   <li>确认完点导出，下载 <code>roster_20260805_车百鼎.json</code> → <b>改名为 <code>roster.json</code></b> 放进 <code>work\20260805_车百鼎\</code>。</li>
   <li>然后跑下一批 <code>--batch 2</code>、<code>--batch 3</code>——后一批会自动带上已有 roster 预填，越跑越省劲。<b>建议逐批跑、逐批确认。</b></li>
 </ul>
@@ -123,24 +125,28 @@
   <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。</li>
   <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。</li>
   <li>成品在 <code>output\20260805_车百鼎\</code>：队伍 <code>队伍_XX_进球集锦.mp4</code>，个人 <code>&lt;队伍&gt;_&lt;姓名&gt;_进球合集.mp4</code>，片段按拍摄时间排序。</li>
+  <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久；几十球规模估计几分钟到十几分钟（暂无整场实测，跑完一次后补准数）。</li>
 </ul>
 
 <h2>二、命令速查</h2>
 <table>
-  <tr><th>命令</th><th>干什么</th><th>常用参数</th></tr>
+  <tr><th>命令</th><th>干什么</th><th>耗时（车百鼎规模实测）</th><th>常用参数</th></tr>
   <tr>
     <td><code>video score &lt;目录&gt;</code></td>
     <td>检测链路，一路跑到生成标注页</td>
+    <td>整场约 <b>6 小时</b>（抽帧 30 分钟只跑一次 + 每批 1.5～2 小时），可断点续跑</td>
     <td><code>--session</code> 必填；<code>--dry-run</code> 只打印；<code>--force</code> 全部重算；<code>--batch-size</code> 每批文件数</td>
   </tr>
   <tr>
     <td><code>video people</code></td>
     <td>认人链路：裁图 → 聚类 → 确认页</td>
+    <td>机器首批实测约 <b>3 分钟</b>（进球多的批更久）；人工确认每批几分钟</td>
     <td><code>--session</code> 必填；<code>--batch K</code> 指定批次（建议逐批）；<code>--read-numbers</code> K3 读号（花 token 按需开）</td>
   </tr>
   <tr>
     <td><code>video build</code></td>
     <td>合成合集</td>
+    <td><b>分钟级</b>（每球一条 6 秒片段重编码，暂无整场实测）</td>
     <td><code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；roster 未确认全会被拒</td>
   </tr>
 </table>
