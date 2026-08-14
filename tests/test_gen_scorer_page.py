@@ -1015,6 +1015,13 @@ class TestBuildHtmlClusterMerge:
         assert "function groupTag(" in html
         assert "clState.clAssign" in html
 
+    def test_group_render_and_split_present(self) -> None:
+        html = self._html()
+        assert "function splitGroup(" in html
+        assert "function groupLabel(" in html
+        assert "并自" in html
+        assert "row.dataset.gid" in html
+
 
 class TestMainClusters:
     """main 端到端 --clusters：同目录强校验、schema 损坏退出 1、簇区内联。"""

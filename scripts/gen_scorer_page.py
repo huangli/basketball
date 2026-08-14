@@ -255,17 +255,36 @@ function renderPlayers() {
     box.appendChild(div);
   }
 }
+function groupLabel(g) {
+  // 组标签：簇#gid（N 球，已归属 X[，并自 #a/#b]）；未并过无"并自"段
+  const t = groupTag(g);
+  let s = "簇#" + g.gid + "（" + g.keys.length + " 球，已归属 " + t.assigned;
+  if (g.cids.length > 1) {
+    s += "，并自 " + g.cids.filter(c => c !== g.gid).map(c => "#" + c).join("/");
+  }
+  return s + "）";
+}
+function splitGroup(gid) {
+  // 拆开 = 删 merges 中指向该组的所有条目；不动 marks / 目标组 clAssign；
+  // doomed 必须传给 saveClState 的删除清单，否则读回合并会把删除的键复活
+  const doomed = Object.keys(clState.merges)
+    .filter(k => groupIdOf(parseInt(k, 10)) === gid);
+  for (const k of doomed) delete clState.merges[k];
+  saveClState({ merges: doomed, clAssign: [] });
+  show(cur);
+}
 function renderClusters() {
-  // 簇区：每簇一行（代表图墙 + 簇内球数 + 选球员按钮），渲染在逐球区之前；
-  // 无簇数据（未传 --clusters）整区隐藏，页面行为与旧版一致
+  // 簇区按显示组渲染：图墙拼接 + 组标签 + 拆开钮（合并组才有）+ 选人按钮；
+  // 无簇数据整区隐藏（无 --clusters 行为同旧版）
   const box = document.getElementById("clusters");
   box.innerHTML = "";
   if (!CLUSTERS.length) { box.style.display = "none"; return; }
   box.style.display = "block";
-  for (const cl of CLUSTERS) {
+  for (const g of computeGroups()) {
     const row = document.createElement("div");
     row.className = "cluster-row";
-    for (const rc of cl.rep_crops) {
+    row.dataset.gid = g.gid;
+    for (const rc of g.rep_crops) {
       const im = document.createElement("img");
       im.src = rc;
       im.className = "rep";
@@ -274,14 +293,22 @@ function renderClusters() {
     }
     const lab = document.createElement("span");
     lab.className = "clusterlabel";
-    lab.textContent = "簇#" + cl.cluster_id + "（" + cl.keys.length + " 球，已归属 " +
-      cl.keys.filter(k => marks[k]).length + "）";
+    const gt = groupTag(g);
+    lab.textContent = groupLabel(g) +
+      (gt.tag ? " → " + gt.tag + (gt.mixed ? "（混合）" : "") : "");
     row.appendChild(lab);
+    if (g.cids.length > 1) {
+      const sp = document.createElement("button");
+      sp.textContent = "拆开";
+      sp.className = "nav";
+      sp.onclick = () => splitGroup(g.gid);
+      row.appendChild(sp);
+    }
     for (const p of PLAYERS) {
       const b = document.createElement("button");
       b.textContent = p.tag + (p.name ? "=" + p.name : "");
       b.className = "team-" + p.team;
-      b.onclick = () => clusterAssign(cl.cluster_id, p.tag);
+      b.onclick = () => clusterAssign(g.gid, p.tag);
       row.appendChild(b);
     }
     box.appendChild(row);
