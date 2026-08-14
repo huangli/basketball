@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>半截篮视频剪辑 · 使用手册</title>
+<style>
+  :root {
+    --ink: #1f2328; --muted: #6a737d; --line: #e1e4e8;
+    --accent: #c2410c; --accent-soft: #fff4ed; --ok: #1a7f37;
+    --code-bg: #f6f8fa; --warn-bg: #fff8e6; --warn-line: #d4a72c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px 64px; color: var(--ink);
+    font: 16px/1.75 "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #fafbfc;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h1 small { font-size: 15px; color: var(--muted); font-weight: normal; margin-left: 10px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  h2 {
+    font-size: 20px; margin: 40px 0 12px; padding-left: 10px;
+    border-left: 4px solid var(--accent);
+  }
+  h3 { font-size: 16.5px; margin: 24px 0 8px; }
+  code, kbd {
+    font: 14px/1.5 Consolas, "Courier New", monospace;
+    background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 6px;
+  }
+  pre {
+    background: #2d333b; color: #e6edf3; border-radius: 8px;
+    padding: 14px 18px; overflow-x: auto; font: 14.5px/1.7 Consolas, monospace;
+  }
+  pre .c { color: #8b949e; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid var(--line); padding: 7px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); white-space: nowrap; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0; }
+  .flow .unit { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .flow .step {
+    background: var(--accent-soft); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 8px 14px; font-weight: 600; white-space: nowrap;
+  }
+  .flow .step.human { background: #eef6ff; border-color: #3b82c4; }
+  .flow .arrow { color: var(--muted); font-weight: 700; }
+  .tip, .warn { border-radius: 8px; padding: 10px 16px; margin: 12px 0; }
+  .tip { background: #effaf1; border: 1px solid var(--ok); }
+  .warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
+  .tip b, .warn b { margin-right: 4px; }
+  kbd { background: #fff; box-shadow: 0 1px 0 var(--line); }
+  ol li, ul li { margin: 4px 0; }
+  .tag { display: inline-block; font-size: 12.5px; color: #fff; background: var(--accent);
+         border-radius: 10px; padding: 0 8px; margin-left: 6px; vertical-align: 2px; }
+  .tag.blue { background: #3b82c4; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>半截篮视频剪辑 · 使用手册<small>半截篮 · 玩到60岁</small></h1>
+<p class="sub">立哥专用操作手册。整个流程就一句话：<b>机器干活，人做裁判</b>——机器把可疑片段排好序端到页面上，你按键拍板。</p>
+
+<div class="flow">
+  <span class="unit"><span class="step">① video score</span></span>
+  <span class="unit"><span class="arrow">→</span><span class="step human">② 标注进球（浏览器）</span></span>
+  <span class="unit"><span class="arrow">→</span><span class="step">③ video people</span></span>
+  <span class="unit"><span class="arrow">→</span><span class="step human">④ 确认认人（浏览器）</span></span>
+  <span class="unit"><span class="arrow">→</span><span class="step">⑤ video build</span></span>
+</div>
+
+<h2>一、新场次上手（车百鼎为例）</h2>
+
+<h3>第 0 步：素材就位</h3>
+<ul>
+  <li>新视频放进一个独立目录，如 <code>20260805车百鼎\</code>（建议放仓库根下，名字随意）。</li>
+  <li>网盘下载的场次，先确认没有 <code>.baiduyun.p.downloading</code> 后缀的文件——没下完的会被跳过或抽帧不全。</li>
+  <li>素材只进不出：流水线不删不改任何原始视频。</li>
+</ul>
+
+<h3>第 1 步：检测 <span class="tag">机器</span></h3>
+<pre>video score "20260805车百鼎" --session 20260805_车百鼎</pre>
+<ul>
+  <li><b>场次 ID</b> 规则：<code>日期_对手名</code>（如 <code>20260805_车百鼎</code>），之后所有命令都用它。</li>
+  <li>全自动串联：探测规格 → 抽帧 → 双模型检测 → 候选挖掘 → 筐轨迹 → 切审核片段 → 生成标注页。CPU 检测约 <b>1.1 秒/帧</b>，整场要跑几个小时，挂着就行。</li>
+  <li>文件多会自动切批（batch1、batch2……），中断/报错后直接<b>重跑同一条命令</b>，已完成的阶段自动跳过。</li>
+  <li>想先看计划不动手：加 <code>--dry-run</code>；想全部重算：加 <code>--force</code>。</li>
+</ul>
+
+<h3>第 2 步：标注进球 <span class="tag blue">人工</span></h3>
+<ol>
+  <li>浏览器打开 <code>work\20260805_车百鼎\review_batch1\label.html</code>（每批一个，batch2、batch3 同理）。</li>
+  <li>片段自带 2 倍速烘焙，默认就是高效状态。逐条按键：</li>
+</ol>
+<table>
+  <tr><th>按键</th><th>含义</th><th>按键</th><th>含义</th></tr>
+  <tr><td><kbd>J</kbd></td><td>进球 ✓（属疑似同回合组时弹窗询问，确定才把同组其余标 F 跳过）</td><td><kbd>W</kbd></td><td>全景 / 筐区 视角切换</td></tr>
+  <tr><td><kbd>P</kbd></td><td>进球但不收（练球等）</td><td><kbd>S</kbd></td><td>倍速切换（默认已是有效 2x）</td></tr>
+  <tr><td><kbd>F</kbd></td><td>不是进球 ✗</td><td><kbd>←</kbd> <kbd>→</kbd></td><td>上一条 / 下一条</td></tr>
+</table>
+<ol start="3">
+  <li>进度自动存在浏览器里，关了就下次接着标。</li>
+  <li>标完点 <b>导出</b>，下载得到 <code>goals_20260805_车百鼎.json</code>（各批导出同名，浏览器可能自动存成 <code>goals_20260805_车百鼎 (1).json</code>，以实际下载到的文件名为准再改）。</li>
+  <li><b>改名</b>（关键！）：batch1 的改成 <code>goals_batch1.json</code>、batch2 的改成 <code>goals_batch2.json</code>……放进 <code>work\20260805_车百鼎\</code> 目录。CLI 只认改名后的文件。</li>
+</ol>
+
+<h3>第 3 步：认人 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
+<pre>video people --session 20260805_车百鼎 --batch 1</pre>
+<ul>
+  <li>机器自动：轨迹法定位投篮者 → 多裁选帧 → CLIP 聚类分组 → 生成确认页。</li>
+  <li>浏览器打开确认页 <code>work\20260805_车百鼎\scorers_b1\scorer.html</code>：<b>看视频终裁，裁图只是辅助</b>。簇级选人一次定一组，个别不对的逐球覆盖。</li>
+  <li>确认完点导出，下载 <code>roster_20260805_车百鼎.json</code> → <b>改名为 <code>roster.json</code></b> 放进 <code>work\20260805_车百鼎\</code>。</li>
+  <li>然后跑下一批 <code>--batch 2</code>、<code>--batch 3</code>——后一批会自动带上已有 roster 预填，越跑越省劲。<b>建议逐批跑、逐批确认。</b></li>
+</ul>
+<div class="tip"><b>提示</b>预填（聚类分组、读号、颜色分队）都可能错，一律可一键改；球衣互换时读号必错，以画面为准。</div>
+
+<h3>第 4 步：出片 <span class="tag">机器</span></h3>
+<pre>video build --session 20260805_车百鼎 --all</pre>
+<ul>
+  <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。</li>
+  <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。</li>
+  <li>成品在 <code>output\20260805_车百鼎\</code>：队伍 <code>队伍_XX_进球集锦.mp4</code>，个人 <code>&lt;队伍&gt;_&lt;姓名&gt;_进球合集.mp4</code>，片段按拍摄时间排序。</li>
+</ul>
+
+<h2>二、命令速查</h2>
+<table>
+  <tr><th>命令</th><th>干什么</th><th>常用参数</th></tr>
+  <tr>
+    <td><code>video score &lt;目录&gt;</code></td>
+    <td>检测链路，一路跑到生成标注页</td>
+    <td><code>--session</code> 必填；<code>--dry-run</code> 只打印；<code>--force</code> 全部重算；<code>--batch-size</code> 每批文件数</td>
+  </tr>
+  <tr>
+    <td><code>video people</code></td>
+    <td>认人链路：裁图 → 聚类 → 确认页</td>
+    <td><code>--session</code> 必填；<code>--batch K</code> 指定批次（建议逐批）；<code>--read-numbers</code> K3 读号（花 token 按需开）</td>
+  </tr>
+  <tr>
+    <td><code>video build</code></td>
+    <td>合成合集</td>
+    <td><code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；roster 未确认全会被拒</td>
+  </tr>
+</table>
+<div class="tip"><b>提示</b><code>video</code> 在任意目录都能跑。新装的 PowerShell 窗口若不识别，关掉重开即可。</div>
+
+<h2>三、文件都放哪</h2>
+<table>
+  <tr><th>位置</th><th>内容</th></tr>
+  <tr><td><code>20260805车百鼎\</code>（素材目录）</td><td>原始视频，只读不动</td></tr>
+  <tr><td><code>work\20260805_车百鼎\</code></td><td>本场全部中间产物：goals_batchK.json（你标注的）、roster.json（你确认的）、candidates_batchK.json / review_batchK / scorers_bK（机器的）</td></tr>
+  <tr><td><code>work\frames\</code>、<code>work\detect\</code></td><td>抽帧与检测缓存（跨批共享，断点续跑靠它们）</td></tr>
+  <tr><td><code>output\20260805_车百鼎\</code></td><td>成品合集，发球友的就从这里拿</td></tr>
+</table>
+
+<h2>四、成品规格（已定型，不用管）</h2>
+<ul>
+  <li>进球锚点 = 球入网瞬间；片段窗口 = 前 4 秒 + 后 2 秒。</li>
+  <li>输出 1080p / 50fps / H.264 + AAC；比例跟随素材等比缩放：16:9 出 1920×1080，4:3 出 1440×1080。</li>
+  <li>100fps 素材：入网后 2 秒半速慢放，与常速段拼接；其他帧率不慢放。</li>
+  <li>命名用标签不用真名：<code>红队-7号</code>、<code>黑T恤-A</code> 风格。</li>
+</ul>
+
+<h2>五、常见问题</h2>
+
+<h3>跑了一半中断了 / 报错了</h3>
+<p>重跑同一条命令。已完成的阶段（抽帧、检测、候选……）会自动跳过，从断点继续。</p>
+
+<h3>日志里出现 <code>零候选 fid（缓存正常，正常产出）</code></h3>
+<p>正常现象。个别短片段（几秒到十几秒）全程没有可疑球轨迹，算法一个候选都不产，这些片段不进标注页——它们本来也没有值得看的球。</p>
+
+<h3>报错 <code>fid 覆盖不足</code></h3>
+<p>检测缓存缺失或失效，属真异常。把报错原样发给 agent 处理。</p>
+
+<h3>报错 <code>混合分辨率 / 混合帧率</code></h3>
+<p>同一场次目录里混了不同规格的素材（如 16:9 和 4:3）。把不同规格的分开，各自声明场次分别跑。</p>
+
+<h3>build 报 <code>roster 不存在</code></h3>
+<p>认人确认页导出的文件还没放好：确认它已改名为 <code>roster.json</code> 并位于 <code>work\&lt;场次&gt;\</code> 下。</p>
+
+<h3>往已跑过的场次里补新视频</h3>
+<pre>video score "素材目录" --session 已存在场次 --fids 新视频fid1,新视频fid2</pre>
+<p>adhoc 补跑模式，产物独立命名（candidates_adhoc.json 等），不覆盖已有批次。<code>fid</code> = 视频文件名去掉 <code>.mp4</code> 后缀（如 <code>dji_mimo_20260805_185356_0001_1785944202088_video</code>）。</p>
+<div class="warn"><b>注意</b>补跑跑完后<b>把情况发给 agent 收尾</b>：adhoc 产物需要改名归位才能进认人和合集，这步目前没有现成命令，自己改名容易接错链路导致新视频的球静默丢失。</div>
+
+<footer>
+  本手册只写操作口径；流水线原理与实测指标见 <code>docs\2026-07-26-current-goal-detection-pipeline.md</code>，
+  CLI 设计契约见 <code>docs\video-cli\spec.md</code>，踩坑记录见 <code>docs\经验教训.md</code>。<br>
+  最后更新：2026-08-14
+</footer>
+
+</main>
+</body>
+</html>
