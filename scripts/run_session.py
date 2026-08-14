@@ -453,6 +453,9 @@ def build_stage_plan(
                     str(events_index),
                     "--session",
                     session_dir.name,
+                    # 批次页导出即 goals_batchK.json（移动即接入 people）；
+                    # adhoc 不传，维持旧名 goals_<场次>.json
+                    *(("--batch", str(k)) if not adhoc else ()),
                 ),
             ),
         )

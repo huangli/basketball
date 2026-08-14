@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
+import subprocess
 from typing import Any
 
 import pytest
@@ -35,6 +37,47 @@ def test_build_html_inlines_events_and_session() -> None:
     # Assert
     assert '"key": "f1#e0"' in html
     assert 'const SESSION = "20260722";' in html
+
+
+def test_build_html_export_name_defaults_to_session() -> None:
+    # Arrange / Act：不传 batch（旧布局/adhoc/手工调用）
+    html = build_html([_event()], "20260722")
+    # Assert：导出维持旧名 goals_<场次>.json（按钮/下载/alert 三处同源）
+    assert 'const OUTNAME = "goals_20260722.json";' in html
+    assert "导出 goals_20260722.json" in html
+    assert "a.download = OUTNAME;" in html
+
+
+def test_build_html_export_name_with_batch() -> None:
+    # Arrange / Act：传 batch=2（label-export-batch：导出即 goals_batchK.json，
+    # 立哥下载后移动即可、无需改名；2026-08-14 车百鼎改错名实踩驱动）
+    html = build_html([_event()], "s", batch=2)
+    # Assert
+    assert 'const OUTNAME = "goals_batch2.json";' in html
+    assert "导出 goals_batch2.json" in html
+
+
+def test_build_html_rejects_invalid_batch() -> None:
+    # Arrange / Act / Assert：batch < 1 直接拒（防静默产出 CLI 不认的文件名）
+    with pytest.raises(ValueError, match="batch 必须 ≥1"):
+        build_html([_event()], "s", batch=0)
+
+
+def test_generated_js_syntax_node_check(tmp_path: pathlib.Path) -> None:
+    # Arrange：node 不在 PATH 则跳过（仿 gen_scorer_page 同款，防模板转义黑屏回归）
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 不在 PATH")
+    html = build_html([_event()], "s", batch=2)
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    js_path = tmp_path / "page.js"
+    js_path.write_text(script, encoding="utf-8")
+    # Act
+    proc = subprocess.run(  # noqa: S603 node 路径来自 shutil.which，可信
+        [node, "--check", str(js_path)], capture_output=True, text=True, check=False
+    )
+    # Assert
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_build_html_has_no_dabin_button() -> None:

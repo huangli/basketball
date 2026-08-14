@@ -4,8 +4,9 @@
 读取 gen_review_clips --keep-clips 产出的事件索引（events_index.json），
 在同目录生成自包含 label.html（事件数据内联，视频用相对路径 clips/）。
 立哥用浏览器打开即可：视频循环播，点按钮或按键标注，进度存 localStorage
-（可中断续标，刷新/重开回到上次标注位置），最后一键下载 goals.json
-（无需手敲任何文本）。
+（可中断续标，刷新/重开回到上次标注位置），最后一键下载 goals 文件
+（无需手敲任何文本）；--batch K 时导出即 goals_batchK.json（移到 work
+场次目录 CLI 直接认），缺省维持 goals_<场次>.json（需人工改名接入）。
 
 输入：--index 指定的 events_index.json；缺省自动取 work/ 下最新的
       work/<场次>/review*/events_index.json（新增场次素材跑完
@@ -136,7 +137,7 @@ small { color: #999; }
   <button class="nav" id="sound">声音开/关</button>
   <button class="nav" id="speed">倍速：1x</button>
   <button class="nav" id="wide">筐区视角 (W)</button>
-  <button id="export">导出 goals.json</button>
+  <button id="export">导出 __OUTNAME__</button>
   <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）</small>
   <small>进度与位置自动存，刷新回到上次位置</small>
 </div>
@@ -144,6 +145,7 @@ small { color: #999; }
 <script>
 const EVENTS = __EVENTS__;
 const SESSION = "__SESSION__";
+const OUTNAME = "__OUTNAME__";
 const BEFORE = __BEFORE__, AFTER = __AFTER__;
 const LSKEY = "label_" + SESSION;
 const POSKEY = LSKEY + "_pos";
@@ -265,11 +267,11 @@ function exportGoals() {
   const blob = new Blob([payload], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "goals_" + SESSION + ".json";
+  a.download = OUTNAME;
   a.click();
   const nGoal = goals.filter(g => g.status === "confirmed").length;
-  alert("已下载 goals_" + SESSION + ".json（进球 " + nGoal +
-        " 个，不收 " + (goals.length - nGoal) + " 个），把它发给助手即可");
+  alert("已下载 " + OUTNAME + "（进球 " + nGoal +
+        " 个，不收 " + (goals.length - nGoal) + " 个），移到 work 场次目录即可");
 }
 document.getElementById("goal").onclick = () => mark("goal");
 document.getElementById("prac").onclick = () => mark("practice");
@@ -305,7 +307,7 @@ show(start >= 0 ? start : 0);
 """
 
 
-def build_html(events: list[dict[str, Any]], session: str) -> str:
+def build_html(events: list[dict[str, Any]], session: str, batch: int | None = None) -> str:
     """把事件列表渲染为自包含标注页 HTML。
 
     疑似同回合分组（assign_same_rally_groups）在此注入：成组事件内联数据
@@ -316,10 +318,15 @@ def build_html(events: list[dict[str, Any]], session: str) -> str:
         events: events_index.json 中的事件列表（复制后加 grp 字段内联，
             不改调用方原 dict）。
         session: 场次名（页面标题与 localStorage 键后缀）。
+        batch: 批次号；给了导出文件名即 goals_batchK.json（移动即接入 CLI），
+            不给维持旧名 goals_<场次>.json（旧布局/adhoc/手工调用）。
 
     Returns:
         label.html 全文。
     """
+    if batch is not None and batch < 1:
+        raise ValueError(f"batch 必须 ≥1: {batch}")
+    out_name: str = f"goals_batch{batch}.json" if batch is not None else f"goals_{session}.json"
     groups: dict[str, int] = assign_same_rally_groups(events)
     sizes: dict[int, int] = {}
     for g in groups.values():
@@ -335,6 +342,7 @@ def build_html(events: list[dict[str, Any]], session: str) -> str:
     return (
         _HTML.replace("__EVENTS__", json.dumps(enriched, ensure_ascii=False))
         .replace("__SESSION__", session)
+        .replace("__OUTNAME__", out_name)
         .replace("__BEFORE__", str(CLIP_BEFORE_SEC))
         .replace("__AFTER__", str(CLIP_AFTER_SEC))
     )
@@ -369,6 +377,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="生成进球标注网页")
     ap.add_argument("--index", default="", help="events_index.json 路径（缺省取 work/ 下最新的）")
     ap.add_argument("--session", default="", help="场次名（默认取 index 父目录名）")
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        help="批次号：给了导出文件名即 goals_batchK.json（缺省维持 goals_<场次>.json）",
+    )
     args = ap.parse_args()
 
     index_path: str = args.index
@@ -394,7 +408,7 @@ def main() -> int:
     session: str = args.session or (
         os.path.basename(os.path.dirname(index_dir)) if parent.startswith("review") else parent
     )
-    html: str = build_html(events, session)
+    html: str = build_html(events, session, batch=args.batch)
     out_path: str = os.path.join(index_dir, "label.html")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)

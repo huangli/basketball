@@ -42,7 +42,7 @@ session_facts.json 只存尺寸/fps/文件清单，**不含素材目录**，而 
 
 ### 批次发现（people/build 共用）
 
-扫描 `work/<场次>/` 的 goals 文件定位批次。**改名是人工步骤**：label.html 导出恒为 `goals_<S>.json`，立哥标注后人工改名为 `goals.json`（批次 1）或 `goals_batchK.json`（批次 K）——本命令只认改名后的文件。配套文件命名从 goals 文件名推导（双轨兼容）：
+扫描 `work/<场次>/` 的 goals 文件定位批次。**改名/移动是人工步骤**：2026-08-14 起（label-export-batch）run_session ⑦ 传 `--batch K`，新生成的批次 label.html 导出即 `goals_batchK.json`，立哥只需移动到 `work/<场次>/`；此前旧页面导出恒为 `goals_<S>.json`，需人工改名为 `goals.json`（批次 1）或 `goals_batchK.json`（批次 K）；**adhoc 补跑页面（⑦ 不传 --batch）2026-08-14 后导出仍为旧名，同旧布局需人工改名**——本命令只认规范命名的文件。配套文件命名从 goals 文件名推导（双轨兼容）：
 
 | goals 文件 | candidates | review 目录 | scorers 输出目录 |
 |---|---|---|---|

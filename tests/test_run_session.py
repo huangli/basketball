@@ -294,6 +294,8 @@ class TestBuildStagePlan:
         # ⑦ 标注页显式 --index/--session（triage 墙 2026-08-11 下线，⑦ 仅 label 页）
         assert "--index" in joined[5] and "--session s1" in joined[5]
         assert "gen_label_page.py" in joined[5]
+        # ⑦ 批次页带 --batch（label-export-batch：导出即 goals_batchK.json）
+        assert "--batch 1" in joined[5]
         # ② 如实标注"全场抽 + 幂等跳过"
         assert "全场抽" in plan.commands[0].note
 
@@ -303,6 +305,8 @@ class TestBuildStagePlan:
         assert plans[0].label == "adhoc"
         assert plans[0].candidates == pathlib.Path("work/s1/candidates_adhoc.json")
         assert plans[0].review_dir == pathlib.Path("work/s1/review_adhoc")
+        # adhoc ⑦ 不传 --batch（导出维持旧名 goals_<场次>.json）
+        assert "--batch" not in " ".join(plans[0].commands[5].argv)
 
 
 class TestMainDryRun:
