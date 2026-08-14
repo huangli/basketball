@@ -83,3 +83,20 @@ docs/scorer-cluster/{spec,review01}.md 与 work/ 真实数据核查）
 - 两条非阻断小点已顺手补：验证清单补"目标组归属混合也弹条"；
   spec 注明弹条打开期间屏蔽全局数字键 1-9/E（防误改逐球）
 - 复审结论：**可实施**
+
+---
+
+## 附：第 4 轮审查记录（2026-08-15，plan.md + todo.md）
+
+- **阻断 1（已修）**：splitGroup 删 merges 会被 saveClState 读回合并写复活
+  → saveClState 改 `del = { merges, clAssign }` 双清单，splitGroup 传 doomed
+- **阻断 2（已修）**：Task 4 替换 PICKER-HOOK 行后 Task 3 断言必红
+  → 替换行保留 "PICKER-HOOK" 字样（`// PICKER-HOOK 已挂接：…`）
+- **阻断 3（已修）**：弹条块 `!folded` 守卫会吞"混合目标组+整组全有 marks"
+  场景的弹条（spec 动作 7 边界）→ 弹条块不加守卫，pickerGid 优先于折叠态
+- 非阻断 6 条全采纳：delAssign 无条件收 src.cids（防 stored 独有键复活）、
+  collapseAll 两态循环注明有意、组排序 `?? 0` 兜底、选人 for 加花括号、
+  Task 6 手工验证措辞写清、todo Task 4 步数映射注明
+- 核查通过：行号与原文引用逐字相符；测试断言标识符与实现一致；
+  合并动作 1-6 无走样；折叠优先级正确；Task 中间态可接受；
+  todo 与 plan 一一对应
