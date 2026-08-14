@@ -102,6 +102,8 @@ small { color: #999; }
                padding: 6px; margin: 6px 0; }
 .cluster-row img.rep { max-height: 120px; max-width: 160px; background: #000; }
 .clusterlabel { color: #fc3; margin: 0 8px; }
+.cluster-row { cursor: grab; }
+.cluster-row.drop-target { outline: 3px dashed #fc3; }
 .cluster-row button { font-size: 14px; padding: 6px 10px; }
 </style>
 </head>
@@ -273,6 +275,37 @@ function splitGroup(gid) {
   saveClState({ merges: doomed, clAssign: [] });
   show(cur);
 }
+function mergeInto(srcGid, dstGid) {
+  // 拖拽合并：被并组全部原始簇指向目标组；预填来源 = 目标组 clAssign，
+  // 无则组内非空 marks 全一致的 tag，混合/未归不预填；被并组 clAssign 删除
+  srcGid = groupIdOf(srcGid);
+  dstGid = groupIdOf(dstGid);
+  if (srcGid === dstGid) return; // 自身/同组无操作
+  const groups = computeGroups();
+  const src = groups.find(g => g.gid === srcGid);
+  const dst = groups.find(g => g.gid === dstGid);
+  if (!src || !dst) return;
+  for (const cid of src.cids) clState.merges[String(cid)] = dstGid;
+  let tag = clState.clAssign[String(dstGid)];
+  if (!tag) {
+    const ts = dst.keys.map(k => marks[k]).filter(Boolean);
+    if (ts.length && ts.every(x => x === ts[0])) tag = ts[0];
+  }
+  if (tag) {
+    for (const k of src.keys) { if (!touched[k]) marks[k] = tag; }
+  }
+  const delAssign = [];
+  for (const cid of src.cids) {
+    const k = String(cid);
+    delete clState.clAssign[k]; // 本地有无都删：stored 里独有的残留键靠删除清单压住
+    delAssign.push(k);
+  }
+  save();
+  saveClState({ merges: [], clAssign: delAssign });
+  show(cur);
+  // PICKER-HOOK: 合并弹条在 Task 4 挂这里（!tag 时 openPicker(dstGid)，
+  // 替换行须保留 "PICKER-HOOK" 字样，否则 test_drag_merge_present 红）
+}
 function renderClusters() {
   // 簇区按显示组渲染：图墙拼接 + 组标签 + 拆开钮（合并组才有）+ 选人按钮；
   // 无簇数据整区隐藏（无 --clusters 行为同旧版）
@@ -284,6 +317,22 @@ function renderClusters() {
     const row = document.createElement("div");
     row.className = "cluster-row";
     row.dataset.gid = g.gid;
+    row.draggable = true;
+    row.ondragstart = (ev) => {
+      ev.dataTransfer.setData("text/plain", String(g.gid));
+      ev.dataTransfer.effectAllowed = "move";
+    };
+    row.ondragover = (ev) => {
+      ev.preventDefault();
+      row.classList.add("drop-target");
+    };
+    row.ondragleave = () => row.classList.remove("drop-target");
+    row.ondrop = (ev) => {
+      ev.preventDefault();
+      row.classList.remove("drop-target");
+      const src = parseInt(ev.dataTransfer.getData("text/plain"), 10);
+      if (!isNaN(src)) mergeInto(src, g.gid);
+    };
     for (const rc of g.rep_crops) {
       const im = document.createElement("img");
       im.src = rc;
