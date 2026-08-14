@@ -140,6 +140,76 @@ marks = Object.assign({}, EXISTING, marks);
 // 不动既有 marks 存储格式）
 let touched = {};
 try { touched = JSON.parse(localStorage.getItem(TOUCHKEY) || "{}"); } catch (e) { touched = {}; }
+const CLSTATE_KEY = LSKEY + "_clusters";
+// 簇合并页面态：merges=被并cid→组id，clAssign=组id→tag（仅作合并预填来源，
+// 显示/折叠判定一律以 marks 为准），collapsed=显式折叠（true/false 都存）
+let clState = { merges: {}, clAssign: {}, collapsed: {} };
+try {
+  const rawCl = JSON.parse(localStorage.getItem(CLSTATE_KEY) || "{}");
+  if (rawCl && typeof rawCl === "object") {
+    for (const sub of ["merges", "clAssign", "collapsed"]) {
+      if (rawCl[sub] && typeof rawCl[sub] === "object") clState[sub] = rawCl[sub];
+    }
+  }
+} catch (e) { clState = { merges: {}, clAssign: {}, collapsed: {} }; }
+function saveClState(del) {
+  // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
+  // del = { merges: [...], clAssign: [...] } 待删键——读回合并会把本地已删的键
+  // 从 stored 复活，必须在合并后再删（拆开/合并吸收依赖此语义）
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(CLSTATE_KEY) || "{}"); }
+  catch (e) { stored = {}; }
+  const merged = {
+    merges: Object.assign({}, stored.merges || {}, clState.merges),
+    clAssign: Object.assign({}, stored.clAssign || {}, clState.clAssign),
+    collapsed: Object.assign({}, stored.collapsed || {}, clState.collapsed),
+  };
+  for (const k of (del && del.merges) || []) delete merged.merges[k];
+  for (const k of (del && del.clAssign) || []) delete merged.clAssign[k];
+  clState = merged;
+  localStorage.setItem(CLSTATE_KEY, JSON.stringify(merged));
+}
+function groupIdOf(cid) {
+  // 沿 merges 链解析最终组 id；环防御：visited 集合，成环即停不报错
+  let cur = String(cid);
+  const seen = new Set([cur]);
+  while (clState.merges[cur] !== undefined &&
+         !seen.has(String(clState.merges[cur]))) {
+    cur = String(clState.merges[cur]);
+    seen.add(cur);
+  }
+  const gid = parseInt(cur, 10);
+  return isNaN(gid) ? cid : gid;
+}
+function computeGroups() {
+  // CLUSTERS → 显示组：keys/rep_crops 按原簇序拼接；组位置 = gid 原簇原位
+  const byGid = new Map();
+  for (const cl of CLUSTERS) {
+    const gid = groupIdOf(cl.cluster_id);
+    if (!byGid.has(gid)) byGid.set(gid, { gid, cids: [], keys: [], rep_crops: [] });
+    const g = byGid.get(gid);
+    g.cids.push(cl.cluster_id);
+    g.keys = g.keys.concat(cl.keys);
+    g.rep_crops = g.rep_crops.concat(cl.rep_crops);
+  }
+  const pos = new Map(CLUSTERS.map((cl, i) => [cl.cluster_id, i]));
+  // ?? 0 兜底：localStorage 残留失效簇 id 时 pos.get 为 undefined，防 NaN 序不稳
+  return [...byGid.values()].sort((a, b) => (pos.get(a.gid) ?? 0) - (pos.get(b.gid) ?? 0));
+}
+function groupTag(g) {
+  // 组内非空 marks 众数（显示"归的人"唯一口径；不读 clAssign）
+  const counts = {};
+  let assigned = 0;
+  for (const k of g.keys) {
+    const t = marks[k];
+    if (t) { counts[t] = (counts[t] || 0) + 1; assigned++; }
+  }
+  let best = "", n = 0;
+  for (const t of Object.keys(counts)) {
+    if (counts[t] > n) { n = counts[t]; best = t; }
+  }
+  return { tag: best, mixed: Object.keys(counts).length > 1, assigned };
+}
 let cur = 0;
 function save() {
   // 合并写入：先读回存储与本页记录合并再写，防止同时开多个页面互相覆盖
@@ -218,11 +288,15 @@ function renderClusters() {
   }
 }
 function clusterAssign(cid, tag) {
-  // 簇级选人 = 批量预填：只写未被逐球手动改过的 key（逐球覆盖优先于簇归属）
-  const cl = CLUSTERS.find(c => c.cluster_id === cid);
-  if (!cl) return;
-  for (const k of cl.keys) { if (!touched[k]) marks[k] = tag; }
+  // 簇级选人 = 按组批量预填：只写未 touched 的 key（逐球覆盖优先）；
+  // 记 clAssign 作合并预填来源（spec：clAssign 唯一用途）
+  const gid = groupIdOf(cid);
+  const g = computeGroups().find(x => x.gid === gid);
+  if (!g) return;
+  for (const k of g.keys) { if (!touched[k]) marks[k] = tag; }
+  clState.clAssign[String(gid)] = tag;
   save();
+  saveClState();
   show(cur);
 }
 function show(i) {
@@ -238,7 +312,7 @@ function show(i) {
   localStorage.setItem(POSKEY, String(cur));
   let info = `第 ${cur + 1}/${ITEMS.length} 个 | 已归属 ${nDone()}/${ITEMS.length}` +
     ` | ${it.file} t=${it.anchor_time}s`;
-  if (it.cluster_id) info += ` | 簇#${it.cluster_id}`;
+  if (it.cluster_id) info += ` | 簇#${groupIdOf(it.cluster_id)}`;
   // 预填优先级：号码匹配（K3 读号）> 颜色 team_guess；歧义不预填
   const ab = document.getElementById("accept");
   if (it.status === "SKIP") info += " | 无法定位";

@@ -996,6 +996,26 @@ class TestBuildHtmlClusters:
         assert proc.returncode == 0, proc.stderr
 
 
+class TestBuildHtmlClusterMerge:
+    """簇合并+折叠模板断言（docs/scorer-cluster-merge/spec.md）：标识符在，JS 语法合法。"""
+
+    def _html(self) -> str:
+        entries = build_entries(
+            [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
+        )
+        page_clusters = build_page_clusters([_cluster()], entries)
+        return build_html(entries, [], "s", {}, {}, clusters=page_clusters)
+
+    def test_cluster_state_layer_present(self) -> None:
+        html = self._html()
+        assert 'CLSTATE_KEY = LSKEY + "_clusters"' in html
+        assert "function saveClState(" in html
+        assert "function groupIdOf(" in html
+        assert "function computeGroups(" in html
+        assert "function groupTag(" in html
+        assert "clState.clAssign" in html
+
+
 class TestMainClusters:
     """main 端到端 --clusters：同目录强校验、schema 损坏退出 1、簇区内联。"""
 
