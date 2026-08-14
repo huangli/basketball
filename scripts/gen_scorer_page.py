@@ -4,7 +4,8 @@
 读取 crop_scorers 产出的 scorer_candidates.json（每球一条：key/裁图/clip 预览
 片段/team_guess/SKIP 状态）+ goals.json（confirmed 球为页面条目全集），在同目录
 生成自包含 scorer.html（数据内联、裁图/视频相对路径、按键+按钮、localStorage
-进度、一键导出 roster_<session>.json）。立哥浏览器打开即可：看裁图与预览片段，
+进度、一键导出 roster.json——文件名即 CLI 认的名字，移到 work/<场次>/
+即可接入 people 预填链与 build，无需改名）。立哥浏览器打开即可：看裁图与预览片段，
 点球员按钮（数字键 1-9）或自由文本输入归属，S 跳过；SKIP 球标"无法定位"
 照常列出可手选；导出物 schema 严格过 scripts/roster.py（format_key 键、
 validate_roster 可校验），confirmed=true 仅当全部非 SKIP 球已归属。
@@ -116,7 +117,7 @@ small { color: #999; }
   <button class="nav" id="toun">跳到未归属</button>
   <button id="export">导出 roster.json</button>
   <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 ←/→=翻页；SKIP 球标"无法定位"可手选</small>
-  <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster___SESSION__.json</small>
+  <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster.json</small>
 </div>
 <div id="clusters"></div>
 <img id="crop" alt="投篮者裁图">
@@ -306,12 +307,12 @@ function exportRoster() {
   const blob = new Blob([payload], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "roster_" + SESSION + ".json";
+  a.download = "roster.json";
   a.click();
   const nUn = ITEMS.filter(it => it.status !== "SKIP" && !marks[it.key]).length;
-  alert("已下载 roster_" + SESSION + ".json（归属 " + Object.keys(assignments).length +
+  alert("已下载 roster.json（归属 " + Object.keys(assignments).length +
         "/" + ITEMS.length + "，confirmed=" + confirmed +
-        (nUn ? "，还有 " + nUn + " 个非 SKIP 球未归属" : "") + "），把它发给助手即可");
+        (nUn ? "，还有 " + nUn + " 个非 SKIP 球未归属" : "") + "），移到 work 场次目录即可");
 }
 document.getElementById("go").onclick = freeAssign;
 document.getElementById("skip").onclick = skip;

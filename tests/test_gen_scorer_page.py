@@ -583,8 +583,9 @@ class TestBuildHtml:
     def test_export_contract_roster_json(self) -> None:
         # Arrange / Act
         html = build_html([], [], "20260722", {}, {})
-        # Assert：导出结构字段与文件名契约（roster.py validate_roster 可过）
-        assert "roster_" in html and ".json" in html
+        # Assert：导出结构字段与文件名契约（roster.py validate_roster 可过；
+        # roster-export-name：下载名即 roster.json，移到 work/<场次>/ 直接接入 CLI）
+        assert 'a.download = "roster.json";' in html
         assert "confirmed" in html
         assert "assignments" in html
         assert "players" in html

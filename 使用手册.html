@@ -114,7 +114,7 @@
 <ul>
   <li>机器自动：轨迹法定位投篮者 → 多裁选帧 → CLIP 聚类分组 → 生成确认页（首批实测约 <b>3 分钟</b>，进球多的批会久一些）。</li>
   <li>浏览器打开确认页 <code>work\20260805_车百鼎\scorers_b1\scorer.html</code>：<b>看视频终裁，裁图只是辅助</b>。簇级选人一次定一组，个别不对的逐球覆盖（约 1～2 秒/球，一批几分钟搞定）。</li>
-  <li>确认完点导出，下载 <code>roster_20260805_车百鼎.json</code> → <b>改名为 <code>roster.json</code></b> 放进 <code>work\20260805_车百鼎\</code>。</li>
+  <li>确认完点导出，下载得到 <code>roster.json</code>——<b>文件名直接就是 CLI 认的名字</b>，移动进 <code>work\20260805_车百鼎\</code> 即可，无需改名（浏览器重名存成 <code>roster (1).json</code> 时把后缀去掉）。</li>
   <li>然后跑下一批 <code>--batch 2</code>、<code>--batch 3</code>——后一批会自动带上已有 roster 预填，越跑越省劲。<b>建议逐批跑、逐批确认。</b></li>
 </ul>
 <div class="tip"><b>提示</b>预填（聚类分组、读号、颜色分队）都可能错，一律可一键改；球衣互换时读号必错，以画面为准。</div>
@@ -184,7 +184,7 @@
 <p>同一场次目录里混了不同规格的素材（如 16:9 和 4:3）。把不同规格的分开，各自声明场次分别跑。</p>
 
 <h3>build 报 <code>roster 不存在</code></h3>
-<p>认人确认页导出的文件还没放好：确认它已改名为 <code>roster.json</code> 并位于 <code>work\&lt;场次&gt;\</code> 下。</p>
+<p>认人确认页导出的文件还没放好：确认 <code>roster.json</code> 已位于 <code>work\&lt;场次&gt;\</code> 下（旧版页面导出的 <code>roster_&lt;场次&gt;.json</code> 需先改名）。</p>
 
 <h3>往已跑过的场次里补新视频</h3>
 <pre>video score "素材目录" --session 已存在场次 --fids 新视频fid1,新视频fid2</pre>
