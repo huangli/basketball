@@ -105,6 +105,9 @@ small { color: #999; }
 .cluster-row { cursor: grab; }
 .cluster-row.drop-target { outline: 3px dashed #fc3; }
 .cluster-row button { font-size: 14px; padding: 6px 10px; }
+.picker { background: #2a2a12; border: 1px solid #fc3; border-radius: 8px;
+          padding: 6px; margin: 4px 0; width: 100%; }
+.picker .hint { color: #fc3; margin-right: 8px; }
 </style>
 </head>
 <body>
@@ -154,6 +157,7 @@ try {
     }
   }
 } catch (e) { clState = { merges: {}, clAssign: {}, collapsed: {} }; }
+let pickerGid = null; // 合并弹条：非 null = 该组行正弹选人条
 function saveClState(del) {
   // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
   // del = { merges: [...], clAssign: [...] } 待删键——读回合并会把本地已删的键
@@ -303,8 +307,17 @@ function mergeInto(srcGid, dstGid) {
   save();
   saveClState({ merges: [], clAssign: delAssign });
   show(cur);
-  // PICKER-HOOK: 合并弹条在 Task 4 挂这里（!tag 时 openPicker(dstGid)，
-  // 替换行须保留 "PICKER-HOOK" 字样，否则 test_drag_merge_present 红）
+  // PICKER-HOOK 已挂接：未自动预填 → 就地弹选人条（spec 合并动作 7）
+  if (!tag) openPicker(dstGid);
+}
+function openPicker(gid) {
+  pickerGid = gid;
+  show(cur);
+}
+function closePicker() {
+  if (pickerGid === null) return;
+  pickerGid = null;
+  show(cur);
 }
 function renderClusters() {
   // 簇区按显示组渲染：图墙拼接 + 组标签 + 拆开钮（合并组才有）+ 选人按钮；
@@ -359,6 +372,27 @@ function renderClusters() {
       b.className = "team-" + p.team;
       b.onclick = () => clusterAssign(g.gid, p.tag);
       row.appendChild(b);
+    }
+    if (pickerGid === g.gid) {
+      const pk = document.createElement("div");
+      pk.className = "picker";
+      const hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = "合并完成，选人应用到整组（" + g.keys.length + " 球）：";
+      pk.appendChild(hint);
+      for (const p of PLAYERS) {
+        const b = document.createElement("button");
+        b.textContent = p.tag + (p.name ? "=" + p.name : "");
+        b.className = "team-" + p.team;
+        b.onclick = () => { pickerGid = null; clusterAssign(g.gid, p.tag); };
+        pk.appendChild(b);
+      }
+      const cancel = document.createElement("button");
+      cancel.textContent = "取消";
+      cancel.className = "nav";
+      cancel.onclick = () => closePicker();
+      pk.appendChild(cancel);
+      row.appendChild(pk);
     }
     box.appendChild(row);
   }
@@ -476,6 +510,11 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   const k = ev.key.toLowerCase();
+  if (pickerGid !== null) {
+    // 弹条期间：Esc 关闭；数字键 1-9/E 屏蔽（防误触逐球归属改错球）
+    if (ev.key === "Escape") closePicker();
+    if ((k >= "1" && k <= "9") || k === "e") return;
+  }
   if (k >= "1" && k <= "9") {
     const idx = parseInt(k, 10) - 1;
     if (idx < PLAYERS.length) assign(PLAYERS[idx].tag);
@@ -483,6 +522,11 @@ document.addEventListener("keydown", (ev) => {
   else if (k === "e" && ITEMS.length && ITEMS[cur].prefill_tag) assign(ITEMS[cur].prefill_tag);
   else if (ev.key === "ArrowLeft") show(cur - 1);
   else if (ev.key === "ArrowRight") show(cur + 1);
+});
+document.addEventListener("click", (ev) => {
+  if (pickerGid === null) return;
+  if (ev.target && ev.target.closest && ev.target.closest(".picker")) return;
+  closePicker();
 });
 // 启动：优先回到上次位置；无记录则跳到第一个未归属球
 let start = parseInt(localStorage.getItem(POSKEY) || "-1", 10);
