@@ -108,6 +108,8 @@ small { color: #999; }
 .picker { background: #2a2a12; border: 1px solid #fc3; border-radius: 8px;
           padding: 6px; margin: 4px 0; width: 100%; }
 .picker .hint { color: #fc3; margin-right: 8px; }
+.cluster-row.collapsed img.rep { max-height: 48px; max-width: 64px; }
+.cluster-row .foldbtn { font-size: 12px; padding: 2px 8px; }
 </style>
 </head>
 <body>
@@ -158,6 +160,9 @@ try {
   }
 } catch (e) { clState = { merges: {}, clAssign: {}, collapsed: {} }; }
 let pickerGid = null; // 合并弹条：非 null = 该组行正弹选人条
+let collapseAll = null; // 总开关：null=随规则 / true=全折 / false=全展（瞬态，刷新回规则；
+                        // 点击后 null→true→false→true… 两态循环回不到"随规则"系有意
+                        // 为之——回规则态靠刷新，spec 未要求三态）
 function saveClState(del) {
   // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
   // del = { merges: [...], clAssign: [...] } 待删键——读回合并会把本地已删的键
@@ -319,6 +324,20 @@ function closePicker() {
   pickerGid = null;
   show(cur);
 }
+function isCollapsed(g) {
+  // 优先级：总开关 > 显式 collapsed > 默认规则（组内全部球有 marks → 折叠）
+  if (collapseAll !== null) return collapseAll;
+  const ex = clState.collapsed[String(g.gid)];
+  if (ex !== undefined) return !!ex;
+  return g.keys.every(k => marks[k]);
+}
+function toggleCollapse(gid) {
+  const g = computeGroups().find(x => x.gid === gid);
+  if (!g) return;
+  clState.collapsed[String(gid)] = !isCollapsed(g);
+  saveClState();
+  show(cur);
+}
 function renderClusters() {
   // 簇区按显示组渲染：图墙拼接 + 组标签 + 拆开钮（合并组才有）+ 选人按钮；
   // 无簇数据整区隐藏（无 --clusters 行为同旧版）
@@ -326,10 +345,28 @@ function renderClusters() {
   box.innerHTML = "";
   if (!CLUSTERS.length) { box.style.display = "none"; return; }
   box.style.display = "block";
+  const tbar = document.createElement("div");
+  const tall = document.createElement("button");
+  tall.textContent = "全部展开/折叠";
+  tall.className = "nav";
+  tall.onclick = () => {
+    collapseAll = collapseAll === null ? true : !collapseAll;
+    renderClusters();
+  };
+  tbar.appendChild(tall);
+  box.appendChild(tbar);
   for (const g of computeGroups()) {
     const row = document.createElement("div");
     row.className = "cluster-row";
     row.dataset.gid = g.gid;
+    const folded = isCollapsed(g);
+    if (folded) row.classList.add("collapsed");
+    const fb = document.createElement("button");
+    fb.textContent = folded ? "▸" : "▾";
+    fb.className = "foldbtn nav";
+    fb.title = folded ? "展开" : "折叠";
+    fb.onclick = () => toggleCollapse(g.gid);
+    row.appendChild(fb);
     row.draggable = true;
     row.ondragstart = (ev) => {
       ev.dataTransfer.setData("text/plain", String(g.gid));
@@ -346,7 +383,7 @@ function renderClusters() {
       const src = parseInt(ev.dataTransfer.getData("text/plain"), 10);
       if (!isNaN(src)) mergeInto(src, g.gid);
     };
-    for (const rc of g.rep_crops) {
+    for (const rc of folded ? g.rep_crops.slice(0, 1) : g.rep_crops) {
       const im = document.createElement("img");
       im.src = rc;
       im.className = "rep";
@@ -359,19 +396,21 @@ function renderClusters() {
     lab.textContent = groupLabel(g) +
       (gt.tag ? " → " + gt.tag + (gt.mixed ? "（混合）" : "") : "");
     row.appendChild(lab);
-    if (g.cids.length > 1) {
+    if (!folded && g.cids.length > 1) {
       const sp = document.createElement("button");
       sp.textContent = "拆开";
       sp.className = "nav";
       sp.onclick = () => splitGroup(g.gid);
       row.appendChild(sp);
     }
-    for (const p of PLAYERS) {
-      const b = document.createElement("button");
-      b.textContent = p.tag + (p.name ? "=" + p.name : "");
-      b.className = "team-" + p.team;
-      b.onclick = () => clusterAssign(g.gid, p.tag);
-      row.appendChild(b);
+    if (!folded) {
+      for (const p of PLAYERS) {
+        const b = document.createElement("button");
+        b.textContent = p.tag + (p.name ? "=" + p.name : "");
+        b.className = "team-" + p.team;
+        b.onclick = () => clusterAssign(g.gid, p.tag);
+        row.appendChild(b);
+      }
     }
     if (pickerGid === g.gid) {
       const pk = document.createElement("div");

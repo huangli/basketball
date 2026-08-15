@@ -1037,6 +1037,13 @@ class TestBuildHtmlClusterMerge:
         assert 'className = "picker"' in html
         assert 'ev.key === "Escape"' in html
 
+    def test_collapse_present(self) -> None:
+        html = self._html()
+        assert "function isCollapsed(" in html
+        assert "function toggleCollapse(" in html
+        assert "collapseAll" in html
+        assert "全部展开" in html
+
 
 class TestMainClusters:
     """main 端到端 --clusters：同目录强校验、schema 损坏退出 1、簇区内联。"""
