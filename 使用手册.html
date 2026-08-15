@@ -131,7 +131,7 @@
   <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。多批次场次自动合并跨批片段，每球员/队伍只出一个合集；某球员或某队伍在选定批次里没球会 WARNING 跳过，不中断其他人（全都没球才会报错不出片）。</li>
   <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。只看某一批：加 <code>--batch 2</code>——只出这一批的片段，不合并其他批。</li>
   <li>成品在 <code>output\20260805_车百鼎\</code>：队伍 <code>队伍_XX_进球集锦.mp4</code>，个人 <code>&lt;队伍&gt;_&lt;姓名&gt;_进球合集.mp4</code>，片段按拍摄时间排序。</li>
-  <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久；几十球规模估计几分钟到十几分钟（暂无整场实测，跑完一次后补准数）。</li>
+  <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久。实测（车百鼎：122 球、18 人 + 2 队共 20 个合集）约 <b>20 分钟</b>。</li>
 </ul>
 
 <h3>第 5 步（可选）：精彩照片 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
@@ -164,7 +164,7 @@
   <tr>
     <td><code>video build</code></td>
     <td>合成合集</td>
-    <td><b>分钟级</b>（每球一条 6 秒片段重编码，暂无整场实测）</td>
+    <td>实测约 <b>20 分钟</b>（122 球 / 20 个合集）</td>
     <td><code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；roster 未确认全会被拒</td>
   </tr>
 </table>
@@ -212,7 +212,7 @@
 <footer>
   本手册只写操作口径；流水线原理与实测指标见 <code>docs\2026-07-26-current-goal-detection-pipeline.md</code>，
   CLI 设计契约见 <code>docs\video-cli\spec.md</code>，踩坑记录见 <code>docs\经验教训.md</code>。<br>
-  最后更新：2026-08-14
+  最后更新：2026-08-16
 </footer>
 
 </main>
