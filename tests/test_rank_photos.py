@@ -1,13 +1,18 @@
-"""rank_photos.py 单元测试（打分 / 分桶 / 构图 / 尺度断言 / apply 校验）。
+"""rank_photos.py 单元测试（打分 / 分桶 / 构图 / 尺度断言 / apply 校验 / 第二轮调参）。
 
-覆盖：每帧 max conf 球选取（conf<0.35 视为无球）、冲击分四信号
-（球速/人球交互/主体尺度/球高度）、10s 分桶保底 1 张再按分补齐、
-构图裁切（联合包围/头顶留白/三分法/边界夹取/放大降级/16:9 与 4:3）、
-缓存坐标尺度可执行断言（越界抛 SchemaError）、selections.json schema 校验、
-apply 落盘命名契约。不触碰真实素材与 ffmpeg。
+覆盖：每帧 max conf 球选取（conf<0.35 视为无球）、冲击分五信号
+（球筐距/主体尺度/球速/人球交互/球高度）、进球锚点 ±0.6s 加成与 force_pick 保底、
+10s 分桶保底 1 张再按分补齐、构图裁切（联合包围/特写占比/头顶留白/三分法/
+边界夹取/过近与放大降级/16:9 与 4:3）、hoops/goals 批次文件读取（缺失记空、
+schema 损坏显式失败）、--force 清空重跑、缓存坐标尺度可执行断言（越界抛
+SchemaError）、selections.json schema 校验、apply 落盘命名契约。
+不触碰真实素材与 ffmpeg。
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import pytest
 
@@ -18,12 +23,17 @@ from mot_candidates import Detection
 from rank_photos import (
     OUT_4_3,
     OUT_16_9,
+    HoopEvent,
     ScoredCandidate,
     apply_filename,
+    apply_goal_boost,
     assert_cache_scale,
     bucket_pick,
     compose_crop,
     frame_ball,
+    load_goal_anchors,
+    load_hoop_events,
+    reset_candidate_outputs,
     score_frames,
     validate_selections,
     window_times,
@@ -192,12 +202,12 @@ class TestComposeCrop:
         h = plan.box.y2 - plan.box.y1
         assert abs(w / h - 4 / 3) < 0.01
 
-    def test_headroom_at_least_10_percent(self) -> None:
+    def test_headroom_at_least_5_percent(self) -> None:
         person = self._person()
         plan = compose_crop(person, None, self.IMG_W, self.IMG_H, *OUT_16_9)
         h = plan.box.y2 - plan.box.y1
         headroom = person.y1 - plan.box.y1
-        assert headroom >= 0.10 * h - 2  # 2px 取整容差
+        assert headroom >= 0.05 * h - 2  # 2px 取整容差（第二轮：留白下限 10%→5%）
 
     def test_person_fully_inside_crop(self) -> None:
         person = self._person()
@@ -343,3 +353,253 @@ class TestApplyFilename:
         name = apply_filename(7, 3, 0.5)
         assert name.startswith("照片_007_v003_t0000.5")
         assert name.endswith(".jpg")
+
+
+def _hoop(start: float, end: float, hx: float, hy: float) -> HoopEvent:
+    """构造一个筐事件（窗口 + 筐心，检测尺度）。"""
+    return HoopEvent(start=start, end=end, hx=hx, hy=hy)
+
+
+class TestHoopSignal:
+    """球筐距信号（第二轮主信号）：筐近 > 筐远；窗口外/无 hoops 记 0 不报错。"""
+
+    def test_ball_near_hoop_beats_far(self) -> None:
+        # 单帧无速度项；同 cy 排除球高干扰；无人排除尺度/交互干扰
+        hoops = [_hoop(0.0, 10.0, 960.0, 300.0)]
+        near = _cache([(_ball(0.9, 960, 320, 0),)], [()])
+        far = _cache([(_ball(0.9, 300, 300, 0),)], [()])
+        assert score_frames(near, DET_H, hoops)[0] > score_frames(far, DET_H, hoops)[0]
+
+    def test_no_hoops_no_error(self) -> None:
+        cache = _cache([(_ball(0.9, 960, 300, 0),)], [()])
+        assert score_frames(cache, DET_H, None)[0] > 0.0
+
+    def test_outside_window_scores_zero_hoop(self) -> None:
+        # 窗口 [0,1] 外（帧 25 → sec=5.0）的帧：筐距信号记 0，与无 hoops 同分
+        hoops = [_hoop(0.0, 1.0, 960.0, 300.0)]
+        cache = _cache(
+            [()] * 25 + [(_ball(0.9, 960, 320, 25),)],
+            [()] * 26,
+        )
+        assert score_frames(cache, DET_H, hoops)[25] == pytest.approx(
+            score_frames(cache, DET_H, None)[25]
+        )
+
+    def test_overlapping_windows_take_best(self) -> None:
+        # 两个窗口同帧覆盖，取距更近的筐
+        hoops = [_hoop(0.0, 10.0, 100.0, 100.0), _hoop(0.0, 10.0, 960.0, 300.0)]
+        near = _cache([(_ball(0.9, 960, 320, 0),)], [()])
+        assert score_frames(near, DET_H, hoops)[0] == pytest.approx(
+            score_frames(near, DET_H, [_hoop(0.0, 10.0, 960.0, 300.0)])[0]
+        )
+
+
+class TestGoalBoost:
+    """进球锚点加成：±0.6s 内 ×1.5，每球窗口内最高分帧 force_pick 保底。"""
+
+    def _item(self, fi: int, score: float) -> ScoredCandidate:
+        return ScoredCandidate(fid="a", frame_idx=fi, sec=fi / 5, global_sec=fi / 5, score=score)
+
+    def test_boost_inside_window(self) -> None:
+        items = [self._item(50, 0.4)]  # sec=10.0，锚点正中
+        boosted = apply_goal_boost(items, [10.0])
+        assert boosted[0].score == pytest.approx(0.6)
+        assert boosted[0].force_pick
+
+    def test_no_boost_outside_window(self) -> None:
+        items = [self._item(50, 0.4), self._item(60, 0.5)]  # sec=10.0 / 12.0
+        boosted = apply_goal_boost(items, [10.0])
+        assert boosted[1].score == pytest.approx(0.5)
+        assert not boosted[1].force_pick
+
+    def test_window_boundary_inclusive(self) -> None:
+        # ±0.6s 边界含端点：sec=9.4/10.6 加成，9.2/10.8 不加（5fps 采样点）
+        items = [self._item(fi, 0.4) for fi in (46, 47, 53, 54)]
+        boosted = apply_goal_boost(items, [10.0])
+        by_sec = {it.sec: it for it in boosted}
+        assert by_sec[9.4].score == pytest.approx(0.6)
+        assert by_sec[10.6].score == pytest.approx(0.6)
+        assert by_sec[9.2].score == pytest.approx(0.4)
+        assert by_sec[10.8].score == pytest.approx(0.4)
+
+    def test_one_force_pick_per_goal_best_frame(self) -> None:
+        # 窗口内多帧只保底最高分那一帧
+        items = [self._item(fi, s) for fi, s in ((49, 0.3), (50, 0.7), (51, 0.5))]
+        boosted = apply_goal_boost(items, [10.0])
+        forced = [it for it in boosted if it.force_pick]
+        assert len(forced) == 1
+        assert forced[0].frame_idx == 50
+
+    def test_anchor_without_frames_noop(self) -> None:
+        items = [self._item(0, 0.4)]
+        boosted = apply_goal_boost(items, [50.0])
+        assert boosted == items
+
+    def test_empty_anchors_noop(self) -> None:
+        items = [self._item(50, 0.4)]
+        assert apply_goal_boost(items, []) == items
+
+
+class TestBucketPickForcePick:
+    """force_pick 帧在分桶保底之外额外保底入选（保底优先可超 total）。"""
+
+    def _item(
+        self, fi: int, global_sec: float, score: float, force: bool = False
+    ) -> ScoredCandidate:
+        return ScoredCandidate(
+            fid="a",
+            frame_idx=fi,
+            sec=fi / 5,
+            global_sec=global_sec,
+            score=score,
+            force_pick=force,
+        )
+
+    def test_force_pick_beyond_bucket_guarantee(self) -> None:
+        # 2 个 force_pick 同桶 + 另两桶各 1 张：total=2 仍全保（保底优先）
+        items = [
+            self._item(0, 1.0, 0.9, force=True),
+            self._item(1, 1.2, 0.8, force=True),
+            self._item(2, 1.5, 0.7),
+            self._item(3, 15.0, 0.1),
+            self._item(4, 25.0, 0.2),
+        ]
+        picked = bucket_pick(items, total=2, bucket_sec=10.0)
+        # 2 forced + 桶0 保底(0.7) + 桶1/桶2 保底 = 5？否：forced 所在桶仍可从池中保底
+        assert {p.frame_idx for p in picked} == {0, 1, 2, 3, 4}
+
+    def test_no_duplicate_when_force_pick_would_win_bucket(self) -> None:
+        items = [self._item(0, 1.0, 0.9, force=True), self._item(1, 1.2, 0.8)]
+        picked = bucket_pick(items, total=10, bucket_sec=10.0)
+        assert len(picked) == 2  # forced 不再作为桶内保底/补齐重复入选
+
+
+class TestComposeCloseUp:
+    """特写构图（第二轮）：主体目标占裁框高 55~75%，头顶留白 ≥5%，允许切脚。"""
+
+    IMG_W: int = 3840
+    IMG_H: int = 2160
+
+    def test_subject_fraction_target(self) -> None:
+        person = Box(1500, 700, 1900, 1900)  # 高 1200
+        plan = compose_crop(person, None, self.IMG_W, self.IMG_H, *OUT_16_9)
+        crop_h = plan.box.y2 - plan.box.y1
+        frac = 1200 / crop_h
+        assert 0.55 <= frac <= 0.75
+
+    def test_headroom_at_least_5_percent(self) -> None:
+        person = Box(1500, 700, 1900, 1900)
+        plan = compose_crop(person, None, self.IMG_W, self.IMG_H, *OUT_16_9)
+        crop_h = plan.box.y2 - plan.box.y1
+        headroom = person.y1 - plan.box.y1
+        assert headroom >= 0.05 * crop_h - 2  # 2px 取整容差
+
+    def test_feet_cut_allowed_at_bottom_edge(self) -> None:
+        # 人贴画面下边缘：裁框夹回后允许切脚/切膝（不再为保全身而外扩），头必须在框内
+        person = Box(1500, 1200, 1900, 2160)  # 高 960，脚贴底边
+        plan = compose_crop(person, None, self.IMG_W, self.IMG_H, *OUT_16_9)
+        assert plan.box.y1 <= person.y1  # 头在框内
+        assert plan.box.y2 <= self.IMG_H  # 裁框不出画面
+
+    def test_too_close_penalized(self) -> None:
+        # 主体占比 >85%（巨人近景，裁框被画面夹小）视为过近降分
+        giant = Box(800, 100, 2500, 2100)  # 高 2000，接近满幅
+        plan = compose_crop(giant, None, self.IMG_W, self.IMG_H, *OUT_16_9)
+        frac = 2000 / (plan.box.y2 - plan.box.y1)
+        assert frac > 0.85
+        assert plan.penalized
+
+
+class TestLoadHoopEvents:
+    """hoops_batchN.json 读取：缺失记空不报错；schema 损坏显式失败。"""
+
+    def _write(self, session_dir: Path, name: str, events: list) -> None:
+        payload = {"session": "s", "params": {}, "events": events}
+        (session_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_valid_load(self, tmp_path: Path) -> None:
+        self._write(
+            tmp_path,
+            "hoops_batch1.json",
+            [
+                {
+                    "key": "f#e1",
+                    "fid": "f",
+                    "event_idx": 1,
+                    "window": [1.0, 5.0],
+                    "anchor": [960, 300],
+                    "detected": True,
+                }
+            ],
+        )
+        got = load_hoop_events(tmp_path)
+        assert got == {"f": [HoopEvent(start=1.0, end=5.0, hx=960.0, hy=300.0)]}
+
+    def test_multi_batch_merged(self, tmp_path: Path) -> None:
+        ev = {
+            "key": "f#e1",
+            "fid": "f",
+            "event_idx": 1,
+            "window": [0.0, 2.0],
+            "anchor": [10, 20],
+            "detected": True,
+        }
+        self._write(tmp_path, "hoops_batch1.json", [ev])
+        self._write(tmp_path, "hoops_batch2.json", [dict(ev, key="g#e1", fid="g")])
+        got = load_hoop_events(tmp_path)
+        assert set(got) == {"f", "g"}
+
+    def test_missing_returns_empty(self, tmp_path: Path) -> None:
+        assert load_hoop_events(tmp_path) == {}
+
+    def test_schema_damaged_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "hoops_batch1.json").write_text('{"events": [{"fid": 1}]}', encoding="utf-8")
+        with pytest.raises(SchemaError):
+            load_hoop_events(tmp_path)
+
+
+class TestLoadGoalAnchors:
+    """goals_batchN.json 读取：只取 confirmed；缺失记空不报错。"""
+
+    def _write(self, session_dir: Path, name: str, goals: list) -> None:
+        (session_dir / name).write_text(
+            json.dumps({"session": "s", "goals": goals}), encoding="utf-8"
+        )
+
+    def test_only_confirmed_collected(self, tmp_path: Path) -> None:
+        self._write(
+            tmp_path,
+            "goals_batch1.json",
+            [
+                {"file": "a.mp4", "anchor_time": 10.0, "status": "confirmed"},
+                {"file": "a.mp4", "anchor_time": 20.0, "status": "rejected"},
+                {"file": "b.mp4", "anchor_time": 5, "status": "confirmed"},
+            ],
+        )
+        got = load_goal_anchors(tmp_path)
+        assert got == {"a.mp4": [10.0], "b.mp4": [5.0]}
+
+    def test_missing_returns_empty(self, tmp_path: Path) -> None:
+        assert load_goal_anchors(tmp_path) == {}
+
+    def test_schema_damaged_raises(self, tmp_path: Path) -> None:
+        self._write(tmp_path, "goals_batch1.json", [{"file": "a.mp4"}])
+        with pytest.raises(SchemaError):
+            load_goal_anchors(tmp_path)
+
+
+class TestResetCandidateOutputs:
+    """--force：清空 candidates 目录与 candidates JSON；空目录幂等不报错。"""
+
+    def test_clears_outputs(self, tmp_path: Path) -> None:
+        photos = tmp_path / "photos"
+        cand = photos / "candidates"
+        cand.mkdir(parents=True)
+        (cand / "c001.jpg").write_bytes(b"x")
+        (photos / "photo_candidates.json").write_text("{}", encoding="utf-8")
+        reset_candidate_outputs(photos)
+        assert not cand.exists()
+        assert not (photos / "photo_candidates.json").exists()
+
+    def test_idempotent_on_empty(self, tmp_path: Path) -> None:
+        reset_candidate_outputs(tmp_path / "photos")  # 不存在也不报错

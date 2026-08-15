@@ -2,6 +2,8 @@
 
 输入：work/<场次>/session_facts.json（逐文件宽高/帧率/时长）、
     work/<场次>/video_cli.json（srcdir 定位原片）、
+    work/<场次>/hoops_batchN.json（筐事件：fid/window/anchor 筐心，检测尺度；缺失记空不报错）、
+    work/<场次>/goals_batchN.json（confirmed 进球：file/anchor_time；缺失记空不报错）、
     work/detect/<视频名去后缀>_mot_cache.json（5fps 球/人检测缓存，经
     crop_scorers.load_mot_cache 唯一入口读取，坐标系 1920 宽检测尺度）。
 输出：work/<场次>/photos/candidates/cNNN.jpg（裁切后 1920×1080 或 1440×1080，q95）、
@@ -12,15 +14,19 @@
     OpenCV + NumPy + PIL。
 典型调用：
     python scripts/rank_photos.py --session 20260805_车百鼎
+    python scripts/rank_photos.py --session 20260805_车百鼎 --force   # 清空候选全量重跑
     python scripts/rank_photos.py --session 20260805_车百鼎 --apply            # 默认路径
     python scripts/rank_photos.py --session 20260805_车百鼎 --apply 某路径.json
 
-打分信号全部来自缓存（spec: docs/photo-select/spec.md）：球速（相邻帧球心位移）、
-人球交互（最近人框与球心距离）、主体尺度（最大人框面积占比）、球高度（cy 越小越高）。
-每帧只取 max conf 球，conf < 0.35 视为无球；无人帧无法构图不成候选。
+打分信号（spec: docs/photo-select/spec.md，第二轮调参 2026-08-15）：球筐距（hoops
+事件窗口内球心到筐心距离，近=高分，主信号）、主体尺度、球速、人球交互、球高度。
+confirmed 进球 anchor_time ±0.6s 内帧分数 ×1.5 且每球窗口内最高分帧 force_pick，
+在分桶保底之外额外保底入选（进球瞬间必进候选）。每帧只取 max conf 球，
+conf < 0.35 视为无球；无人帧无法构图不成候选。
 时间分桶 10s/桶，每桶保底 1 张再按分数全局补齐（桶多于目标张数时以保底为准，
 宁多勿漏）；尺度换算带可执行断言（spec §风险：越界抛 SchemaError 停跑）。
-断点续跑：photo_candidates.json 已存在且视频清单未变 → 跳过抽帧直接复用。
+断点续跑：photo_candidates.json 已存在且视频清单未变 → 跳过抽帧直接复用；
+--force 清空 candidates 与 candidates JSON 全量重跑（裁切参数变更后适用）。
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ import logging
 import math
 import shutil
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -58,15 +64,22 @@ SAMPLE_FPS: int = 5  # 缓存抽帧帧率：帧 i 对应 sec = i/5
 DETECT_WIDTH: int = 1920  # mot_cache 坐标系宽度（检测尺度）
 COORD_TOLERANCE: float = 0.01  # 尺度断言容差（spec §风险：1%）
 
-# ---- 打分信号参数（检测尺度像素；权重合计 1.0） ----
+# ---- 打分信号参数（检测尺度像素；权重合计 1.0，第二轮调参 2026-08-15） ----
 BALL_CONF_MIN: float = 0.35  # 球置信度下限，低于视为无球（spec §风险：缓存含 0.18~0.34 假球）
+HOOP_DIST_FULL_PX: float = 400.0  # 球筐距满值（球心到筐心 400px 以上视为无筐信号）
 SPEED_FULL_PX: float = 300.0  # 0.2s 球心位移满值（≈全场冲刺速度）
 INTERACT_FULL_PX: float = 400.0  # 人球交互距离满值（框外 400px 以上视为无交互）
 SCALE_FULL_RATIO: float = 0.12  # 主体面积占帧比满值（全身近景 ≈0.15）
-W_SPEED: float = 0.35
-W_INTERACT: float = 0.25
-W_SCALE: float = 0.25
-W_HEIGHT: float = 0.15
+W_HOOP: float = 0.35  # 球筐距（主信号：覆盖进球/篮板/封盖，都发生在筐附近）
+W_SCALE: float = 0.20  # 主体尺度（上调，特写导向）
+W_SPEED: float = 0.20
+W_INTERACT: float = 0.15
+W_HEIGHT: float = 0.10
+
+# ---- 进球锚点加成（goals_batchN.json confirmed 球） ----
+GOAL_BOOST_WINDOW_SEC: float = 0.6  # anchor_time ±0.6s 内帧加成（5fps 下 ±3 采样点）
+GOAL_BOOST_FACTOR: float = 1.5  # 窗口内分数倍率
+GOAL_TIME_EPS: float = 1e-6  # 窗口边界浮点容差（含端点）
 
 # ---- 分桶参数 ----
 BUCKET_SEC: float = 10.0  # 时间分桶宽度（spec：每桶保底 1 张保证时间覆盖）
@@ -82,20 +95,21 @@ EXTRACT_TIMEOUT_SEC: int = 120  # 单帧 ffmpeg 抽取超时（rules.md §4 兜�
 TMP_QV: int = 2  # 中间全帧 jpg 质量（防抖选材用，不省体积）
 EOF_MARGIN_FRAMES: float = 1.5  # 片尾余量（帧）：抽取时刻上限 = duration − 1.5/fps
 
-# ---- 构图裁切参数 ----
+# ---- 构图裁切参数（第二轮特写化 2026-08-15：替换保守外扩） ----
 OUT_16_9: tuple[int, int] = (1920, 1080)  # 16:9 素材输出尺寸
 OUT_4_3: tuple[int, int] = (1440, 1080)  # 4:3 素材输出尺寸
 RATIO_TOLERANCE: float = 0.01  # 比例判定容差（与 video.py resolve_out_size 一致）
-HEADROOM_RATIO: float = 0.10  # 头顶留白下限（占裁框高度比例，spec §3）
+HEADROOM_RATIO: float = 0.05  # 头顶留白下限（占裁框高度比例，10%→5% 特写化）
+SUBJECT_FRAC_TARGET: float = 0.65  # 主体（人+球联合框）占裁框高度目标（spec 55~75% 中点）
+SUBJECT_FRAC_OVER: float = 0.85  # 主体占比超此值视为过近，降排序分
 SUBJECT_PAD_W: float = 1.1  # 主体宽度方向余量系数
-SUBJECT_PAD_H: float = 1.25  # 主体高度方向余量系数
 NEAR_BALL_FACTOR: float = 0.75  # 球心距人框 ≤ 0.75×人高 视为"球在附近"联合包围
 UPSCALE_WARN: float = 1.5  # 放大超此倍数降分并记日志（spec §3）
 UPSCALE_PENALTY: float = 0.5  # 降分系数（惩罚后参与排序）
 JPEG_QUALITY: int = 95  # 候选图保存质量
 
 # ---- 产物契约 ----
-CANDIDATES_VERSION: int = 1  # photo_candidates.json 版本号
+CANDIDATES_VERSION: int = 2  # photo_candidates.json 版本号（v2：特写裁切+进球加成字段）
 SELECTIONS_NAME: str = "photo_selections.json"  # 页面导出物的约定文件名
 
 
@@ -111,8 +125,22 @@ class FileFact:
 
 
 @dataclass(frozen=True, slots=True)
+class HoopEvent:
+    """一个筐事件（hoops_batchN.json 归一后）：窗口（片内秒）+ 筐心（检测尺度）。"""
+
+    start: float
+    end: float
+    hx: float
+    hy: float
+
+
+@dataclass(frozen=True, slots=True)
 class ScoredCandidate:
-    """打过分的候选帧；person/ball 为原图像素坐标（构图输入，测试构造时可缺省）。"""
+    """打过分的候选帧；person/ball 为原图像素坐标（构图输入，测试构造时可缺省）。
+
+    force_pick=True 表示 confirmed 进球锚点 ±0.6s 窗口内最高分帧，
+    在分桶保底之外额外保底入选（spec 第二轮：进球瞬间必进候选）。
+    """
 
     fid: str
     frame_idx: int
@@ -121,6 +149,7 @@ class ScoredCandidate:
     score: float
     person: Box | None = None
     ball: Box | None = None
+    force_pick: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +157,8 @@ class CropPlan:
     """构图裁切方案：原图坐标裁框 + 输出放大倍数。
 
     不变式：box 宽高比 = 输出比例（±取整误差），box 夹回画面内，
-    主体完整在框内；upscale = 输出宽 / 裁框宽（<1 时记 1.0，即不放大只缩小）。
+    头顶与横向主体完整在框内（竖向允许切脚/切膝，spec 第二轮特写化）；
+    upscale = 输出宽 / 裁框宽（<1 时记 1.0，即不放大只缩小）。
     """
 
     box: Box
@@ -158,30 +188,58 @@ def _point_box_dist(x: float, y: float, b: Box) -> float:
     return math.hypot(dx, dy)
 
 
-def score_frames(cache: MotCache, det_h: int) -> list[float]:
-    """对缓存逐帧计算冲击分（检测尺度；四信号加权，各项缺失记 0）。
+def _hoop_score(ball: Detection, sec: float, hoops: list[HoopEvent]) -> float:
+    """球筐距信号：窗口内球心到筐心距离越近分越高；窗口外/无球记 0。
 
-    信号：球速（相邻帧球心位移，中间断帧则该帧球速记 0）、人球交互
-    （球心到最近人框距离，框内为满分）、主体尺度（最大人框面积占比）、
-    球高度（cy 越小分越高）。无人帧只得尺度分 0 以外的分项——无人即 0 分。
+    多个事件窗口覆盖同一帧时取最高分（距最近的筐）。
+
+    Args:
+        ball: 本帧 max conf 球（检测尺度球心）。
+        sec: 帧时刻（片内秒，5fps 采样）。
+        hoops: 该文件的筐事件清单（可为空 → 信号恒 0）。
+
+    Returns:
+        [0,1] 的筐距信号分。
+    """
+    best: float = 0.0
+    for ev in hoops:
+        if not (ev.start <= sec <= ev.end):
+            continue
+        d: float = math.hypot(ball.cx - ev.hx, ball.cy - ev.hy)
+        best = max(best, max(0.0, 1.0 - d / HOOP_DIST_FULL_PX))
+    return best
+
+
+def score_frames(cache: MotCache, det_h: int, hoops: list[HoopEvent] | None = None) -> list[float]:
+    """对缓存逐帧计算冲击分（检测尺度；五信号加权，各项缺失记 0）。
+
+    信号：球筐距（hoops 窗口内球心到筐心距离，主信号；hoops 缺失/窗口外记 0）、
+    主体尺度（最大人框面积占比）、球速（相邻帧球心位移，中间断帧则该帧球速记 0）、
+    人球交互（球心到最近人框距离，框内为满分）、球高度（cy 越小分越高）。
+    无人帧只得尺度分 0 以外的分项——无人即 0 分。
 
     Args:
         cache: 校验后的 mot_cache。
         det_h: 检测尺度帧高（16:9→1080，4:3→1440）。
+        hoops: 该文件的筐事件（hoops_batchN.json 归一）；None/空则筐距信号全 0。
 
     Returns:
         长度为 cache.frames 的逐帧分数列表。
     """
     frame_area: int = DETECT_WIDTH * det_h
+    hoop_events: list[HoopEvent] = hoops or []
     scores: list[float] = []
     prev_ball: Detection | None = None
     for i in range(cache.frames):
         ball: Detection | None = frame_ball(cache.balls[i])
         persons: tuple[Box, ...] = cache.persons[i]
+        hoop: float = 0.0
         speed: float = 0.0
         interact: float = 0.0
         height: float = 0.0
         if ball is not None:
+            if hoop_events:
+                hoop = _hoop_score(ball, i / SAMPLE_FPS, hoop_events)
             if prev_ball is not None:
                 d: float = math.hypot(ball.cx - prev_ball.cx, ball.cy - prev_ball.cy)
                 speed = min(d / SPEED_FULL_PX, 1.0)
@@ -193,9 +251,58 @@ def score_frames(cache: MotCache, det_h: int) -> list[float]:
         if persons:
             max_area: int = max(b.area for b in persons)
             scale = min(max_area / (SCALE_FULL_RATIO * frame_area), 1.0)
-        scores.append(W_SPEED * speed + W_INTERACT * interact + W_SCALE * scale + W_HEIGHT * height)
+        scores.append(
+            W_HOOP * hoop
+            + W_SCALE * scale
+            + W_SPEED * speed
+            + W_INTERACT * interact
+            + W_HEIGHT * height
+        )
         prev_ball = ball
     return scores
+
+
+def apply_goal_boost(
+    items: list[ScoredCandidate],
+    anchors: list[float],
+    window: float = GOAL_BOOST_WINDOW_SEC,
+    factor: float = GOAL_BOOST_FACTOR,
+) -> list[ScoredCandidate]:
+    """confirmed 进球加成：anchor ±window 内帧分数 ×factor，且每球窗口内最高分帧
+    标记 force_pick（分桶保底之外额外保底入选，spec 第二轮：进球瞬间必进候选）。
+
+    窗口边界含端点（浮点容差 GOAL_TIME_EPS）；无锚点或无候选原样返回；
+    锚点窗口内无任何候选帧时该球自然跳过（素材缺失容忍）。
+
+    Args:
+        items: 单文件候选帧（score 已含放大/过近惩罚）。
+        anchors: 该文件 confirmed 进球 anchor_time 清单（片内秒）。
+        window: 加成半窗（秒）。
+        factor: 窗口内分数倍率。
+
+    Returns:
+        新候选列表（输入不被修改；加成帧为 replace 副本）。
+    """
+    if not anchors or not items:
+        return items
+    tol: float = window + GOAL_TIME_EPS
+
+    def _in_window(sec: float, anchor: float) -> bool:
+        return abs(sec - anchor) <= tol
+
+    boosted: list[ScoredCandidate] = [
+        replace(it, score=it.score * factor) if any(_in_window(it.sec, a) for a in anchors) else it
+        for it in items
+    ]
+    forced_idx: set[int] = set()
+    for a in anchors:
+        best_idx: int | None = None
+        for idx, it in enumerate(boosted):
+            if _in_window(it.sec, a) and (best_idx is None or it.score > boosted[best_idx].score):
+                best_idx = idx
+        if best_idx is not None:
+            forced_idx.add(best_idx)
+    return [replace(it, force_pick=True) if i in forced_idx else it for i, it in enumerate(boosted)]
 
 
 def bucket_pick(
@@ -203,23 +310,26 @@ def bucket_pick(
     total: int = DEFAULT_TOTAL,
     bucket_sec: float = BUCKET_SEC,
 ) -> list[ScoredCandidate]:
-    """时间分桶挑选：每桶保底最高分 1 张，再按分数全局补齐至 total。
+    """时间分桶挑选：force_pick 帧额外保底 → 每桶保底最高分 1 张 → 按分数全局补齐。
 
-    保底优先于 total（桶多于 total 时宁可超出也不丢时间覆盖，spec「宁多勿漏」）；
-    无候选的桶（items 不含，如全段无人）自然跳过。结果按 global_sec 升序。
+    force_pick（confirmed 进球锚点窗口帧）在分桶保底之外必入选，且不再参与
+    桶内保底与补齐（防重复）；保底优先于 total（桶多/保底多于 total 时宁可
+    超出也不丢覆盖，spec「宁多勿漏」）；无候选的桶自然跳过。结果按 global_sec 升序。
 
     Args:
-        items: 全部候选帧（分数已含放大惩罚）。
+        items: 全部候选帧（分数已含放大/过近惩罚与进球加成）。
         total: 目标张数。
         bucket_sec: 分桶宽度（秒，按 global_sec 计）。
 
     Returns:
         入选候选，按场次时间升序。
     """
+    forced: list[ScoredCandidate] = [it for it in items if it.force_pick]
+    pool: list[ScoredCandidate] = [it for it in items if not it.force_pick]
     buckets: dict[int, list[ScoredCandidate]] = {}
-    for it in items:
+    for it in pool:
         buckets.setdefault(int(it.global_sec // bucket_sec), []).append(it)
-    picked: list[ScoredCandidate] = []
+    picked: list[ScoredCandidate] = list(forced)
     rest: list[ScoredCandidate] = []
     for b in sorted(buckets):
         ranked: list[ScoredCandidate] = sorted(
@@ -288,12 +398,14 @@ def compose_crop(
     out_w: int,
     out_h: int,
 ) -> CropPlan:
-    """以最大人框为主体计算构图裁框（spec §3）。
+    """以最大人框为主体计算特写构图裁框（spec 第二轮：替换保守外扩）。
 
-    球在附近（球心距人框 ≤ 0.75×人高）则人球联合包围；裁框外扩到输出比例，
-    头顶留白 ≥10%，人置于三分法竖线附近（偏左半场上左线，反之右线），
-    裁框平移夹回画面内（比画面大则按比例收缩后居中主体）；
-    裁框宽不足输出宽时记 upscale，>1.5 倍 penalized=True（降分+日志）。
+    球在附近（球心距人框 ≤ 0.75×人高）则人球联合包围；裁框高度 = 主体高 /
+    0.65（主体目标占裁框高 55~75%），头顶留白 ≥5%，人置于三分法竖线附近
+    （偏左半场上左线，反之右线）；允许切脚/切膝——竖向只锚定头顶，不为
+    保住主体底部而外扩或重夹；裁框平移夹回画面内（比画面大则按比例收缩）；
+    裁框宽不足输出宽时记 upscale，>1.5 倍 penalized；主体占比 >85%（过近）
+    同样 penalized（降分+日志）。
 
     Args:
         person: 主体人框（原图像素坐标）。
@@ -302,7 +414,7 @@ def compose_crop(
         out_w / out_h: 输出尺寸（比例即裁切比例）。
 
     Returns:
-        CropPlan（裁框已夹回画面，主体完整在框内）。
+        CropPlan（裁框已夹回画面，头与横向主体完整在框内，脚部可出框）。
     """
     subject: Box = person
     if ball is not None:
@@ -316,34 +428,33 @@ def compose_crop(
             )
     sub_w: int = subject.x2 - subject.x1
     sub_h: int = subject.y2 - subject.y1
-    # 高度取主体余量与宽度反推的较大者，保证两向都装得下且比例精确
-    crop_h: int = math.ceil(max(sub_h * SUBJECT_PAD_H, sub_w * SUBJECT_PAD_W * out_h / out_w))
+    # 特写化：高度取主体目标占比反推与宽度反推的较大者，保证两向都装得下且比例精确
+    crop_h: int = math.ceil(max(sub_h / SUBJECT_FRAC_TARGET, sub_w * SUBJECT_PAD_W * out_h / out_w))
     crop_w: int = round(crop_h * out_w / out_h)
-    # 头顶留白 ≥10%：裁框顶 = 主体顶 − 10% 裁框高（主体高 ≤80% 裁框高，底部自然有余量）
+    # 头顶留白 ≥5%：裁框顶 = 主体顶 − 5% 裁框高（竖向锚定头顶，底部不做保护）
     y1: int = subject.y1 - round(HEADROOM_RATIO * crop_h)
     # 三分法：人中心放左/右三分线（按人在画面左右半选择，保证构图朝向留白）
     if person.cx <= img_w // 2:
         x1: int = person.cx - crop_w // 3
     else:
         x1 = person.cx - 2 * crop_w // 3
-    # 比画面大则按比例收缩（16:9 素材此时贴满宽或高）
+    # 比画面大则按比例收缩（仍锚定头顶，允许底部切脚）
     if crop_w > img_w or crop_h > img_h:
         shrink: float = min(img_w / crop_w, img_h / crop_h)
         crop_w = round(crop_w * shrink)
         crop_h = round(crop_h * shrink)
         x1 = subject.cx - crop_w // 2
-        y1 = subject.cy - crop_h // 2
-    # 平移夹回画面（不缩放，保住比例与主体）
+        y1 = subject.y1 - round(HEADROOM_RATIO * crop_h)
+    # 平移夹回画面（不缩放，保住比例；夹取只增头顶留白，不切头）
     x1 = max(0, min(img_w - crop_w, x1))
     y1 = max(0, min(img_h - crop_h, y1))
-    # 夹取后主体若出框（极端贴边），向主体居中重夹一次
+    # 横向主体若出框（极端贴边），向主体居中重夹一次；竖向不重夹（允许切脚/切膝）
     if x1 > subject.x1 or x1 + crop_w < subject.x2:
         x1 = max(0, min(img_w - crop_w, subject.cx - crop_w // 2))
-    if y1 > subject.y1 or y1 + crop_h < subject.y2:
-        y1 = max(0, min(img_h - crop_h, subject.cy - crop_h // 2))
     box: Box = Box(x1, y1, x1 + crop_w, y1 + crop_h)
     upscale: float = max(1.0, out_w / crop_w)
-    return CropPlan(box=box, upscale=upscale, penalized=upscale > UPSCALE_WARN)
+    too_close: bool = sub_h / crop_h > SUBJECT_FRAC_OVER
+    return CropPlan(box=box, upscale=upscale, penalized=upscale > UPSCALE_WARN or too_close)
 
 
 def validate_selections(data: Any, session: str) -> list[str]:  # noqa: ANN401 JSON 入参
@@ -408,6 +519,102 @@ def load_session_facts(path: Path) -> list[FileFact]:
     return facts
 
 
+def load_hoop_events(session_dir: Path) -> dict[str, list[HoopEvent]]:
+    """读取场次目录全部 hoops_batchN.json，归一为 fid（去后缀）→ 筐事件清单。
+
+    文件缺失记空 dict 不报错（老场次无 hoops，筐距信号全 0）；文件存在但
+    schema 损坏（缺 events / 事件缺 fid/window/anchor 或类型错）抛 SchemaError
+    （rules.md §0.2：数据损坏必须停）。
+
+    Args:
+        session_dir: work/<场次> 目录。
+
+    Returns:
+        fid（视频名去后缀，与 mot_cache 主键一致）→ 筐事件列表（可多批次合并）。
+
+    Raises:
+        SchemaError: 任一批次文件 schema 损坏。
+    """
+    out: dict[str, list[HoopEvent]] = {}
+    for path in sorted(session_dir.glob("hoops_batch*.json")):
+        data: Any = read_json(path, what="hoops_batch")
+        if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+            raise SchemaError(f"{path}: 顶层必须是含 events 列表的对象")
+        for idx, ev in enumerate(data["events"]):
+            if not isinstance(ev, dict):
+                raise SchemaError(f"{path}: events[{idx}] 不是对象")
+            fid: Any = ev.get("fid")
+            window: Any = ev.get("window")
+            anchor: Any = ev.get("anchor")
+            if (
+                not isinstance(fid, str)
+                or not isinstance(window, list)
+                or len(window) != 2
+                or not all(isinstance(v, (int, float)) for v in window)
+                or not isinstance(anchor, list)
+                or len(anchor) != 2
+                or not all(isinstance(v, (int, float)) for v in anchor)
+            ):
+                raise SchemaError(f"{path}: events[{idx}] 缺 fid/window/anchor 或类型错")
+            out.setdefault(fid, []).append(
+                HoopEvent(
+                    start=float(window[0]),
+                    end=float(window[1]),
+                    hx=float(anchor[0]),
+                    hy=float(anchor[1]),
+                )
+            )
+    return out
+
+
+def load_goal_anchors(session_dir: Path) -> dict[str, list[float]]:
+    """读取场次目录全部 goals_batchN.json，归一为 file（含后缀）→ confirmed 锚点清单。
+
+    只收 status == "confirmed" 的球；文件缺失记空 dict 不报错（未标注场次无加成）；
+    文件存在但 schema 损坏抛 SchemaError（rules.md §0.2）。
+
+    Args:
+        session_dir: work/<场次> 目录。
+
+    Returns:
+        file（视频名含后缀，与 session_facts 主键一致）→ anchor_time（片内秒）列表。
+
+    Raises:
+        SchemaError: 任一批次文件 schema 损坏。
+    """
+    out: dict[str, list[float]] = {}
+    for path in sorted(session_dir.glob("goals_batch*.json")):
+        data: Any = read_json(path, what="goals_batch")
+        if not isinstance(data, dict) or not isinstance(data.get("goals"), list):
+            raise SchemaError(f"{path}: 顶层必须是含 goals 列表的对象")
+        for idx, g in enumerate(data["goals"]):
+            if not isinstance(g, dict):
+                raise SchemaError(f"{path}: goals[{idx}] 不是对象")
+            file: Any = g.get("file")
+            anchor_time: Any = g.get("anchor_time")
+            status: Any = g.get("status")
+            if (
+                not isinstance(file, str)
+                or not isinstance(anchor_time, (int, float))
+                or not isinstance(status, str)
+            ):
+                raise SchemaError(f"{path}: goals[{idx}] 缺 file/anchor_time/status 或类型错")
+            if status == "confirmed":
+                out.setdefault(file, []).append(float(anchor_time))
+    return out
+
+
+def reset_candidate_outputs(photos_dir: Path) -> None:
+    """--force：清空 candidates 目录与 photo_candidates.json（裁切参数变更后
+    断点续跑不适用，必须全量重出）。目录/文件不存在时幂等不报错。
+
+    Args:
+        photos_dir: work/<场次>/photos 目录。
+    """
+    shutil.rmtree(photos_dir / "candidates", ignore_errors=True)
+    (photos_dir / "photo_candidates.json").unlink(missing_ok=True)
+
+
 def out_size_for(fact: FileFact) -> tuple[int, int]:
     """按素材比例判定输出尺寸（容差 ±1%，与 video.py resolve_out_size 同口径）。
 
@@ -437,22 +644,27 @@ def build_scored_candidates(
     fact: FileFact,
     cache: MotCache,
     global_offset: float,
+    hoops: list[HoopEvent] | None = None,
+    goal_anchors: list[float] | None = None,
 ) -> list[ScoredCandidate]:
     """单文件逐帧打分并装配候选（无人帧跳过：无主体无法构图）。
 
-    构图在打分阶段完成：放大惩罚先于分桶生效，模糊/远景帧自然沉底。
+    构图在打分阶段完成：放大/过近惩罚先于分桶生效，模糊/远景帧自然沉底；
+    末尾套进球锚点加成（±0.6s ×1.5 + force_pick 保底）。
 
     Args:
         fact: 文件元数据。
         cache: 该文件的 mot_cache（已 schema 校验）。
         global_offset: 该文件在场次时间轴上的起始秒（前序文件时长累加）。
+        hoops: 该文件的筐事件（可空 → 筐距信号全 0）。
+        goal_anchors: 该文件 confirmed 进球 anchor_time 清单（可空 → 无加成）。
 
     Returns:
         候选列表（分桶挑选的输入）。
     """
     factor: float = assert_cache_scale(cache, fact.width, fact.height, fact.name)
     det_h: int = round(fact.height / factor)
-    scores: list[float] = score_frames(cache, det_h)
+    scores: list[float] = score_frames(cache, det_h, hoops)
     out_w, out_h = out_size_for(fact)
     items: list[ScoredCandidate] = []
     for i in range(cache.frames):
@@ -470,7 +682,7 @@ def build_scored_candidates(
         if plan.penalized:
             score *= UPSCALE_PENALTY
             logger.debug(
-                "%s 帧%d 放大 %.2f 倍超阈，降分 %.3f→%.3f",
+                "%s 帧%d 放大 %.2f 倍/过近，降分 %.3f→%.3f",
                 fact.name,
                 i,
                 plan.upscale,
@@ -489,7 +701,7 @@ def build_scored_candidates(
                 ball=ball,
             )
         )
-    return items
+    return apply_goal_boost(items, goal_anchors or [])
 
 
 def window_times(sec: float, fps: float, duration: float) -> list[float]:
@@ -634,7 +846,7 @@ def _load_candidates_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _run_rank(session: str, rawdir: str | None, total: int) -> int:
+def _run_rank(session: str, rawdir: str | None, total: int, force: bool) -> int:
     """主流程：读缓存打分 → 分桶选 top N → 抽帧防抖裁切 → 落 candidates JSON。"""
     session_dir: Path = Path("work") / session
     if not session_dir.is_dir():
@@ -645,16 +857,32 @@ def _run_rank(session: str, rawdir: str | None, total: int) -> int:
     cand_dir: Path = photos_dir / "candidates"
     cand_json: Path = photos_dir / "photo_candidates.json"
 
+    if force:
+        reset_candidate_outputs(photos_dir)
+        logger.info("--force：已清空 %s 与 candidates JSON，全量重跑", cand_dir)
+
+    hoop_map: dict[str, list[HoopEvent]] = load_hoop_events(session_dir)
+    goal_map: dict[str, list[float]] = load_goal_anchors(session_dir)
+    logger.info(
+        "筐事件 %d 个文件 / confirmed 进球 %d 个文件",
+        len(hoop_map),
+        len(goal_map),
+    )
+
     video_names: list[str] = [f.name for f in facts]
     if cand_json.is_file():
-        old: dict[str, Any] = _load_candidates_json(cand_json)
-        if old.get("videos") == video_names:
-            logger.info(
-                "断点续跑：candidates 已存在且视频清单未变（%d 张），跳过抽帧",
-                len(old["candidates"]),
-            )
-            return 0
-        logger.info("视频清单已变，全量重算（旧 candidates 作废）")
+        try:
+            old: dict[str, Any] = _load_candidates_json(cand_json)
+        except SchemaError:
+            logger.info("旧 candidates 版本不兼容，全量重算（旧产物作废）")
+        else:
+            if old.get("videos") == video_names:
+                logger.info(
+                    "断点续跑：candidates 已存在且视频清单未变（%d 张），跳过抽帧",
+                    len(old["candidates"]),
+                )
+                return 0
+            logger.info("视频清单已变，全量重算（旧 candidates 作废）")
 
     # 逐文件：读缓存 → 尺度断言 → 打分装配候选
     items: list[ScoredCandidate] = []
@@ -678,14 +906,25 @@ def _run_rank(session: str, rawdir: str | None, total: int) -> int:
             global_offset += fact.duration
             continue
         cache: MotCache = load_mot_cache(cache_path)
-        items.extend(build_scored_candidates(fact, cache, global_offset))
+        items.extend(
+            build_scored_candidates(
+                fact,
+                cache,
+                global_offset,
+                hoops=hoop_map.get(Path(fact.name).stem),
+                goal_anchors=goal_map.get(fact.name),
+            )
+        )
         global_offset += fact.duration
     if skipped:
         logger.warning("共 %d 个文件被跳过（缺缓存或缺原片）", skipped)
     logger.info("候选帧池 %d（%d 个文件）", len(items), len(facts) - skipped)
 
     picked: list[ScoredCandidate] = bucket_pick(items, total=total, bucket_sec=BUCKET_SEC)
-    logger.info("分桶挑选 %d 张（目标 %d，保底优先）", len(picked), total)
+    n_forced: int = sum(1 for c in picked if c.force_pick)
+    logger.info(
+        "分桶挑选 %d 张（目标 %d，保底优先；进球锚点保底 %d 张）", len(picked), total, n_forced
+    )
 
     # 抽帧防抖 + 裁切落盘
     cand_dir.mkdir(parents=True, exist_ok=True)
@@ -735,6 +974,7 @@ def _run_rank(session: str, rawdir: str | None, total: int) -> int:
                     "penalized": plan.penalized,
                     "crop": [plan.box.x1, plan.box.y1, plan.box.x2, plan.box.y2],
                     "sharpness": round(best[1], 1),
+                    "goal_boost": cand.force_pick,
                     "image": f"candidates/{cid}.jpg",
                     "status": "ok",
                 }
@@ -824,6 +1064,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--rawdir", default=None, help="原片目录（缺省读 video_cli.json srcdir）")
     ap.add_argument("--total", type=int, default=DEFAULT_TOTAL, help="候选目标张数（保底优先）")
     ap.add_argument(
+        "--force",
+        action="store_true",
+        help="清空 candidates 目录与 candidates JSON 全量重跑（裁切参数变更后适用）",
+    )
+    ap.add_argument(
         "--apply",
         nargs="?",
         const="",
@@ -848,7 +1093,7 @@ def main(argv: list[str] | None = None) -> int:
             return _run_apply(args.session, sel)
         if args.total < 1:
             raise BasketballPipelineError(f"--total 必须 ≥1，实际 {args.total}")
-        return _run_rank(args.session, args.rawdir, args.total)
+        return _run_rank(args.session, args.rawdir, args.total, args.force)
     except BasketballPipelineError as exc:
         logger.error("失败 run_id=%s: %s", run_id, exc, exc_info=True)
         return 1
