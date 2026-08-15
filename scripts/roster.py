@@ -1,4 +1,5 @@
-"""roster.json 契约模块（spec: docs/scorer/spec.md §roster schema）。
+"""roster.json 契约模块（spec: docs/scorer/spec.md §roster schema；
+team 取值口径以 docs/session-opponent-name/spec.md 为准）。
 
 schema 校验、assignments 键格式化、fid 映射、scorer 解析。
 
@@ -13,7 +14,8 @@ schema 校验、assignments 键格式化、fid 映射、scorer 解析。
 契约要点（写读双方必须共用本模块，禁止各自裸拼，spec M3）：
 - assignments 键 = ``f"{file}#{t:.1f}"``（file 保留全名含 .mp4）；
 - fid = 文件主名（去扩展名），与 extract_frames / mot_candidates 的目录命名一致；
-- 合法 team 值：地平线 / 半截篮 / 便服（见 VALID_TEAMS）。
+- 合法 team 值：任意非空 str（"半截篮"/"便服"有特殊语义；对手队名随场次 ID 后缀，
+  见 docs/session-opponent-name/spec.md）。
 """
 
 from __future__ import annotations
@@ -24,9 +26,6 @@ from pathlib import Path
 from typing import Any
 
 from errors import SchemaError
-
-# 合法分队值（spec §roster.json schema；便服球员只进全员/个人合集，spec Open Q3）
-VALID_TEAMS: tuple[str, ...] = ("地平线", "半截篮", "便服")
 
 # assignments 键格式：<file>#<t:.1f>（file 可含任意字符除 # 结尾的时间部分，t 必须恰为一位小数）
 _KEY_PATTERN: re.Pattern[str] = re.compile(r"^(?P<file>.+)#(?P<t>-?\d+(?:\.\d+)?)$")
@@ -98,7 +97,7 @@ def player_from_dict(
         seen_tags: 已见 tag 集合（查重；命中即就地登记）。
 
     Raises:
-        SchemaError: 记录非对象 / tag 缺失或非空 str / tag 重复 / name 非 str / team 非法。
+        SchemaError: 记录非对象 / tag 缺失或非空 str / tag 重复 / name 非 str / team 不是非空 str。
     """
     if not isinstance(raw, dict):
         raise SchemaError(f"{path}: players[{idx}] 不是对象，实际 {type(raw).__name__}")
@@ -112,10 +111,8 @@ def player_from_dict(
     if not isinstance(name, str):
         raise SchemaError(f"{path}: players[{idx}]({tag}) name 不是 str")
     team: Any = raw.get("team")
-    if team not in VALID_TEAMS:
-        raise SchemaError(
-            f"{path}: players[{idx}]({tag}) team 非法值: {team!r}，合法值 {VALID_TEAMS}"
-        )
+    if not isinstance(team, str) or not team.strip():
+        raise SchemaError(f"{path}: players[{idx}]({tag}) team 必须是非空字符串，实际 {team!r}")
     return Player(tag=tag, name=name, team=team)
 
 
@@ -146,7 +143,7 @@ def validate_roster(data: Any, path: str) -> Roster:  # noqa: ANN401 JSON 待校
         校验后的 Roster。
 
     Raises:
-        SchemaError: 顶层非对象 / 缺 players / tag 重复 / team 非法值 /
+        SchemaError: 顶层非对象 / 缺 players / tag 重复 / team 不是非空 str /
             assignments 键格式错或值不是非空 str。
     """
     if not isinstance(data, dict):

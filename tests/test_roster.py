@@ -1,6 +1,6 @@
 """roster.py 契约模块单元测试（spec: docs/scorer/spec.md §roster schema）。
 
-覆盖：schema 校验（缺 players / tag 重复 / team 非法 / 键格式错 → SchemaError）、
+覆盖：schema 校验（缺 players / tag 重复 / team 空串或非 str / 键格式错 → SchemaError）、
 format_key 双端一致性（4.1234→"4.1"）、fid_of 去扩展名、resolve_scorer 命中 tag 或 name。
 """
 
@@ -101,12 +101,29 @@ class TestValidateRoster:
         with pytest.raises(SchemaError):
             validate_roster(_roster_data(players=[_player(tag="")]), _PATH)
 
-    def test_invalid_team(self) -> None:
-        # Arrange：spec 写死合法值仅 黑/白/便服
-        data = _roster_data(players=[_player(team="红")])
-        # Act / Assert
-        with pytest.raises(SchemaError, match="team 非法值"):
-            validate_roster(data, _PATH)
+    def test_arbitrary_team_valid(self) -> None:
+        # Arrange：team 放宽为任意非空 str——对手队名随场次 ID 后缀
+        # （docs/session-opponent-name/spec.md，如 20260805_车百鼎 → 车百鼎）
+        data = _roster_data(players=[_player(tag="红7", team="车百鼎")])
+        # Act
+        roster = validate_roster(data, _PATH)
+        # Assert
+        assert roster.players[0].team == "车百鼎"
+
+    def test_empty_team_rejected(self) -> None:
+        # Arrange / Act / Assert：空串仍拒
+        with pytest.raises(SchemaError, match="team 必须是非空字符串"):
+            validate_roster(_roster_data(players=[_player(team="")]), _PATH)
+
+    def test_whitespace_team_rejected(self) -> None:
+        # Arrange / Act / Assert：纯空白视为空，仍拒
+        with pytest.raises(SchemaError, match="team 必须是非空字符串"):
+            validate_roster(_roster_data(players=[_player(team="  ")]), _PATH)
+
+    def test_team_not_str_rejected(self) -> None:
+        # Arrange / Act / Assert：非 str 仍拒
+        with pytest.raises(SchemaError, match="team 必须是非空字符串"):
+            validate_roster(_roster_data(players=[_player(team=123)]), _PATH)  # type: ignore[arg-type]
 
     def test_casual_team_valid(self) -> None:
         # Arrange：便服是合法 team 值（spec Open Q3）

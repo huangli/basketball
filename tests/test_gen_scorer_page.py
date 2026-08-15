@@ -173,8 +173,8 @@ class TestLoadPlayersFile:
             load_players_file(path)
 
     def test_invalid_team_raises(self, tmp_path: pathlib.Path) -> None:
-        # Arrange：team 非法值（合法值 = 地平线/半截篮/便服）
-        path = _write_players_file(tmp_path, [{"tag": "白22-小朱", "name": "小朱", "team": "白队"}])
+        # Arrange：team 空串（team 已放宽为任意非空 str，见 docs/session-opponent-name/spec.md）
+        path = _write_players_file(tmp_path, [{"tag": "白22-小朱", "name": "小朱", "team": ""}])
         # Act / Assert
         with pytest.raises(SchemaError, match="team"):
             load_players_file(path)
@@ -274,11 +274,9 @@ class TestPlayersFileCli:
         assert '"team": "半截篮"' in html
 
     def test_bad_players_file_exit_1(self, tmp_path: pathlib.Path) -> None:
-        # Arrange：名单文件 schema 损坏（非法队名）
+        # Arrange：名单文件 schema 损坏（team 空串）
         scorers, goals = self._write_inputs(tmp_path)
-        players_file = _write_players_file(
-            tmp_path, [{"tag": "白22", "name": "小朱", "team": "白队"}]
-        )
+        players_file = _write_players_file(tmp_path, [{"tag": "白22", "name": "小朱", "team": ""}])
         # Act：SchemaError 经 main 转为退出 1（显式失败不静默）
         rc = main(
             [
