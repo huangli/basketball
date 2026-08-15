@@ -1304,3 +1304,31 @@ class TestBuildHtmlReviewLayout:
         # Assert
         assert "#review #crop:hover" in html
         assert "img.rep:hover" in html
+
+
+class TestBuildHtmlClickMerge:
+    """点选合并（docs/scorer-click-merge/spec.md）：与拖拽并存，复用 mergeInto 语义。"""
+
+    def _html(self) -> str:
+        entries = build_entries(
+            [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
+        )
+        page_clusters = build_page_clusters([_cluster()], entries)
+        return build_html(entries, [], "s", {}, {}, "地平线", clusters=page_clusters)
+
+    def test_click_merge_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert "function pickMerge(" in html
+        assert "let mergeSrc = null" in html
+        assert "并入这里" in html
+        assert "merge-src" in html
+
+    def test_drag_merge_untouched(self) -> None:
+        # Arrange / Act：拖拽路径标识符原样保留（两套并存）
+        html = self._html()
+        # Assert
+        assert "row.draggable = true" in html
+        assert "text/plain" in html
+        assert "function mergeInto(" in html

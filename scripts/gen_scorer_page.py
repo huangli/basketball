@@ -114,6 +114,7 @@ small { color: #999; }
 .clusterlabel { color: #fc3; margin: 0 8px; }
 .cluster-row { cursor: grab; }
 .cluster-row.drop-target { outline: 3px dashed #fc3; }
+.cluster-row.merge-src { outline: 3px solid #fc3; }
 .teamrow.drop-target { outline: 3px dashed #fc3; }
 .cluster-row button { font-size: 14px; padding: 6px 10px; }
 .picker { background: #2a2a12; border: 1px solid #fc3; border-radius: 8px;
@@ -192,6 +193,8 @@ let pickerGid = null; // 合并弹条：非 null = 该组行正弹选人条
 let collapseAll = null; // 总开关：null=随规则 / true=全折 / false=全展（瞬态，刷新回规则；
                         // 点击后 null→true→false→true… 两态循环回不到"随规则"系有意
                         // 为之——回规则态靠刷新，spec 未要求三态）
+let mergeSrc = null; // 点选合并：非 null = 该 gid 组已被点为源（瞬态，刷新即清；
+                     // 与拖拽并存，合并语义复用 mergeInto）
 const TEAMOVR_KEY = LSKEY + "_teamovr";
 // 队员改队覆盖：{ tag: team }；改队直接写 PLAYERS 内存值，导出自动跟随
 let teamOvr = {};
@@ -560,6 +563,15 @@ function mergeInto(srcGid, dstGid) {
   // PICKER-HOOK 已挂接：未自动预填 → 就地弹选人条（spec 合并动作 7）
   if (!tag) openPicker(dstGid);
 }
+function pickMerge(gid) {
+  // 点选合并：未选源→记源；点源行→取消；点目标行→并入（先清态再合并，
+  // mergeInto 内部 show 重渲染，避免残态参与渲染）
+  if (mergeSrc === null) { mergeSrc = gid; show(cur); return; }
+  if (mergeSrc === gid) { mergeSrc = null; show(cur); return; }
+  const src = mergeSrc;
+  mergeSrc = null;
+  mergeInto(src, gid);
+}
 function openPicker(gid) {
   pickerGid = gid;
   show(cur);
@@ -606,7 +618,11 @@ function renderClusters() {
   };
   tbar.appendChild(tall);
   box.appendChild(tbar);
-  for (const g of computeGroups()) {
+  const groups = computeGroups();
+  // 点选合并残态守卫：源组被并走/被删/被拆开后不在可见组里即清态
+  // （mergeInto/splitGroup/deleteCluster 都经 show→renderClusters，此处一处全覆盖）
+  if (mergeSrc !== null && !groups.some(g => g.gid === mergeSrc)) mergeSrc = null;
+  for (const g of groups) {
     const row = document.createElement("div");
     row.className = "cluster-row";
     row.dataset.gid = g.gid;
@@ -673,6 +689,14 @@ function renderClusters() {
     del.title = "移除该簇分组（不动球和归属）";
     del.onclick = () => deleteCluster(g.gid);
     row.appendChild(del);
+    const mg = document.createElement("button");
+    mg.textContent = mergeSrc === null ? "合并"
+      : (mergeSrc === g.gid ? "取消" : "并入这里");
+    mg.className = "nav";
+    mg.title = "点选合并：先点源行，再点目标行（拖拽也行）";
+    mg.onclick = () => pickMerge(g.gid);
+    row.appendChild(mg);
+    if (mergeSrc === g.gid) row.classList.add("merge-src");
     if (pickerGid === g.gid) {
       const pk = document.createElement("div");
       pk.className = "picker";
@@ -838,6 +862,13 @@ document.addEventListener("keydown", (ev) => {
     // 弹条期间：Esc 关闭；数字键 1-9/E 屏蔽（防误触逐球归属改错球）
     if (ev.key === "Escape") closePicker();
     if ((k >= "1" && k <= "9") || k === "e") return;
+  }
+  if (ev.key === "Escape" && pickerGid === null && mergeSrc !== null) {
+    // 点选合并 Esc 取消（弹条开着时 Esc 优先只关弹条，再按一次才清点选态——
+    // 避免一次按键双清两态；不屏蔽数字键/E，点选态不影响逐球归属）
+    mergeSrc = null;
+    show(cur);
+    return;
   }
   if (ev.target && ev.target.id === "free") {
     // 弹条打开时 Enter 也不许绕过屏蔽做逐球归属（free 聚焦态可拖拽合并）
