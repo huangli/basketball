@@ -1082,6 +1082,22 @@ class TestBuildHtmlClusterMerge:
         assert "全部展开" in html
 
 
+class TestBuildHtmlTeamDrag:
+    """队员拖拽改队模板断言（docs/player-team-drag/spec.md）。"""
+
+    def _html(self) -> str:
+        return build_html([], [], "s", {}, {}, "车百鼎")
+
+    def test_team_drag_present(self) -> None:
+        html = self._html()
+        assert '"_teamovr"' in html
+        assert "function changeTeam(" in html
+        assert "function saveTeamOvr(" in html
+        assert "div.dataset.team" in html
+        assert "b.draggable = true" in html
+        assert "text/player-tag" in html
+
+
 class TestMainClusters:
     """main 端到端 --clusters：同目录强校验、schema 损坏退出 1、簇区内联。"""
 

@@ -106,6 +106,7 @@ small { color: #999; }
 .clusterlabel { color: #fc3; margin: 0 8px; }
 .cluster-row { cursor: grab; }
 .cluster-row.drop-target { outline: 3px dashed #fc3; }
+.teamrow.drop-target { outline: 3px dashed #fc3; }
 .cluster-row button { font-size: 14px; padding: 6px 10px; }
 .picker { background: #2a2a12; border: 1px solid #fc3; border-radius: 8px;
           padding: 6px; margin: 4px 0; width: 100%; }
@@ -166,6 +167,31 @@ let pickerGid = null; // 合并弹条：非 null = 该组行正弹选人条
 let collapseAll = null; // 总开关：null=随规则 / true=全折 / false=全展（瞬态，刷新回规则；
                         // 点击后 null→true→false→true… 两态循环回不到"随规则"系有意
                         // 为之——回规则态靠刷新，spec 未要求三态）
+const TEAMOVR_KEY = LSKEY + "_teamovr";
+// 队员改队覆盖：{ tag: team }；改队直接写 PLAYERS 内存值，导出自动跟随
+let teamOvr = {};
+try { teamOvr = JSON.parse(localStorage.getItem(TEAMOVR_KEY) || "{}"); }
+catch (e) { teamOvr = {}; }
+for (const p of PLAYERS) {
+  if (teamOvr[p.tag] !== undefined) p.team = teamOvr[p.tag];
+}
+function saveTeamOvr() {
+  // 读回再合并写，防多开页面互踩（沿用 save() 模式）
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(TEAMOVR_KEY) || "{}"); }
+  catch (e) { stored = {}; }
+  teamOvr = Object.assign(stored, teamOvr);
+  localStorage.setItem(TEAMOVR_KEY, JSON.stringify(teamOvr));
+}
+function changeTeam(tag, team) {
+  // 拖拽改队：只动队别（分队合集/分行/着色），不碰任何 marks 归属
+  const p = PLAYERS.find(x => x.tag === tag);
+  if (!p || p.team === team) return; // 原队行 drop = 无操作
+  p.team = team;
+  teamOvr[tag] = team;
+  saveTeamOvr();
+  show(cur);
+}
 function saveClState(del) {
   // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
   // del = { merges: [...], clAssign: [...] } 待删键——读回合并会把本地已删的键
@@ -258,8 +284,23 @@ function renderPlayers() {
   const KNOWN_TEAMS = [OPP, "半截篮", "便服"];
   for (const tm of KNOWN_TEAMS) {
     const row = numbered.filter(([p]) => p.team === tm);
-    if (!row.length) continue;
+    // 三行恒渲染（空队也渲染行，否则该队零队员时无处可拖入）
     const div = document.createElement("div");
+    div.className = "teamrow";
+    div.dataset.team = tm;
+    div.ondragover = (ev) => {
+      // 只响应队员拖拽（text/player-tag）；簇行拖拽（text/plain）不高亮
+      if (!ev.dataTransfer.types.includes("text/player-tag")) return;
+      ev.preventDefault();
+      div.classList.add("drop-target");
+    };
+    div.ondragleave = () => div.classList.remove("drop-target");
+    div.ondrop = (ev) => {
+      ev.preventDefault();
+      div.classList.remove("drop-target");
+      const tag = ev.dataTransfer.getData("text/player-tag");
+      if (tag) changeTeam(tag, tm);
+    };
     const lab = document.createElement("span");
     lab.textContent = tm + "：";
     lab.className = "teamlabel";
@@ -269,6 +310,12 @@ function renderPlayers() {
       b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
         (p.name ? "=" + p.name : "");
       b.className = teamClass(p.team);
+      b.draggable = true;
+      b.ondragstart = (ev) => {
+        // 自定义 MIME：与簇行拖拽的 text/plain 隔离，防跨域误触发
+        ev.dataTransfer.setData("text/player-tag", p.tag);
+        ev.dataTransfer.effectAllowed = "move";
+      };
       if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
@@ -280,6 +327,7 @@ function renderPlayers() {
   const rest = numbered.filter(([p]) => !KNOWN_TEAMS.includes(p.team));
   if (rest.length) {
     const div = document.createElement("div");
+    div.className = "teamrow";
     const lab = document.createElement("span");
     lab.textContent = "其他（team 口径不符）：";
     lab.className = "teamlabel";
@@ -289,6 +337,12 @@ function renderPlayers() {
       b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
         (p.name ? "=" + p.name : "");
       b.className = teamClass(p.team);
+      b.draggable = true;
+      b.ondragstart = (ev) => {
+        // 自定义 MIME：与簇行拖拽的 text/plain 隔离，防跨域误触发
+        ev.dataTransfer.setData("text/player-tag", p.tag);
+        ev.dataTransfer.effectAllowed = "move";
+      };
       if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
@@ -403,11 +457,15 @@ function renderClusters() {
       ev.dataTransfer.effectAllowed = "move";
     };
     row.ondragover = (ev) => {
+      // 只响应簇行拖拽（text/plain）；队员拖拽（text/player-tag）不高亮
+      if (!ev.dataTransfer.types.includes("text/plain")) return;
       ev.preventDefault();
       row.classList.add("drop-target");
     };
     row.ondragleave = () => row.classList.remove("drop-target");
     row.ondrop = (ev) => {
+      // 同上守卫：队员 tag 拖到簇行不得触发合并
+      if (!ev.dataTransfer.types.includes("text/plain")) return;
       ev.preventDefault();
       row.classList.remove("drop-target");
       const src = parseInt(ev.dataTransfer.getData("text/plain"), 10);
