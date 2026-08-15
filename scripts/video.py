@@ -1,8 +1,9 @@
-"""统一入口 CLI：score / people / build 三条高频链路的 subprocess 薄封装。
+"""统一入口 CLI：score / people / build / photo 四条高频链路的 subprocess 薄封装。
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
 输出：透传调用 run_session / crop_scorers / cluster_scorers / gen_scorer_page /
-    build_highlight 五个底层脚本；状态文件 work/<场次>/video_cli.json。
+    build_highlight / rank_photos / gen_photo_page 七个底层脚本；
+    状态文件 work/<场次>/video_cli.json。
 依赖：scripts/pipe_common.py（read_json/atomic_write_json/configure_logging/new_run_id）、
     scripts/errors.py、scripts/roster.py（validate_roster）；命令拼装契约见
     docs/video-cli/spec.md（逐字照做，不改底层脚本任何行为）。
@@ -10,6 +11,7 @@
     python scripts/video.py score <素材目录> --session 20260722
     python scripts/video.py people --session 20260722 --batch 1
     python scripts/video.py build --session 20260722 --all
+    python scripts/video.py photo --session 20260722 [--apply]
 """
 
 from __future__ import annotations
@@ -565,6 +567,73 @@ def _cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_photo(args: argparse.Namespace) -> int:
+    """photo：精彩照片链路——rank（打分→抽帧裁切）→ page（瀑布流确认页）。
+
+    --apply 时只跑落盘段（selections 约定路径 work/<场次>/photos/photo_selections.json）；
+    否则 rank + page 两步。rank 缺缓存/缺原片的文件由底层 WARNING 跳过。
+    """
+    session_dir_or_die(args.session)
+    steps: list[Step] = []
+    if args.apply:
+        steps.append(
+            Step(
+                "照片落盘",
+                (
+                    sys.executable,
+                    str(SCRIPT_DIR / "rank_photos.py"),
+                    "--session",
+                    args.session,
+                    "--apply",
+                ),
+            )
+        )
+    else:
+        state: dict[str, Any] = load_state(args.session)
+        rawdir: Path = resolve_rawdir(args.rawdir, state)
+        rank_argv: list[str] = [
+            sys.executable,
+            str(SCRIPT_DIR / "rank_photos.py"),
+            "--session",
+            args.session,
+            "--rawdir",
+            str(rawdir),
+        ]
+        if args.total is not None:
+            rank_argv.extend(["--total", str(args.total)])
+        steps.append(Step("照片打分抽帧", tuple(rank_argv)))
+        steps.append(
+            Step(
+                "照片确认页",
+                (
+                    sys.executable,
+                    str(SCRIPT_DIR / "gen_photo_page.py"),
+                    "--session",
+                    args.session,
+                ),
+            )
+        )
+    completed: list[str] = []
+    dry_count: int = 0
+    try:
+        for step in steps:
+            if args.dry_run:
+                _log_dry_step(step)
+                dry_count += 1
+                continue
+            run_step(list(step.argv), step.env_extra)
+            completed.append(step.title)
+    except StepFailedError as exc:
+        logger.error("失败命令: %s", shlex.join(exc.cmd))
+        logger.error("已完成步骤: %s", completed or "（无）")
+        return 1
+    if args.dry_run:
+        logger.info("DRY-RUN 共 %d 步（未执行）", dry_count)
+    else:
+        logger.info("photo 完成（%d 步）", len(completed))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """构建三级 argparse：prog → 子命令 → 各自参数。"""
     ap = argparse.ArgumentParser(
@@ -610,6 +679,18 @@ def _build_parser() -> argparse.ArgumentParser:
     grp.add_argument("--all", action="store_true", help="roster 逐人 + 逐队全量合集")
     bd.add_argument("--dry-run", action="store_true", help="只打印不执行")
     bd.set_defaults(func=_cmd_build)
+
+    ph = sub.add_parser("photo", help="精彩照片：打分 → 抽帧裁切 → 确认页 / --apply 落盘精选")
+    ph.add_argument("--session", required=True, help="场次 ID")
+    ph.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
+    ph.add_argument("--total", type=int, default=None, help="候选目标张数（缺省透传底层 200）")
+    ph.add_argument(
+        "--apply",
+        action="store_true",
+        help="落盘模式：按 work/<场次>/photos/photo_selections.json 出照片精选",
+    )
+    ph.add_argument("--dry-run", action="store_true", help="只打印不执行")
+    ph.set_defaults(func=_cmd_photo)
     return ap
 
 

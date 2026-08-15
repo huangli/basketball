@@ -133,6 +133,18 @@
   <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久；几十球规模估计几分钟到十几分钟（暂无整场实测，跑完一次后补准数）。</li>
 </ul>
 
+<h3>第 5 步（可选）：精彩照片 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
+<pre>video photo --session 20260805_车百鼎</pre>
+<ul>
+  <li>机器自动：用检测缓存打分（球速/人球交互/主体大小/球高度）→ 时间分桶选约 200 张 → 抽帧防抖 + 自动构图裁切放大（148 个 4K 短片规模约 <b>10～30 分钟</b>，可断点续跑——重跑同一条命令，视频清单没变就跳过抽帧）。</li>
+  <li>浏览器打开 <code>work\20260805_车百鼎\photos\photo_page.html</code>：瀑布流点选（再点取消），双击看原图，<kbd>←</kbd><kbd>→</kbd>/数字键翻页，<kbd>A</kbd> 全选本页，回车导出。</li>
+  <li>导出得到 <code>photo_selections.json</code>，<b>移动</b>到 <code>work\20260805_车百鼎\photos\</code>，然后落盘：</li>
+</ul>
+<pre>video photo --session 20260805_车百鼎 --apply</pre>
+<ul>
+  <li>成品在 <code>output\20260805_车百鼎\照片精选\</code>：<code>照片_XXX_视频序号_时刻.jpg</code>（1080p，比例跟随素材）。</li>
+</ul>
+
 <h2>二、命令速查</h2>
 <table>
   <tr><th>命令</th><th>干什么</th><th>耗时（车百鼎规模实测）</th><th>常用参数</th></tr>
