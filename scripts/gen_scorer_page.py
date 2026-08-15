@@ -96,6 +96,7 @@ button.sel { outline: 3px solid #fc3; }
         color: #eee; border: 1px solid #555; border-radius: 8px; }
 .stepbar { color: #fc3; font-size: 14px; margin: 10px 0 2px; }
 .stepbar small { color: #999; margin-left: 8px; font-size: 12px; }
+.renamebtn { font-size: 12px; padding: 4px 8px; }
 #crop { max-width: 44vw; max-height: 68vh; background: #000; }
 video { max-width: 48vw; max-height: 68vh; background: #000; }
 .badge { color: #fc3; }
@@ -197,6 +198,35 @@ function changeTeam(tag, team) {
   p.team = team;
   teamOvr[tag] = team;
   saveTeamOvr();
+  show(cur);
+}
+const NAMES_KEY = LSKEY + "_names";
+// 页内改真名覆盖：{ tag: name }；清空真名=写空串不删键（读回合并写会复活删键，
+// saveClState 前科），加载时空串视为无真名
+let nameOvr = {};
+try { nameOvr = JSON.parse(localStorage.getItem(NAMES_KEY) || "{}"); }
+catch (e) { nameOvr = {}; }
+for (const p of PLAYERS) {
+  if (nameOvr[p.tag] !== undefined) p.name = nameOvr[p.tag];
+}
+function saveNames() {
+  // 读回再合并写，防多开页面互踩（沿用 save() 模式）
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(NAMES_KEY) || "{}"); }
+  catch (e) { stored = {}; }
+  nameOvr = Object.assign(stored, nameOvr);
+  localStorage.setItem(NAMES_KEY, JSON.stringify(nameOvr));
+}
+function renamePlayer(tag) {
+  // 只改真名不改标签（tag 是归属键，级联风险）；三态：非空=改 / 空串=清 / 取消=不动；
+  // 四处按钮文字（队伍区主行/兜底行/簇区/弹条）都读 p.name，改内存值 show 即全刷
+  const p = PLAYERS.find(x => x.tag === tag);
+  if (!p) return;
+  const v = prompt("真名（空=清除）", p.name);
+  if (v === null) return;
+  p.name = v.trim();
+  nameOvr[tag] = p.name;
+  saveNames();
   show(cur);
 }
 function saveClState(del) {
@@ -332,6 +362,12 @@ function renderPlayers() {
       if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
+      const rn = document.createElement("button");
+      rn.textContent = "改名";
+      rn.className = "nav renamebtn";
+      rn.title = "改真名（不改标签）";
+      rn.onclick = () => renamePlayer(p.tag);
+      div.appendChild(rn);
     }
     box.appendChild(div);
   }
@@ -359,6 +395,12 @@ function renderPlayers() {
       if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
+      const rn = document.createElement("button");
+      rn.textContent = "改名";
+      rn.className = "nav renamebtn";
+      rn.title = "改真名（不改标签）";
+      rn.onclick = () => renamePlayer(p.tag);
+      div.appendChild(rn);
     }
     box.appendChild(div);
   }

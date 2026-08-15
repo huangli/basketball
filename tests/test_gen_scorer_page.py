@@ -1229,3 +1229,25 @@ class TestBuildHtmlDeleteCluster:
         # Assert：加载白名单与 saveClState 合并分支都带上 deleted
         assert '"deleted"' in html
         assert "stored.deleted" in html
+
+
+class TestBuildHtmlRename:
+    """页内改真名（docs/scorer-three-step/spec.md）：独立 _names 键，清空=写空串不删键。"""
+
+    def _html(self) -> str:
+        return build_html([], [], "s", {}, {}, "车百鼎")
+
+    def test_rename_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert '"_names"' in html
+        assert "function renamePlayer(" in html
+        assert "function saveNames(" in html
+        assert "改名" in html
+
+    def test_rename_entry_in_player_rows(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert：改名钮只挂队伍区（含兜底行）按钮旁，簇区/弹条不加
+        assert "renamePlayer(p.tag)" in html
