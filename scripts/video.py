@@ -55,7 +55,8 @@ OUT_4_3: str = "1440x1080"
 # 便服队不出分队集锦（build_highlight --team 便服 明文拒收退出 1；--all 展开时跳过）
 CASUAL_TEAM: str = "便服"
 # 多批次 build 的合并 goals 中间产物（work/<场次>/ 下，每次 build 重写——素材流动）
-MERGED_GOALS_NAME: str = "goals_merged_cli.json"
+# 命名不以 goals 开头——避开 discover_batches 的 goals*.json 扫描，防 WARNING 噪音
+MERGED_GOALS_NAME: str = "merged_goals_cli.json"
 # 批次 goals 文件名双轨：goals.json（旧布局批次 1）/ goals_batchK.json（现行布局）
 GOALS_BATCH_RE: re.Pattern[str] = re.compile(r"^goals_batch(\d+)\.json$")
 
@@ -511,7 +512,7 @@ def _confirmed_keys(goals_path: Path) -> set[str]:
 
 
 def _merge_goals_for_build(batches: list[Batch], session: str, session_dir: Path) -> Path:
-    """多批次合并 goals：全记录逐字拼接，原子写 work/<场次>/goals_merged_cli.json。
+    """多批次合并 goals：全记录逐字拼接，原子写 work/<场次>/merged_goals_cli.json。
 
     不过滤不校验（confirmed 过滤与结构校验是 build_highlight 的单一职责点）。
     每次 build 重写（素材流动，goals 会变）。

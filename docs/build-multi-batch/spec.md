@@ -14,7 +14,7 @@
 方案（合集口径 = 每球员/队伍每场一个合集、片段按拍摄时间排序）：
 
 - **多批次合并合成**：选中批次 >1 时，先把各批 goals 全记录逐字合并，原子写
-  `work/<场次>/goals_merged_cli.json`（`{"session": ..., "goals": [...]}`），
+  `work/<场次>/merged_goals_cli.json`（`{"session": ..., "goals": [...]}`），
   每个 filter 只调一次 build_highlight。片段由 build_highlight 内部按
   (file, anchor_time) 排序——文件名即拍摄时间戳，跨批排序天然正确。
   选中批次 ==1（含 --batch K）时现状不变。
@@ -40,9 +40,11 @@ roster.py 零改动；无新依赖。
 
 ## 数据契约
 
-- 合并文件 `goals_merged_cli.json`：`{"session": <场次ID>, "goals": [各批全记录
+- 合并文件 `merged_goals_cli.json`：`{"session": <场次ID>, "goals": [各批全记录
   逐字拼接]}`——不过滤不校验（confirmed 过滤与结构校验是 build_highlight 职责，
   单一校验点不复制）。原子写（pipe_common.atomic_write_json）。
+  命名不以 goals 开头——避开 discover_batches 的 `goals*.json` 批次发现扫描
+  （否则每次 people/build 命中 glob 打 "无法识别的 goals 文件" WARNING 噪音）。
 - 命中预算：`_confirmed_keys(goals_path)` 返回 confirmed 记录的 format_key 集合；
   缺 file/anchor_time 的坏记录跳过（留给 build_highlight 报错），不提前炸。
 - 零命中判定：tag→keys 映射来自 roster.assignments；球员 = 其 tag 的键 ∩
@@ -57,7 +59,7 @@ rules.md；video.py 现有编排器风格（Step/run_step/logger.warning）。
 
 - 新增（tests/test_video.py，run_recorder 拦截 subprocess 既有模式）：
   - 多批 --all：两批 goals + roster 全命中 → 每 filter 只调一次、--goals 指向
-    goals_merged_cli.json、合并文件已写盘且内容 = 两批逐字拼接 + session 字段
+    merged_goals_cli.json、合并文件已写盘且内容 = 两批逐字拼接 + session 字段
   - --all 零命中跳过：assignments 只给部分球员 → 零命中球员/队伍 WARNING 跳过，
     命令数 = 命中数；caplog 含跳过提示
   - --all 全零命中 → exit 1 且无子进程

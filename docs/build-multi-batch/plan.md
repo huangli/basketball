@@ -4,7 +4,7 @@
 
 **Goal:** `video build` 多批次合并合成 + --all 零命中跳过；spec = `docs/build-multi-batch/spec.md`（唯一契约）。
 
-**Architecture:** 只改编排层 `scripts/video.py`：多批次时合并 goals 到 `goals_merged_cli.json` 后每 filter 调一次 build_highlight；--all 展开前用 confirmed 键集预检零命中。build_highlight/roster.py 零改动。
+**Architecture:** 只改编排层 `scripts/video.py`：多批次时合并 goals 到 `merged_goals_cli.json` 后每 filter 调一次 build_highlight；--all 展开前用 confirmed 键集预检零命中。build_highlight/roster.py 零改动。
 
 **Tech Stack:** Python 3.14，pytest（run_recorder 拦截 subprocess 既有模式）。
 
@@ -26,7 +26,7 @@
 
 **Interfaces:**
 - Consumes: `Batch`（.batch/.goals）、`run_step`、`Step`、`_select_batches`/`discover_batches`、`validate_roster` 返回 Roster（.players/.assignments）、roster.format_key（`<file>#<t:.1f>`）
-- Produces: `MERGED_GOALS_NAME = "goals_merged_cli.json"`；`_confirmed_keys(goals_path: Path) -> set[str]`；`_merge_goals_for_build(batches: list[Batch], session: str, session_dir: Path) -> Path`；`_build_expand_all(session_dir: Path, known_keys: set[str]) -> list[tuple[str, str]]`
+- Produces: `MERGED_GOALS_NAME = "merged_goals_cli.json"`；`_confirmed_keys(goals_path: Path) -> set[str]`；`_merge_goals_for_build(batches: list[Batch], session: str, session_dir: Path) -> Path`；`_build_expand_all(session_dir: Path, known_keys: set[str]) -> list[tuple[str, str]]`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -116,9 +116,9 @@ class TestBuildMultiBatch:
         assert rc == 0
         assert len(run_recorder) == 4
         for cmd, _env in run_recorder:
-            assert str(REL / "goals_merged_cli.json") in cmd
+            assert str(REL / "merged_goals_cli.json") in cmd
         # 合并文件已写盘：两批各 2 confirmed+1 rejected 逐字拼接 + session 字段
-        merged = json.loads((session_dir / "goals_merged_cli.json").read_text("utf-8"))
+        merged = json.loads((session_dir / "merged_goals_cli.json").read_text("utf-8"))
         assert merged["session"] == SESSION
         assert len(merged["goals"]) == 6
 
@@ -187,7 +187,7 @@ class TestBuildMultiBatch:
         )
         # Assert
         assert rc == 0
-        assert not (session_dir / "goals_merged_cli.json").exists()
+        assert not (session_dir / "merged_goals_cli.json").exists()
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -223,7 +223,7 @@ E2 — 模块常量区（CASUAL_TEAM 附近）加：
 
 ```python
 # 多批次 build 的合并 goals 中间产物（work/<场次>/ 下，每次 build 重写——素材流动）
-MERGED_GOALS_NAME: str = "goals_merged_cli.json"
+MERGED_GOALS_NAME: str = "merged_goals_cli.json"
 ```
 
 E3 — `_build_expand_all` 前插入两个新函数：
@@ -257,7 +257,7 @@ def _confirmed_keys(goals_path: Path) -> set[str]:
 
 
 def _merge_goals_for_build(batches: list[Batch], session: str, session_dir: Path) -> Path:
-    """多批次合并 goals：全记录逐字拼接，原子写 work/<场次>/goals_merged_cli.json。
+    """多批次合并 goals：全记录逐字拼接，原子写 work/<场次>/merged_goals_cli.json。
 
     不过滤不校验（confirmed 过滤与结构校验是 build_highlight 的单一职责点）。
     每次 build 重写（素材流动，goals 会变）。
@@ -461,7 +461,7 @@ git commit -m "fix: video build 多批次合并合成 + --all 零命中跳过（
 - Create: `docs/build-multi-batch/review01.md`
 
 - [ ] **Step 1: 全量质量门**（见 Global Constraints）
-- [ ] **Step 2: docs/video-cli/spec.md build 节**：把逐批调用语义改为"选中批次 >1 时先合并 goals 到 goals_merged_cli.json、每 filter 只调一次；--all 零命中球员/队伍 WARNING 跳过、全零 exit 1"
+- [ ] **Step 2: docs/video-cli/spec.md build 节**：把逐批调用语义改为"选中批次 >1 时先合并 goals 到 merged_goals_cli.json、每 filter 只调一次；--all 零命中球员/队伍 WARNING 跳过、全零 exit 1"
 - [ ] **Step 3: 使用手册.html 合成一节补一句**：多批次场次 build 自动合并跨批片段，每球员/队伍只出一个合集；某球员全场没进球会 WARNING 跳过不中断。改完过 spec-reviewer（subagent_type=plan 扮演）
 - [ ] **Step 4: 立哥实测**：`video build --session 20260805_车百鼎 --all`（先 --dry-run 看展开）
 - [ ] **Step 5: todo.md 勾完 + review01.md + Commit**

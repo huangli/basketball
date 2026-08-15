@@ -787,9 +787,9 @@ class TestBuildMultiBatch:
         assert rc == 0
         assert len(run_recorder) == 4
         for cmd, _env in run_recorder:
-            assert str(REL / "goals_merged_cli.json") in cmd
+            assert str(REL / "merged_goals_cli.json") in cmd
         # 合并文件已写盘：两批各 2 confirmed+1 rejected 逐字拼接 + session 字段
-        merged = json.loads((session_dir / "goals_merged_cli.json").read_text("utf-8"))
+        merged = json.loads((session_dir / "merged_goals_cli.json").read_text("utf-8"))
         assert merged["session"] == SESSION
         assert len(merged["goals"]) == 6
 
@@ -856,7 +856,7 @@ class TestBuildMultiBatch:
         )
         # Assert
         assert rc == 0
-        assert not (session_dir / "goals_merged_cli.json").exists()
+        assert not (session_dir / "merged_goals_cli.json").exists()
 
 
 class TestMainEntry:
