@@ -18,6 +18,7 @@ import pytest
 
 import video
 from errors import BasketballPipelineError
+from roster import format_key
 from video import Batch
 
 SESSION: str = "s1"
@@ -35,8 +36,11 @@ def _write_json(path: pathlib.Path, data: Any) -> None:  # noqa: ANN401 JSON 内
 
 def _goals_payload(n_confirmed: int = 2) -> dict[str, Any]:
     """构造 goals.json 内容：n 条 confirmed + 1 条 rejected（不计数）。"""
-    goals = [{"status": "confirmed", "file": f"f{i}.mp4"} for i in range(n_confirmed)]
-    goals.append({"status": "rejected", "file": "fx.mp4"})
+    goals = [
+        {"status": "confirmed", "file": f"f{i}.mp4", "anchor_time": float(i) + 0.5}
+        for i in range(n_confirmed)
+    ]
+    goals.append({"status": "rejected", "file": "fx.mp4", "anchor_time": 99.0})
     return {"goals": goals}
 
 
@@ -572,7 +576,10 @@ class TestBuild:
                         {"tag": "黑-A", "name": "", "team": "地平线"},
                         {"tag": "黑-B", "name": "", "team": "地平线"},
                     ],
-                    "assignments": {},
+                    "assignments": {
+                        format_key("f0.mp4", 0.5): "红-7",
+                        format_key("f1.mp4", 1.5): "黑-A",
+                    },
                 },
             )
         rawdir = session_dir.parent.parent / "raw"
@@ -632,13 +639,12 @@ class TestBuild:
         rawdir = self._setup(session_dir, roster=True)
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
         assert rc == 0
-        # 3 人（逐人 --scorer tag）+ 2 队（去重，按出现序：半截篮、地平线）= 5 条
-        assert len(run_recorder) == 5
+        # 黑-B 无归属球零命中跳过：2 人（红-7、黑-A）+ 2 队（半截篮、地平线）= 4 条
+        assert len(run_recorder) == 4
         tail = [c[0][-2:] for c in run_recorder]
         assert tail == [
             ["--scorer", "红-7"],
             ["--scorer", "黑-A"],
-            ["--scorer", "黑-B"],
             ["--team", "半截篮"],
             ["--team", "地平线"],
         ]
@@ -671,15 +677,17 @@ class TestBuild:
                     {"tag": "红-7", "name": "", "team": "半截篮"},
                     {"tag": "便-X", "name": "", "team": "便服"},
                 ],
-                "assignments": {},
+                "assignments": {
+                    format_key("f0.mp4", 0.5): "红-7",
+                },
             },
         )
         caplog.set_level(logging.WARNING)
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
         assert rc == 0
         tail = [c[0][-2:] for c in run_recorder]
-        # 便服球员个人合集照常出，便服分队合集跳过（build_highlight 拒收 --team 便服）
-        assert tail == [["--scorer", "红-7"], ["--scorer", "便-X"], ["--team", "半截篮"]]
+        # 便-X 无归属球零命中跳过；便服分队合集跳过（build_highlight 拒收 --team 便服）
+        assert tail == [["--scorer", "红-7"], ["--team", "半截篮"]]
         assert "便服" in caplog.text
 
     def test_all_roster_missing(
@@ -737,6 +745,118 @@ class TestBuild:
             ["build", "--session", SESSION, "--rawdir", str(rawdir), "--all", "--dry-run"]
         )
         assert rc == 0
+
+
+class TestBuildMultiBatch:
+    """多批次合并合成 + --all 零命中跳过（docs/build-multi-batch/spec.md）。"""
+
+    def _setup_two_batches(self, session_dir: pathlib.Path) -> pathlib.Path:
+        _write_json(session_dir / "goals_batch1.json", _goals_payload())
+        _write_json(session_dir / "goals_batch2.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch1.json", [])
+        _write_json(session_dir / "candidates_batch2.json", [])
+        _write_json(session_dir / "session_facts.json", _facts_payload())
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    def _roster_full_hits(self, session_dir: pathlib.Path) -> None:
+        _write_json(
+            session_dir / "roster.json",
+            {
+                "players": [
+                    {"tag": "红-7", "name": "", "team": "半截篮"},
+                    {"tag": "黑-A", "name": "", "team": "地平线"},
+                ],
+                "assignments": {
+                    format_key("f0.mp4", 0.5): "红-7",
+                    format_key("f1.mp4", 1.5): "黑-A",
+                },
+            },
+        )
+
+    def test_multi_batch_merges_goals_and_single_call_per_filter(
+        self, session_dir: pathlib.Path, run_recorder: list
+    ) -> None:
+        # Arrange
+        rawdir = self._setup_two_batches(session_dir)
+        self._roster_full_hits(session_dir)
+        # Act
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
+        # Assert：2 球员 + 2 队 = 4 条命令，每 filter 只调一次，--goals 指向合并文件
+        assert rc == 0
+        assert len(run_recorder) == 4
+        for cmd, _env in run_recorder:
+            assert str(REL / "goals_merged_cli.json") in cmd
+        # 合并文件已写盘：两批各 2 confirmed+1 rejected 逐字拼接 + session 字段
+        merged = json.loads((session_dir / "goals_merged_cli.json").read_text("utf-8"))
+        assert merged["session"] == SESSION
+        assert len(merged["goals"]) == 6
+
+    def test_all_skips_zero_hit_players_and_teams(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：黑-A 有归属但不在 confirmed 键集（键对不上）→ 零命中
+        rawdir = self._setup_two_batches(session_dir)
+        _write_json(
+            session_dir / "roster.json",
+            {
+                "players": [
+                    {"tag": "红-7", "name": "", "team": "半截篮"},
+                    {"tag": "黑-A", "name": "", "team": "地平线"},
+                ],
+                "assignments": {
+                    format_key("f0.mp4", 0.5): "红-7",
+                    "ghost.mp4#9.9": "黑-A",
+                },
+            },
+        )
+        caplog.set_level(logging.WARNING)
+        # Act
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
+        # Assert：只出 红-7 + 半截篮；黑-A 与 地平线 零命中跳过（WARNING）
+        assert rc == 0
+        tail = [c[0][-2:] for c in run_recorder]
+        assert tail == [["--scorer", "红-7"], ["--team", "半截篮"]]
+        assert "零命中" in caplog.text
+
+    def test_all_zero_hits_exit1(self, session_dir: pathlib.Path, run_recorder: list) -> None:
+        # Arrange：assignments 全对不上 confirmed 键
+        rawdir = self._setup_two_batches(session_dir)
+        _write_json(
+            session_dir / "roster.json",
+            {
+                "players": [{"tag": "红-7", "name": "", "team": "半截篮"}],
+                "assignments": {"ghost.mp4#9.9": "红-7"},
+            },
+        )
+        # Act
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
+        # Assert：全零命中 → exit 1 且无子进程
+        assert rc == 1
+        assert run_recorder == []
+
+    def test_dry_run_does_not_write_merged_file(
+        self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange
+        rawdir = self._setup_two_batches(session_dir)
+        self._roster_full_hits(session_dir)
+
+        def forbidden(*a: object, **kw: object) -> None:
+            raise AssertionError("dry-run 不得启动子进程")
+
+        monkeypatch.setattr(video.subprocess, "run", forbidden)
+        # Act
+        rc = video.main(
+            ["build", "--session", SESSION, "--rawdir", str(rawdir), "--all", "--dry-run"]
+        )
+        # Assert
+        assert rc == 0
+        assert not (session_dir / "goals_merged_cli.json").exists()
 
 
 class TestMainEntry:

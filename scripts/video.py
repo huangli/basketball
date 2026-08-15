@@ -28,9 +28,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from errors import BasketballPipelineError
+from errors import BasketballPipelineError, SchemaError
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json
-from roster import validate_roster
+from roster import format_key, validate_roster
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,8 @@ OUT_16_9: str = "1920x1080"
 OUT_4_3: str = "1440x1080"
 # 便服队不出分队集锦（build_highlight --team 便服 明文拒收退出 1；--all 展开时跳过）
 CASUAL_TEAM: str = "便服"
+# 多批次 build 的合并 goals 中间产物（work/<场次>/ 下，每次 build 重写——素材流动）
+MERGED_GOALS_NAME: str = "goals_merged_cli.json"
 # 批次 goals 文件名双轨：goals.json（旧布局批次 1）/ goals_batchK.json（现行布局）
 GOALS_BATCH_RE: re.Pattern[str] = re.compile(r"^goals_batch(\d+)\.json$")
 
@@ -481,11 +483,74 @@ def _cmd_people(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_expand_all(session_dir: Path) -> list[tuple[str, str]]:
+def _confirmed_keys(goals_path: Path) -> set[str]:
+    """读 goals 文件，返回 confirmed 记录的 format_key 集合（--all 命中预算用）。
+
+    缺 file/anchor_time 的坏记录跳过——结构校验是 build_highlight 的职责，
+    此处只预算命中，不提前炸。
+
+    Args:
+        goals_path: goals_batchK.json 路径。
+
+    Returns:
+        confirmed 记录的 format_key 集合。
+    """
+    data: Any = read_json(goals_path, what=f"goals 命中预算 {goals_path.name}")
+    goals: Any = data.get("goals") if isinstance(data, dict) else None
+    keys: set[str] = set()
+    for g in goals if isinstance(goals, list) else []:
+        if not isinstance(g, dict) or g.get("status") != "confirmed":
+            continue
+        try:
+            keys.add(format_key(g["file"], g["anchor_time"]))
+        except KeyError, TypeError, ValueError:
+            # 缺键/类型坏（str anchor_time 走 f"{t:.1f}" 抛 ValueError）都跳过——
+            # 结构校验是 build_highlight 的职责，此处只预算命中
+            continue
+    return keys
+
+
+def _merge_goals_for_build(batches: list[Batch], session: str, session_dir: Path) -> Path:
+    """多批次合并 goals：全记录逐字拼接，原子写 work/<场次>/goals_merged_cli.json。
+
+    不过滤不校验（confirmed 过滤与结构校验是 build_highlight 的单一职责点）。
+    每次 build 重写（素材流动，goals 会变）。
+
+    Args:
+        batches: 选定批次列表。
+        session: 场次 ID（写入合并文件顶层 session 字段，build_highlight 据此定输出目录）。
+        session_dir: work/<场次> 目录。
+
+    Returns:
+        合并文件路径。
+
+    Raises:
+        SchemaError: 某批 goals 顶层缺 goals 列表（结构损坏显式失败）。
+    """
+    merged: list[Any] = []
+    for batch in batches:
+        data: Any = read_json(batch.goals, what=f"批次{batch.batch} goals")
+        goals: Any = data.get("goals") if isinstance(data, dict) else None
+        if not isinstance(goals, list):
+            raise SchemaError(f"{batch.goals}: 缺 goals 列表或类型错误")
+        merged.extend(goals)
+    out: Path = session_dir / MERGED_GOALS_NAME
+    atomic_write_json(out, {"session": session, "goals": merged}, what="合并 goals")
+    return out
+
+
+def _build_expand_all(session_dir: Path, known_keys: set[str]) -> list[tuple[str, str]]:
     """--all 展开：roster 逐人 --scorer tag + 逐队 --team（team 按出现序去重）。
 
-    便服队不入分队合集（build_highlight --team 便服 明文拒收），跳过并记 WARNING；
-    便服球员的个人合集仍照常出。
+    零命中跳过：球员/队伍在选定批次 confirmed 键集（known_keys）内无归属球 →
+    WARNING 跳过不调用（build_highlight 对零记录 exit 1，--all 遍历不能让
+    单点空组合中止整轮；2026-08-15 立哥实测黑后卫零球批次中止事故）。
+    便服队不入分队合集（build_highlight 拒收），跳过并记 WARNING；
+    便服球员个人合集有命中才出。
+
+    Args:
+        session_dir: work/<场次> 目录。
+        known_keys: 选定批次 confirmed 球的 format_key 集合。
 
     Returns:
         (旗标, 值) 列表，旗标为 "--scorer" 或 "--team"。
@@ -498,15 +563,30 @@ def _build_expand_all(session_dir: Path) -> list[tuple[str, str]]:
     if not roster_path.is_file():
         raise BasketballPipelineError(f"roster 不存在: {roster_path}（先跑 people 确认导出）")
     roster = validate_roster(read_json(roster_path, what="roster.json"), str(roster_path))
-    pairs: list[tuple[str, str]] = [("--scorer", p.tag) for p in roster.players]
+    tag_keys: dict[str, set[str]] = {}
+    for key, tag in roster.assignments.items():
+        tag_keys.setdefault(tag, set()).add(key)
+    hit_tags: set[str] = {t for t, ks in tag_keys.items() if ks & known_keys}
+    pairs: list[tuple[str, str]] = []
+    for p in roster.players:
+        if p.tag not in hit_tags:
+            logger.warning("--all 跳过零命中球员: %s（选定批次内无归属球）", p.tag)
+            continue
+        pairs.append(("--scorer", p.tag))
     teams: list[str] = []
     casual_skipped: bool = False
+    warned_teams: set[str] = set()  # 零命中队伍只 WARNING 一次（不进 teams 去重失效）
     for p in roster.players:
         if p.team == CASUAL_TEAM:
             casual_skipped = True
             continue
-        if p.team and p.team not in teams:
+        if not p.team or p.team in teams or p.team in warned_teams:
+            continue
+        if any(q.team == p.team and q.tag in hit_tags for q in roster.players):
             teams.append(p.team)
+        else:
+            warned_teams.add(p.team)
+            logger.warning("--all 跳过零命中队伍: %s（选定批次内无归属球）", p.team)
     if casual_skipped:
         logger.warning("--all 跳过便服分队合集（build_highlight 拒收；便服球员个人合集照常出）")
     pairs.extend(("--team", t) for t in teams)
@@ -522,9 +602,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
     batches: list[Batch] = _select_batches(discover_batches(session_dir), args.batch)
     filters: list[tuple[str, str]]
     if args.all:
-        filters = _build_expand_all(session_dir)
+        known_keys: set[str] = set()
+        for batch in batches:
+            known_keys |= _confirmed_keys(batch.goals)
+        filters = _build_expand_all(session_dir, known_keys)
         if not filters:
-            raise BasketballPipelineError(f"roster players 为空，--all 无合集可出: {session_dir}")
+            raise BasketballPipelineError(
+                f"--all 无合集可出（roster players 为空或选定批次内均无归属球）: {session_dir}"
+            )
     elif args.scorer:
         filters = [("--scorer", args.scorer)]
     elif args.team:
@@ -532,15 +617,26 @@ def _cmd_build(args: argparse.Namespace) -> int:
     else:
         filters = [("", "")]
     roster_path: Path = session_dir / "roster.json"
+    # 多批次合并：输出名由 session+filter 决定、不含批次，逐批调会互相覆盖
+    # （且零球批次 exit 1 中止整轮）；合并后每 filter 只调一次，build_highlight
+    # 内部按 (file, anchor_time) 排序——文件名即时间戳，跨批排序天然正确
+    jobs: list[tuple[Path, str]]
+    if len(batches) > 1:
+        merged_path: Path = session_dir / MERGED_GOALS_NAME
+        if not args.dry_run:
+            merged_path = _merge_goals_for_build(batches, args.session, session_dir)
+        jobs = [(merged_path, "合并批次")]
+    else:
+        jobs = [(b.goals, f"批次{b.batch}") for b in batches]
     completed: list[str] = []
     dry_count: int = 0
     try:
-        for batch in batches:
+        for goals_path, batch_label in jobs:
             base: list[str] = [
                 sys.executable,
                 str(SCRIPT_DIR / "build_highlight.py"),
                 "--goals",
-                str(batch.goals),
+                str(goals_path),
             ]
             if roster_path.is_file():
                 base.extend(["--roster", str(roster_path)])
@@ -548,7 +644,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
             for flag, value in filters:
                 cmd: list[str] = [*base, flag, value] if flag else list(base)
                 title: str = (
-                    f"批次{batch.batch} 合成{(' ' + flag + ' ' + value) if flag else '（全员）'}"
+                    f"{batch_label} 合成{(' ' + flag + ' ' + value) if flag else '（全员）'}"
                 )
                 if args.dry_run:
                     _log_dry_step(Step(title, tuple(cmd)))
