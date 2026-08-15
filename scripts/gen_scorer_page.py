@@ -544,15 +544,16 @@ document.getElementById("next").onclick = () => show(cur + 1);
 document.getElementById("toun").onclick = jumpUnassigned;
 document.getElementById("export").onclick = exportRoster;
 document.addEventListener("keydown", (ev) => {
-  if (ev.target && ev.target.id === "free") {
-    if (ev.key === "Enter") freeAssign();
-    return;
-  }
   const k = ev.key.toLowerCase();
   if (pickerGid !== null) {
     // 弹条期间：Esc 关闭；数字键 1-9/E 屏蔽（防误触逐球归属改错球）
     if (ev.key === "Escape") closePicker();
     if ((k >= "1" && k <= "9") || k === "e") return;
+  }
+  if (ev.target && ev.target.id === "free") {
+    // 弹条打开时 Enter 也不许绕过屏蔽做逐球归属（free 聚焦态可拖拽合并）
+    if (ev.key === "Enter" && pickerGid === null) freeAssign();
+    return;
   }
   if (k >= "1" && k <= "9") {
     const idx = parseInt(k, 10) - 1;

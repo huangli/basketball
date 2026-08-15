@@ -100,3 +100,17 @@ docs/scorer-cluster/{spec,review01}.md 与 work/ 真实数据核查）
 - 核查通过：行号与原文引用逐字相符；测试断言标识符与实现一致；
   合并动作 1-6 无走样；折叠优先级正确；Task 中间态可接受；
   todo 与 plan 一一对应
+
+---
+
+## 附：整体终审记录（2026-08-15，code-reviewer 全分支审查 469f36d..f134a72）
+
+- 结论：**Ready to merge = Yes**；实现与 plan 逐字一致、spec 数据契约逐条对齐，
+  roster 导出契约与无簇兼容零回归，测试全绿
+- 顺手修（终审 Minor 一行级）：keydown 弹条屏蔽段防 free 聚焦态 Enter 绕过
+  （终审 Minor #2 + roll-up #3 同源）；task-5-report 测试计数更正（168→496）
+- 终审 Minor triage：JS 行为级测试缺失 / dragleave 冒泡闪烁 / collapseAll
+  期间单组折叠钮无反馈 / mergeInto 双渲染 / groupTag 双调用 ——全部"可留"
+  （plan-mandated 或 cosmetic）；splitGroup 后 collapsed 残留备查不改
+- 组小结无 marks 时不显示"未归属"字样（"已归属 0"信息等价）——可留
+- 唯一在途项：spec 11 条手工验证清单待立哥浏览器实测（todo.md Task 6 已标注）

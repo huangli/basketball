@@ -54,8 +54,16 @@
 
 ## Task 6: 实跑验证 + 手册同步 + 收尾
 
-- [ ] 20260805_车百鼎 批次1 实数据生成页面（带 --clusters）
-- [ ] 无 --clusters 兼容性回归（const CLUSTERS = []; 簇区隐藏）
-- [ ] 手工验证清单交付立哥过浏览器（spec 11 条）
-- [ ] 使用手册.html 认人节补簇合并/折叠/弹条说明 + spec-reviewer 审
-- [ ] 本 todo 勾完 + 质量门终跑 + Commit
+- [x] 20260805_车百鼎 批次1 实数据生成页面（带 --clusters；29 球/16 球员/13 簇）
+- [x] 无 --clusters 兼容性回归（const CLUSTERS = []; 簇区隐藏）
+- [ ] 手工验证清单交付立哥过浏览器（spec 11 条）——**在途，等立哥实测**
+- [x] 使用手册.html 认人节补簇合并/折叠/弹条说明 + spec-reviewer 审（第 6 轮过，
+      两条措辞建议已采纳）
+- [x] 本 todo 勾完 + 质量门终跑 + Commit
+
+## 整体终审（2026-08-15，code-reviewer）
+
+- 结论：Ready to merge = Yes；实现与 plan 逐字一致、spec 契约逐条对齐
+- 顺手修已落：弹条屏蔽段防 free 聚焦 Enter 绕过（终审 Minor #2）；
+  报告计数修正（task-5-report 168→496，实测 496 passed）
+- 其余 Minor 终审 triage 全部"可留"（见终审报告与 review01.md 追加段）
