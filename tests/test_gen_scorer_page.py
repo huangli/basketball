@@ -1282,3 +1282,25 @@ class TestBuildHtmlReviewByPlayer:
         html = self._html()
         # Assert
         assert 'tag === "__none__"' in html
+
+
+class TestBuildHtmlReviewLayout:
+    """逐球区布局（docs/scorer-three-step/spec.md）：#review flex 定高不定宽 + 悬停放大浮层。"""
+
+    def _html(self) -> str:
+        return build_html([], [], "s", {}, {}, "车百鼎")
+
+    def test_review_flex_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert 'id="review"' in html
+        assert "align-items: flex-start" in html
+        assert "68vh" in html
+
+    def test_hover_zoom_present(self) -> None:
+        # Arrange / Act：悬停浮层规则须在（点击放大已证伪）
+        html = self._html()
+        # Assert
+        assert "#review #crop:hover" in html
+        assert "img.rep:hover" in html

@@ -99,8 +99,11 @@ button.sel { outline: 3px solid #fc3; }
 .renamebtn { font-size: 12px; padding: 4px 8px; }
 #reviewbar { margin: 4px 0; }
 #reviewbar button { font-size: 14px; padding: 6px 10px; }
-#crop { max-width: 44vw; max-height: 68vh; background: #000; }
-video { max-width: 48vw; max-height: 68vh; background: #000; }
+/* 逐球区：图/视频定高不定宽顶端对齐（68vh 等高、翻球不跳、无黑边——
+   固定框留边方案有黑边已证伪，docs/scorer-three-step/spec.md Objective 第 5 条） */
+#review { display: flex; align-items: flex-start; gap: 8px; }
+#review #crop { height: 68vh; width: auto; background: #000; }
+#review video { height: 68vh; width: auto; background: #000; }
 .badge { color: #fc3; }
 small { color: #999; }
 #clusters { margin: 8px 0; }
@@ -118,6 +121,15 @@ small { color: #999; }
 .picker .hint { color: #fc3; margin-right: 8px; }
 .cluster-row.collapsed img.rep { max-height: 48px; max-width: 64px; }
 .cluster-row .foldbtn { font-size: 12px; padding: 2px 8px; }
+/* 悬停放大浮层：置于样式表末尾——#review #crop:hover 特异度压过 #review #crop；
+   .cluster-row img.rep:hover 与 .cluster-row.collapsed img.rep 同特异度靠后写胜出
+   （点击放大已证伪；移开即收回） */
+#review #crop:hover, .cluster-row img.rep:hover {
+  position: fixed; z-index: 99; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  height: 92vh; width: auto; max-width: 96vw; max-height: 96vh;
+  outline: 3px solid #fc3; background: #000;
+}
 </style>
 </head>
 <body>
@@ -140,8 +152,10 @@ small { color: #999; }
 <div id="clusters"></div>
 <div class="stepbar">第三步：逐球核对<small>选核对对象，判错直接点正确球员</small></div>
 <div id="reviewbar"></div>
+<div id="review">
 <img id="crop" alt="投篮者裁图">
 <video id="v" autoplay loop muted playsinline></video>
+</div>
 <script>
 const ITEMS = __ITEMS__;
 const PLAYERS = __PLAYERS__;
