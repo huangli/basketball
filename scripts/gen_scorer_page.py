@@ -94,6 +94,8 @@ button.sel { outline: 3px solid #fc3; }
 #go { background: #2c9e4b; color: #fff; }
 #free { font-size: 18px; padding: 8px; width: 10em; background: #222;
         color: #eee; border: 1px solid #555; border-radius: 8px; }
+.stepbar { color: #fc3; font-size: 14px; margin: 10px 0 2px; }
+.stepbar small { color: #999; margin-left: 8px; font-size: 12px; }
 #crop { max-width: 44vw; max-height: 68vh; background: #000; }
 video { max-width: 48vw; max-height: 68vh; background: #000; }
 .badge { color: #fc3; }
@@ -118,6 +120,7 @@ small { color: #999; }
 <body>
 <div id="bar">
   <span id="prog"></span> <span class="badge" id="cur"></span><br>
+  <div class="stepbar">第一步：判队伍<small>拖队员到正确队伍行，点"改名"填真名</small></div>
   <span id="players"></span>
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
   <button id="accept" style="display:none"></button>
@@ -129,7 +132,10 @@ small { color: #999; }
   <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 ←/→=翻页；SKIP 球标"无法定位"可手选</small>
   <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster.json</small>
 </div>
+<div class="stepbar" id="step2">第二步：并簇认人<small>同人的簇拖到一起，点队员名应用到整组；
+误分组的簇点"删除"移除（不动球和归属）</small></div>
 <div id="clusters"></div>
+<div class="stepbar">第三步：逐球核对<small>选核对对象，判错直接点正确球员</small></div>
 <img id="crop" alt="投篮者裁图">
 <video id="v" autoplay loop muted playsinline></video>
 <script>
@@ -427,8 +433,14 @@ function renderClusters() {
   // 无簇数据整区隐藏（无 --clusters 行为同旧版）
   const box = document.getElementById("clusters");
   box.innerHTML = "";
-  if (!CLUSTERS.length) { box.style.display = "none"; return; }
+  const step2 = document.getElementById("step2");
+  if (!CLUSTERS.length) {
+    box.style.display = "none";
+    if (step2) step2.style.display = "none";
+    return;
+  }
   box.style.display = "block";
+  if (step2) step2.style.display = "block";
   const tbar = document.createElement("div");
   const tall = document.createElement("button");
   tall.textContent = "全部展开/折叠";

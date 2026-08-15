@@ -1173,3 +1173,32 @@ class TestMainClusters:
         # Act / Assert：parser.error 显式拒绝（SystemExit 2）
         with pytest.raises(SystemExit):
             main(["--scorers", str(scorers), "--goals", str(goals), "--clusters", str(other)])
+
+
+class TestBuildHtmlStepBars:
+    """三步引导标题条（docs/scorer-three-step/spec.md）：判队伍/并簇认人/逐球核对。"""
+
+    def _html(self, with_clusters: bool = True) -> str:
+        if with_clusters:
+            entries = build_entries(
+                [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
+            )
+            page_clusters = build_page_clusters([_cluster()], entries)
+            return build_html(entries, [], "s", {}, {}, "地平线", clusters=page_clusters)
+        return build_html([], [], "s", {}, {}, "地平线")
+
+    def test_step_bars_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert "stepbar" in html
+        assert "第一步：判队伍" in html
+        assert "第二步：并簇认人" in html
+        assert "第三步：逐球核对" in html
+
+    def test_step2_toggles_with_clusters(self) -> None:
+        # Arrange / Act：无簇页面也要有 step2 元素 + JS 开关（随簇区隐藏）
+        html = self._html(with_clusters=False)
+        # Assert
+        assert 'id="step2"' in html
+        assert 'getElementById("step2")' in html
