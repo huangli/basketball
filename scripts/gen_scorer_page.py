@@ -58,14 +58,16 @@ CLIP_MATCH_MAX_DT_SEC: float = 4.0
 STATUS_OK: str = "OK"
 STATUS_SKIP: str = "SKIP"
 
-TEAM_BLACK: str = "地平线"  # 黑队队名（黑/蓝球衣；2026-08-09 立哥定队名）
-TEAM_WHITE: str = "半截篮"  # 白队队名
+TEAM_WHITE: str = "半截篮"  # 白队队名（立哥队，固定）
 TEAM_CASUAL: str = "便服"
-# 标签前缀 → 队名（顺序即优先级；蓝色27 归地平线系立哥 2026-08-09 口径）
+# 对手队名不再硬编码：opponent_of(session) 从场次 ID 后缀派生
+# （黑/蓝球衣=对手队；2026-08-09 立哥定前缀映射，2026-08-15 队名会话化）
+OPPONENT_FALLBACK: str = "地平线"  # 无后缀老场次（20260722）的历史口径
+# 标签前缀 → 阵营（顺序即优先级；蓝色27 归对手系立哥 2026-08-09 口径）
 _TEAM_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("黑", TEAM_BLACK),
-    ("蓝", TEAM_BLACK),
-    ("白", TEAM_WHITE),
+    ("黑", "opp"),
+    ("蓝", "opp"),
+    ("白", "home"),
 )
 # team_guess 合法值：crop_scorers 颜色分队产出的是颜色（黑/白/便服），与队名不同命名空间
 TEAM_GUESS_VALUES: tuple[str, ...] = ("黑", "白", "便服")
@@ -81,9 +83,9 @@ body { font-family: sans-serif; background: #111; color: #eee; margin: 16px; }
 button { font-size: 18px; padding: 10px 18px; margin: 4px; border-radius: 8px;
          border: 0; cursor: pointer; }
 button.sel { outline: 3px solid #fc3; }
-.team-地平线 { background: #222; color: #fff; border: 1px solid #666; }
-.team-半截篮 { background: #eee; color: #111; }
-.team-便服 { background: #777; color: #fff; }
+.team-opp { background: #222; color: #fff; border: 1px solid #666; }
+.team-home { background: #eee; color: #111; }
+.team-casual { background: #777; color: #fff; }
 .teamlabel { color: #aaa; margin-right: 6px; }
 .nav { background: #444; color: #fff; }
 #skip { background: #7a5c00; color: #fff; }
@@ -136,6 +138,7 @@ const EXISTING = __EXISTING__;
 const EXPLAYERS = __EXPLAYERS__;
 const CLUSTERS = __CLUSTERS__;
 const SESSION = "__SESSION__";
+const OPP = __OPP__;
 const LSKEY = "scorer_" + SESSION;
 const POSKEY = LSKEY + "_pos";
 const TOUCHKEY = LSKEY + "_touched";
@@ -235,18 +238,24 @@ function save() {
   localStorage.setItem(TOUCHKEY, JSON.stringify(touched));
 }
 function teamOfTag(tag) {
-  // 与 Python 端 team_of_tag 同规则：标签前缀定队，其余便服
-  if (tag.startsWith("黑") || tag.startsWith("蓝")) return "地平线";
+  // 与 Python 端 team_of_tag 同规则：标签前缀定队，黑/蓝→对手队（OPP），其余便服
+  if (tag.startsWith("黑") || tag.startsWith("蓝")) return OPP;
   if (tag.startsWith("白")) return "半截篮";
   return "便服";
 }
+function teamClass(team) {
+  // 队名→CSS 语义类：任意对手队名都能渲染（队名随场次，类名固定）
+  if (team === "半截篮") return "team-home";
+  if (team === "便服") return "team-casual";
+  return "team-opp";
+}
 function nDone() { return ITEMS.filter(it => marks[it.key]).length; }
 function renderPlayers() {
-  // 按队分行（地平线/半截篮/便服），找人不用扫全名单（2026-08-09 立哥要求）
+  // 按队分行（对手队 OPP/半截篮/便服），找人不用扫全名单（2026-08-09 立哥要求）
   const box = document.getElementById("players");
   box.innerHTML = "";
   const numbered = PLAYERS.map((p, idx) => [p, idx]);
-  for (const tm of ["地平线", "半截篮", "便服"]) {
+  for (const tm of [OPP, "半截篮", "便服"]) {
     const row = numbered.filter(([p]) => p.team === tm);
     if (!row.length) continue;
     const div = document.createElement("div");
@@ -258,7 +267,7 @@ function renderPlayers() {
       const b = document.createElement("button");
       b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
         (p.name ? "=" + p.name : "");
-      b.className = "team-" + p.team;
+      b.className = teamClass(p.team);
       if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
@@ -407,7 +416,7 @@ function renderClusters() {
       for (const p of PLAYERS) {
         const b = document.createElement("button");
         b.textContent = p.tag + (p.name ? "=" + p.name : "");
-        b.className = "team-" + p.team;
+        b.className = teamClass(p.team);
         b.onclick = () => clusterAssign(g.gid, p.tag);
         row.appendChild(b);
       }
@@ -422,7 +431,7 @@ function renderClusters() {
       for (const p of PLAYERS) {
         const b = document.createElement("button");
         b.textContent = p.tag + (p.name ? "=" + p.name : "");
-        b.className = "team-" + p.team;
+        b.className = teamClass(p.team);
         b.onclick = () => { pickerGid = null; clusterAssign(g.gid, p.tag); };
         pk.appendChild(b);
       }
@@ -580,31 +589,50 @@ show(start >= 0 ? start : 0);
 """
 
 
-def team_of_tag(tag: str) -> str:
-    """按标签前缀推定队别：黑*/蓝*→地平线、白*→半截篮，其余（灰T恤-A 等）归便服。
+def opponent_of(session: str) -> str:
+    """对手队名 = 场次 ID 第一个 ``_`` 后的后缀（AGENTS.md 约定 YYYYMMDD_对手名）。
+
+    无后缀 / 后缀空白 → 回退 OPPONENT_FALLBACK（20260722 等老场次历史口径）。
+
+    Args:
+        session: 场次 ID，如 ``20260805_车百鼎``。
+
+    Returns:
+        对手队名（黑/蓝球衣标签的 team 值）。
+    """
+    parts = session.strip().split("_", 1)
+    if len(parts) == 2 and parts[1].strip():
+        return parts[1].strip()
+    return OPPONENT_FALLBACK
+
+
+def team_of_tag(tag: str, opp: str) -> str:
+    """按标签前缀推定队别：黑*/蓝*→对手队（opp）、白*→半截篮，其余归便服。
 
     页面导出自动补录名单外标签时用同一规则（JS teamOfTag 与本文档同步，
-    改规则须两端一起改）。蓝色27 归地平线系 2026-08-09 立哥口径。
+    改规则须两端一起改）。蓝色27 归对手系 2026-08-09 立哥口径。
 
     Args:
         tag: 球员标签，如 ``黑21`` / ``白-熊志鹏`` / ``灰T恤-A``。
+        opp: 对手队名（opponent_of 产物）。
 
     Returns:
-        "地平线" / "半截篮" / "便服"。
+        opp / "半截篮" / "便服"。
     """
-    for prefix, team in _TEAM_PREFIXES:
+    for prefix, side in _TEAM_PREFIXES:
         if tag.startswith(prefix):
-            return team
+            return opp if side == "opp" else TEAM_WHITE
     return TEAM_CASUAL
 
 
-def parse_players(spec: str) -> list[Player]:
+def parse_players(spec: str, opp: str) -> list[Player]:
     """解析 --players 名单串："黑21=大斌,白-熊志鹏=熊志鹏" → Player 列表。
 
     每条为 ``tag[=name]``（name 可省，省则为空串）；队别按 team_of_tag 推定。
 
     Args:
         spec: 逗号分隔的名单串；空串返回空列表。
+        opp: 对手队名（opponent_of 产物，传给 team_of_tag）。
 
     Returns:
         Player 列表（保持给定顺序）。
@@ -621,7 +649,9 @@ def parse_players(spec: str) -> list[Player]:
         tag = tag.strip()
         if not tag:
             raise SchemaError(f"--players 条目缺 tag: {item!r}")
-        players.append(Player(tag=tag, name=name.strip() if sep else "", team=team_of_tag(tag)))
+        players.append(
+            Player(tag=tag, name=name.strip() if sep else "", team=team_of_tag(tag, opp))
+        )
     return players
 
 
@@ -629,7 +659,8 @@ def load_players_file(path: Path) -> list[Player]:
     """加载 --players-file 名单文件：JSON 数组，与 roster.players 同构。
 
     每条记录的校验复用 roster.player_from_dict（tag 非空唯一 / name 为 str /
-    team ∈ 地平线/半截篮/便服），与 roster.json 同一契约入口（rules.md §0.2：
+    team 为任意非空 str——对手队名随场次，见 docs/session-opponent-name/spec.md），
+    与 roster.json 同一契约入口（rules.md §0.2：
     schema 损坏必须显式失败，不静默容错）。
 
     Args:
@@ -1097,6 +1128,7 @@ def build_html(
     session: str,
     existing_assignments: dict[str, str],
     existing_players: dict[str, Player],
+    opp: str,
     clusters: list[dict[str, Any]] | None = None,
 ) -> str:
     """把条目/名单/已有归属/簇数据渲染为自包含确认页 HTML。
@@ -1107,6 +1139,7 @@ def build_html(
         session: 场次名（标题、localStorage 键、导出文件名后缀）。
         existing_assignments: 已有 roster 的 assignments（页面预填底色）。
         existing_players: 已有 roster 的 tag → Player（自动补录时沿用 name/team）。
+        opp: 对手队名（注入 JS ``const OPP``，opponent_of 产物）。
         clusters: build_page_clusters 产出的簇区数据；None/空列表不渲染簇区
             （无 --clusters 时页面行为与旧版一致）。
 
@@ -1128,6 +1161,7 @@ def build_html(
         .replace("__EXPLAYERS__", explayers_json)
         .replace("__CLUSTERS__", json.dumps(clusters or [], ensure_ascii=False))
         .replace("__SESSION__", session)
+        .replace("__OPP__", json.dumps(opp, ensure_ascii=False))
     )
 
 
@@ -1179,6 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
         if not session:
             logger.error("缺 --session 且 candidates 无 session 字段")
             return 1
+        opp: str = opponent_of(session)
 
         goals_data: Any = read_json(args.goals, what="goals.json")
         confirmed: list[dict[str, Any]] = _confirmed_goals(goals_data, str(args.goals))
@@ -1202,7 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
         players: list[Player] = (
             load_players_file(args.players_file)
             if args.players_file is not None
-            else parse_players(args.players)
+            else parse_players(args.players, opp)
         )
         existing_assignments: dict[str, str] = {}
         existing_players: dict[str, Player] = {}
@@ -1238,6 +1273,7 @@ def main(argv: list[str] | None = None) -> int:
             session,
             existing_assignments,
             existing_players,
+            opp,
             clusters=page_clusters,
         )
         out_path: Path = scorers_path.resolve().parent / "scorer.html"

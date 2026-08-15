@@ -34,6 +34,7 @@ from gen_scorer_page import (
     match_players_by_name,
     match_players_by_number,
     merge_assignments,
+    opponent_of,
     parse_players,
     team_of_tag,
 )
@@ -87,18 +88,36 @@ def _event(src_file: str = "a.mp4", anchor_t0: float = 4.0, clip: str = "clips/a
     }
 
 
+class TestOpponentOf:
+    """对手队名派生：场次 ID 后缀；无后缀/空白后缀回退地平线（老场次历史口径）。"""
+
+    def test_suffix(self) -> None:
+        assert opponent_of("20260805_车百鼎") == "车百鼎"
+
+    def test_no_suffix_fallback(self) -> None:
+        assert opponent_of("20260722") == "地平线"
+
+    def test_blank_suffix_fallback(self) -> None:
+        assert opponent_of("20260722_") == "地平线"
+
+
 class TestTeamOfTag:
-    """标签前缀推队（页面 JS teamOfTag 同规则；docs/scorer-reid/spec.md 锁现状映射）。"""
+    """标签前缀推队（页面 JS teamOfTag 同规则；对手队名由 opp 参数注入）。"""
 
     def test_prefix_teams(self) -> None:
         # Arrange / Act / Assert
-        assert team_of_tag("黑21") == "地平线"
-        assert team_of_tag("白-熊志鹏") == "半截篮"
-        assert team_of_tag("灰T恤-A") == "便服"
+        assert team_of_tag("黑21", "地平线") == "地平线"
+        assert team_of_tag("白-熊志鹏", "地平线") == "半截篮"
+        assert team_of_tag("灰T恤-A", "地平线") == "便服"
 
-    def test_blue_prefix_maps_to_black_team(self) -> None:
-        # Arrange / Act / Assert：蓝 → 地平线（蓝27 归地平线系 2026-08-09 立哥口径）
-        assert team_of_tag("蓝27") == "地平线"
+    def test_blue_prefix_maps_to_opponent_team(self) -> None:
+        # Arrange / Act / Assert：蓝 → 对手队（蓝27 归对手系 2026-08-09 立哥口径）
+        assert team_of_tag("蓝27", "地平线") == "地平线"
+
+    def test_opponent_name_follows_opp_arg(self) -> None:
+        # Arrange / Act / Assert：对手队名随 opp 走，不硬编码（2026-08-15 队名会话化）
+        assert team_of_tag("黑21", "车百鼎") == "车百鼎"
+        assert team_of_tag("蓝27", "车百鼎") == "车百鼎"
 
 
 class TestParsePlayers:
@@ -106,7 +125,7 @@ class TestParsePlayers:
 
     def test_tag_name_pairs(self) -> None:
         # Arrange / Act
-        players = parse_players("黑21=大斌,白-熊志鹏=熊志鹏,白-小陈=小陈")
+        players = parse_players("黑21=大斌,白-熊志鹏=熊志鹏,白-小陈=小陈", "地平线")
         # Assert
         assert players == [
             Player(tag="黑21", name="大斌", team="地平线"),
@@ -116,13 +135,18 @@ class TestParsePlayers:
 
     def test_name_optional_and_empty_spec(self) -> None:
         # Arrange / Act / Assert
-        assert parse_players("") == []
-        assert parse_players("黑21") == [Player(tag="黑21", name="", team="地平线")]
+        assert parse_players("", "地平线") == []
+        assert parse_players("黑21", "地平线") == [Player(tag="黑21", name="", team="地平线")]
+
+    def test_opp_arg_flows_to_team(self) -> None:
+        # Arrange / Act / Assert：黑/蓝前缀队名 = opp 参数（队名会话化）
+        players = parse_players("黑21,蓝27", "车百鼎")
+        assert [p.team for p in players] == ["车百鼎", "车百鼎"]
 
     def test_missing_tag_raises(self) -> None:
         # Arrange / Act / Assert
         with pytest.raises(SchemaError, match="tag"):
-            parse_players("=大斌")
+            parse_players("=大斌", "地平线")
 
 
 # ---- --players-file 名单文件注入（docs/scorer-reid/spec.md Phase D） ----
@@ -565,7 +589,7 @@ class TestBuildHtml:
         entries = build_entries([_goal()], [_candidate()], None, "", "")
         players = [Player(tag="黑21", name="大斌", team="地平线")]
         # Act
-        html = build_html(entries, players, "20260722", {}, {})
+        html = build_html(entries, players, "20260722", {}, {}, "地平线")
         # Assert
         assert '"key": "a.mp4#4.1"' in html
         assert '"tag": "黑21"' in html
@@ -573,14 +597,14 @@ class TestBuildHtml:
 
     def test_progress_localstorage_key_contains_session(self) -> None:
         # Arrange / Act
-        html = build_html([], [], "mysession", {}, {})
+        html = build_html([], [], "mysession", {}, {}, "地平线")
         # Assert
         assert '"scorer_" + SESSION' in html
         assert "localStorage" in html
 
     def test_export_contract_roster_json(self) -> None:
         # Arrange / Act
-        html = build_html([], [], "20260722", {}, {})
+        html = build_html([], [], "20260722", {}, {}, "地平线")
         # Assert：导出结构字段与文件名契约（roster.py validate_roster 可过；
         # roster-export-name：下载名即 roster.json，移到 work/<场次>/ 直接接入 CLI）
         assert 'a.download = "roster.json";' in html
@@ -592,7 +616,7 @@ class TestBuildHtml:
 
     def test_skip_badge_and_free_text_and_keys(self) -> None:
         # Arrange / Act
-        html = build_html([], [], "s", {}, {})
+        html = build_html([], [], "s", {}, {}, "地平线")
         # Assert：SKIP 标"无法定位"、自由文本输入、数字键 1-9、S 跳过、E 采用预填
         assert "无法定位" in html
         assert 'id="free"' in html
@@ -604,9 +628,21 @@ class TestBuildHtml:
 
     def test_existing_assignments_inlined(self) -> None:
         # Arrange / Act
-        html = build_html([], [], "s", {"a.mp4#4.1": "黑21"}, {})
+        html = build_html([], [], "s", {"a.mp4#4.1": "黑21"}, {}, "地平线")
         # Assert：已有 roster 归属内联作预填底色
         assert '"a.mp4#4.1": "黑21"' in html
+
+    def test_opponent_injected_and_semantic_css(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "20260805_车百鼎", {}, {}, "车百鼎")
+        # Assert：对手队名注入 JS 常量；CSS/类名走语义类（队名随场次、类名固定）
+        assert 'const OPP = "车百鼎";' in html
+        assert "team-opp" in html
+        assert "team-home" in html
+        assert "team-casual" in html
+        assert "function teamClass(" in html
+        assert "b.className = teamClass(p.team)" in html
+        assert '[OPP, "半截篮", "便服"]' in html
 
 
 class TestMain:
@@ -946,7 +982,7 @@ class TestBuildHtmlClusters:
         )
         page_clusters = build_page_clusters([_cluster()], entries)
         # Act
-        html = build_html(entries, [], "s", {}, {}, clusters=page_clusters)
+        html = build_html(entries, [], "s", {}, {}, "地平线", clusters=page_clusters)
         # Assert：簇区容器/行样式/代表图引用/簇级选人函数/逐球覆盖注释口径
         assert 'id="clusters"' in html
         assert "cluster-row" in html
@@ -956,7 +992,7 @@ class TestBuildHtmlClusters:
 
     def test_no_clusters_renders_empty(self) -> None:
         # Arrange / Act
-        html = build_html([], [], "s", {}, {})
+        html = build_html([], [], "s", {}, {}, "地平线")
         # Assert：无簇数据 → CLUSTERS 空数组，JS 整区隐藏
         assert "const CLUSTERS = [];" in html
 
@@ -981,6 +1017,7 @@ class TestBuildHtmlClusters:
             "s",
             {},
             {},
+            "地平线",
             clusters=page_clusters,
         )
         script = html.split("<script>", 1)[1].split("</script>", 1)[0]
@@ -1002,7 +1039,7 @@ class TestBuildHtmlClusterMerge:
             [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
         )
         page_clusters = build_page_clusters([_cluster()], entries)
-        return build_html(entries, [], "s", {}, {}, clusters=page_clusters)
+        return build_html(entries, [], "s", {}, {}, "地平线", clusters=page_clusters)
 
     def test_cluster_state_layer_present(self) -> None:
         html = self._html()
