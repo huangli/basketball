@@ -2,55 +2,55 @@
 
 ## Task 1: 页面态层 + 组解析工具函数
 
-- [ ] 写失败测试 TestBuildHtmlClusterMerge.test_cluster_state_layer_present
-- [ ] 跑测试确认失败
-- [ ] 模板插入 clState/saveClState/groupIdOf/computeGroups/groupTag
-- [ ] 改造 clusterAssign（按组作用 + 记 clAssign）
-- [ ] show() 逐球区簇号改显示组 id
-- [ ] 测试通过 + 质量门全绿
-- [ ] Commit
+- [x] 写失败测试 TestBuildHtmlClusterMerge.test_cluster_state_layer_present
+- [x] 跑测试确认失败
+- [x] 模板插入 clState/saveClState/groupIdOf/computeGroups/groupTag
+- [x] 改造 clusterAssign（按组作用 + 记 clAssign）
+- [x] show() 逐球区簇号改显示组 id
+- [x] 测试通过 + 质量门全绿
+- [x] Commit
 
 ## Task 2: renderClusters 按组渲染 + 拆开
 
-- [ ] 加失败断言 test_group_render_and_split_present
-- [ ] 跑测试确认失败
-- [ ] 整段替换 renderClusters + 新增 groupLabel/splitGroup
-- [ ] 测试通过 + 质量门全绿
-- [ ] Commit
+- [x] 加失败断言 test_group_render_and_split_present
+- [x] 跑测试确认失败
+- [x] 整段替换 renderClusters + 新增 groupLabel/splitGroup
+- [x] 测试通过 + 质量门全绿
+- [x] Commit
 
 ## Task 3: 拖拽合并 mergeInto + 预填跟随
 
-- [ ] 加失败断言 test_drag_merge_present
-- [ ] 跑测试确认失败
-- [ ] CSS 加 .drop-target / 拖拽光标
-- [ ] 新增 mergeInto（预填跟随 / clAssign 清除 / 同组与环防御 / PICKER-HOOK 埋点）
-- [ ] renderClusters 行加 draggable + drop 事件
-- [ ] 测试通过 + 质量门全绿
-- [ ] Commit
+- [x] 加失败断言 test_drag_merge_present
+- [x] 跑测试确认失败
+- [x] CSS 加 .drop-target / 拖拽光标
+- [x] 新增 mergeInto（预填跟随 / clAssign 清除 / 同组与环防御 / PICKER-HOOK 埋点）
+- [x] renderClusters 行加 draggable + drop 事件
+- [x] 测试通过 + 质量门全绿
+- [x] Commit
 
 ## Task 4: 合并弹条就地选人 + 数字键屏蔽
 
 （9 条 ↔ plan 10 步：plan 的 Step 4 变量声明+新函数合并为一条，映射无遗漏）
 
-- [ ] 加失败断言 test_merge_picker_present
-- [ ] 跑测试确认失败
-- [ ] CSS 加 .picker
-- [ ] 新增 pickerGid/openPicker/closePicker；mergeInto 尾部挂 openPicker(dstGid)
-- [ ] renderClusters 加弹条渲染块
-- [ ] keydown 加弹条屏蔽段（Esc 关、1-9/E 屏蔽）
-- [ ] document click 弹条外关闭
-- [ ] 测试通过 + 质量门全绿
-- [ ] Commit
+- [x] 加失败断言 test_merge_picker_present
+- [x] 跑测试确认失败
+- [x] CSS 加 .picker
+- [x] 新增 pickerGid/openPicker/closePicker；mergeInto 尾部挂 openPicker(dstGid)
+- [x] renderClusters 加弹条渲染块
+- [x] keydown 加弹条屏蔽段（Esc 关、1-9/E 屏蔽）
+- [x] document click 弹条外关闭
+- [x] 测试通过 + 质量门全绿
+- [x] Commit
 
 ## Task 5: 折叠
 
-- [ ] 加失败断言 test_collapse_present
-- [ ] 跑测试确认失败
-- [ ] CSS 加 collapsed/foldbtn
-- [ ] 新增 collapseAll/isCollapsed/toggleCollapse
-- [ ] renderClusters 三处改造（总开关行 / 折叠态分支+折叠钮 / 图墙首图+按钮守卫）
-- [ ] 测试通过 + 质量门全绿
-- [ ] Commit
+- [x] 加失败断言 test_collapse_present
+- [x] 跑测试确认失败
+- [x] CSS 加 collapsed/foldbtn
+- [x] 新增 collapseAll/isCollapsed/toggleCollapse
+- [x] renderClusters 三处改造（总开关行 / 折叠态分支+折叠钮 / 图墙首图+按钮守卫）
+- [x] 测试通过 + 质量门全绿
+- [x] Commit
 
 ## Task 6: 实跑验证 + 手册同步 + 收尾
 
