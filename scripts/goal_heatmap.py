@@ -1,8 +1,9 @@
-"""球队进球热图生成器（热图 v3：roster 驱动追人 + 筐锚粗配准，docs/heatmap/spec.md v3）。
+"""球队进球热图生成器（热图 v4：v3 框人纠偏——出手前窗口 + 队色硬守卫，docs/heatmap/spec.md v4）。
 
 输入：work/<场次>/roster.json（已归属球，tag→team）、glob 发现的
     goals_batch*.json / candidates_batch*.json / hoops_batch*.json、
-    work/detect/<fid>_mot_cache.json、work/frames/<fid>/f_*.jpg（串人守卫 + 目击拼图）
+    work/detect/<fid>_mot_cache.json、work/frames/<fid>/f_*.jpg（串人守卫 + 目击拼图）、
+    work/<场次>/session_facts.json 的 team_color 键（队色硬守卫映射，缺失则守卫禁用）
 输出：work/<场次>/goal_landings.json（逐球落点 + 筐锚相对坐标）、
     output/<场次>/队伍_<team>_进球热图.png（每队一张）、
     work/<场次>/heatmap_audit.png（目击拼图，固定种子抽 15 球）
@@ -10,10 +11,13 @@
     matplotlib 渲染（Agg 后端，已装，无新依赖）
 典型调用：python scripts/goal_heatmap.py --sessiondir work/20260805_车百鼎
 
-口径（spec v3 写死）：
+口径（spec v4 写死）：
     落点两路并集——主路 trace_person 回追 anchor−1.0s±0.3s 取人框底边中点
     （串人守卫 team_of_box 黑↔白相反时主路不可用、视同链断走兜底）；
     兜底 = 进球轨迹起点 ≥0.8s 前时取起点帧最近人框底边中点。
+    v4 框人纠偏——持球点搜索只看 sec ≤ anchor−0.5s 的截断轨迹（v3 实测
+    22/27 错球种子在入网后，球穿网落进筐下人躯干框）；队色硬守卫：落点帧
+    框中人队色与 roster 队伍期望队色明确相反 → uncovered(team_mismatch)。
     坐标——原点 hoops 筐心（时刻最近采样；多覆盖取时刻最近、并列取空间最近；
     零覆盖退化全局时刻最近 + WARNING）；cx 中位切两端、归一小端、大端取反；
     尺度 = 人框高 / 1.75m；不校正旋转（同机位假设）。
@@ -47,7 +51,7 @@ from crop_scorers import (
 )
 from errors import BasketballPipelineError, SchemaError
 from geom import Box
-from mot_candidates import run_mot
+from mot_candidates import Detection, Track, run_mot
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json
 from release_probe import GoalEvent, load_goals_events
 from roster import format_key, validate_roster
@@ -55,8 +59,11 @@ from scorer_landings import load_merged_candidates
 
 logger = logging.getLogger(__name__)
 
-# ---- 判据常量（docs/heatmap/spec.md v3 写死）----
+# ---- 判据常量（docs/heatmap/spec.md v4 写死）----
 RELEASE_BEFORE_SEC: float = 1.0  # 出手时刻固定估计 = 锚点前 1.0s（球飞行 0.5~1.5s 中值）
+HELD_SEARCH_BEFORE_SEC: float = (
+    0.5  # v4：持球点搜索只看 sec ≤ anchor−0.5s 的轨迹点（入网后点不链种子）
+)
 TRACE_TOL_SEC: float = 0.3  # 追人链目标帧容差（5fps 即 ±1.5 帧）
 TRACK_START_MIN_SEC: float = 0.8  # 兜底路：轨迹起点须在锚点前 ≥0.8s
 PERSON_HEIGHT_M: float = 1.75  # 假设身高（像素→米尺度锚；模块常量可调）
@@ -67,7 +74,10 @@ AUDIT_SEED: int = 20260815  # 目击抽样固定种子（可复现）
 TEAM_CASUAL: str = "便服"  # roster 中便服队不进热图
 HEAT_BIN_M: float = 0.25  # 密度网格边长（米）
 HEAT_SIGMA_M: float = 0.8  # 密度高斯平滑 sigma（米）
-_OPPOSITE_TEAM: dict[str, str] = {"黑": "白", "白": "黑"}  # 串人守卫对立映射（便服不触发）
+_OPPOSITE_TEAM: dict[str, str] = {
+    "黑": "白",
+    "白": "黑",
+}  # 队色相反映射（串人守卫 + v4 队色硬守卫；便服不触发）
 
 # FIBA 半场模板尺寸（米，筐心为原点，y 向场内为正；模板画线用）
 COURT_HALF_W: float = 7.5  # 半场宽 15m
@@ -108,7 +118,9 @@ class HeatLanding:
         team: 队别（roster players.team 原值；便服/查不到为 ""）。
         covered: 是否有可用落点。
         reason: 未覆盖原因（no_team/casual_team/missing_cache/no_track/
-            no_track_near_anchor/no_seed/no_landing/no_hoop）；覆盖时为 ""。
+            no_track_near_anchor/no_seed/no_landing/no_hoop/team_mismatch）；
+            覆盖时为 ""。team_mismatch = v4 队色硬守卫剔除（落点框中人队色
+            与 roster 队伍期望队色明确相反）。
         path: 落点路径（"trace" 主路 / "track_start" 兜底）；未覆盖为 ""。
         frame_idx: 落点帧索引（-1 未覆盖）。
         landing_px: 人框底边中点像素。
@@ -305,19 +317,26 @@ def find_landing(
     event: GoalEvent,
     anchor_xy: tuple[int, int] | None,
     frames_dir: Path,
+    expect_color: str = "",
 ) -> tuple[str, str, int, Box | None]:
-    """单球落点：两路并集（spec v3 落点口径写死）。
+    """单球落点：两路并集 + v4 队色硬守卫（spec v4 落点口径写死）。
 
-    主路 = 种子框（find_held_box / start_nearest_box）→ trace_person 回追 →
-    链上最接近 anchor−RELEASE_BEFORE_SEC 帧（±TRACE_TOL_SEC）→ 串人守卫
-    （黑↔白相反时主路不可用、视同链断走兜底）。兜底 = 轨迹起点 ≥0.8s 前时
-    取起点帧最近人框。
+    主路 = 种子框（find_held_box / start_nearest_box，**均喂 sec ≤
+    anchor−HELD_SEARCH_BEFORE_SEC 的截断轨迹**——v3 实测 22/27 错球种子在
+    入网后，球穿网落进筐下人躯干框；截断为空则无种子直接落兜底）→
+    trace_person 回追 → 链上最接近 anchor−RELEASE_BEFORE_SEC 帧
+    （±TRACE_TOL_SEC）→ 串人守卫（黑↔白相反时主路不可用、视同链断走兜底）。
+    兜底 = 原轨迹起点 ≥TRACK_START_MIN_SEC 前时取起点帧最近人框。
+    队色硬守卫（v4 终闸）：两路落点产出后统一判——落点帧框中人队色与
+    expect_color 明确相反 → uncovered(team_mismatch)；便服放行；
+    expect_color 为空 → 守卫禁用。
 
     Args:
         cache: 校验后的 mot_cache。
         event: 进球事件。
         anchor_xy: candidates 锚点（None 退化端点时间最近）。
-        frames_dir: 帧图根目录（串人守卫用）。
+        frames_dir: 帧图根目录（串人守卫 + 队色硬守卫用）。
+        expect_color: roster 队伍期望队色（"黑"/"白"；"" 守卫禁用）。
 
     Returns:
         (path, reason, frame_idx, box)；覆盖时 path ∈ {trace, track_start}、
@@ -331,9 +350,15 @@ def find_landing(
     if track is None:
         return "", "no_track_near_anchor", -1, None
 
-    seed = find_held_box(track, cache.persons)
-    if seed is None:
-        seed = start_nearest_box(track, cache.persons)
+    pre_dets: list[Detection] = [
+        d for d in track.dets if d.sec <= event.anchor_time - HELD_SEARCH_BEFORE_SEC
+    ]
+    seed: tuple[Detection, Box] | None = None
+    if pre_dets:
+        pre_track = Track(dets=pre_dets)  # 新建实例不改原轨迹（兜底路仍用原起点）
+        seed = find_held_box(pre_track, cache.persons)
+        if seed is None:
+            seed = start_nearest_box(pre_track, cache.persons)
     if seed is not None:
         seed_det, seed_box = seed
         chain: list[tuple[int, Box]] = trace_person(cache.persons, seed_det.frame_idx, seed_box)
@@ -343,6 +368,14 @@ def find_landing(
             seed_team: str = _team_at(frames_dir, event.fid, seed_det.frame_idx, seed_box)
             target_team: str = _team_at(frames_dir, event.fid, fi, box)
             if _OPPOSITE_TEAM.get(seed_team) != target_team:
+                if _OPPOSITE_TEAM.get(target_team) == expect_color:
+                    logger.info(
+                        "队色硬守卫：%s 落点框色=%s 与期望=%s 相反，计 team_mismatch",
+                        event.event_key,
+                        target_team,
+                        expect_color,
+                    )
+                    return "", "team_mismatch", -1, None
                 return "trace", "", fi, box
             logger.info("串人守卫：%s 目标帧 %s 与种子相反，主路不可用走兜底", event.event_key, fi)
 
@@ -354,6 +387,15 @@ def find_landing(
                 boxes,
                 key=lambda b: math.hypot(first.cx - b.cx, first.cy - b.cy),
             )
+            fb_team: str = _team_at(frames_dir, event.fid, first.frame_idx, box)
+            if _OPPOSITE_TEAM.get(fb_team) == expect_color:
+                logger.info(
+                    "队色硬守卫（兜底）：%s 落点框色=%s 与期望=%s 相反，计 team_mismatch",
+                    event.event_key,
+                    fb_team,
+                    expect_color,
+                )
+                return "", "team_mismatch", -1, None
             return "track_start", "", first.frame_idx, box
     return "", "no_landing", -1, None
 
@@ -620,6 +662,19 @@ def heat_session(
         raise BasketballPipelineError(f"roster.json 不存在: {roster_path}（先完成认人导出）")
     roster = validate_roster(read_json(roster_path, what="roster.json"), str(roster_path))
     tag2team: dict[str, str] = {p.tag: p.team for p in roster.players}
+    # v4 队色硬守卫映射（按场次注入；缺失 → 守卫禁用 + WARNING，不静默）
+    team_color: dict[str, str] = {}
+    facts_path: Path = session_dir / "session_facts.json"
+    if facts_path.is_file():
+        facts: Any = read_json(facts_path, what="session_facts.json")
+        if isinstance(facts, dict) and isinstance(facts.get("team_color"), dict):
+            team_color = {str(k): str(v) for k, v in facts["team_color"].items()}
+    if not team_color:
+        logger.warning("session_facts.json 无 team_color 键，队色硬守卫禁用（退化 v3 行为）")
+    else:
+        roster_teams: set[str] = {p.team for p in roster.players if p.team != TEAM_CASUAL}
+        for t in sorted(roster_teams - set(team_color)):
+            logger.warning("team_color 缺队伍映射，该队队色硬守卫禁用: %s", t)
     goals_files: list[Path] = sorted(session_dir.glob("goals_batch*.json"))
     cand_files: list[Path] = sorted(session_dir.glob("candidates_batch*.json"))
     hoops_files: list[Path] = sorted(session_dir.glob("hoops_batch*.json"))
@@ -669,7 +724,9 @@ def heat_session(
         if e.fid not in caches:
             caches[e.fid] = load_mot_cache(cache_path)
         anchor_xy = match_anchor_xy(cand_index, e.fid, e.anchor_time)
-        path, reason, fi, box = find_landing(caches[e.fid], e, anchor_xy, frames_dir)
+        path, reason, fi, box = find_landing(
+            caches[e.fid], e, anchor_xy, frames_dir, expect_color=team_color.get(team, "")
+        )
         if box is None:
             records.append(_uncovered(e.event_key, team, reason))
             continue
@@ -745,11 +802,13 @@ def heat_session(
         "generated_at": datetime.now(UTC).isoformat(),
         "params": {
             "release_before_sec": RELEASE_BEFORE_SEC,
+            "held_search_before_sec": HELD_SEARCH_BEFORE_SEC,
             "trace_tol_sec": TRACE_TOL_SEC,
             "track_start_min_sec": TRACK_START_MIN_SEC,
             "person_height_m": PERSON_HEIGHT_M,
             "coverage_min_ratio": COVERAGE_MIN_RATIO,
             "flip_threshold_cx": threshold,
+            "team_color_guard": bool(team_color),
         },
         "summary": {
             "total_marked": total,
@@ -779,7 +838,7 @@ def heat_session(
     )
     logger.info("目击拼图已出（%d 球）: %s", len(audit_keys), session_dir / "heatmap_audit.png")
 
-    logger.info("==== 热图 v3 覆盖率汇总 ====")
+    logger.info("==== 热图 v4 覆盖率汇总 ====")
     logger.info(
         "覆盖率: %d/%d = %.1f%%（阈值 %.0f%%）→ %s",
         n_covered,
@@ -801,7 +860,7 @@ def heat_session(
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """解析 CLI 参数。"""
-    parser = argparse.ArgumentParser(description="球队进球热图生成（热图 v3）")
+    parser = argparse.ArgumentParser(description="球队进球热图生成（热图 v4）")
     parser.add_argument("--sessiondir", required=True, type=Path, help="work/<场次> 目录")
     parser.add_argument(
         "--detectdir", type=Path, default=None, help="mot_cache 目录（默认 <sessiondir>/../detect）"

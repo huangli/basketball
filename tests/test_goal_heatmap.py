@@ -1,8 +1,10 @@
-"""goal_heatmap.py 单元测试（热图 v3：roster 驱动追人 + 筐锚粗配准）。
+"""goal_heatmap.py 单元测试（热图 v4：v3 框人纠偏——出手前窗口 + 队色硬守卫）。
 
 覆盖：hoops schema 校验、hoop_xy_at（覆盖/多覆盖/零覆盖退化/无 detected）、
 flip_threshold 两端切分、to_rel_m 坐标换算（含翻转）、find_landing 两路并集
-（主路命中/串人守卫走兜底/链断兜底/两路皆无/no_track）、heat_session 端到端
+（主路命中/串人守卫走兜底/链断兜底/两路皆无/no_track）、v4 新增（持球点
+窗口截断——入网后点不链种子/截断空轨迹直接 no_landing、队色硬守卫——主路
+与兜底相反剔除/便服放行/expect_color 空禁用退化）、heat_session 端到端
 （合成 roster+goals+candidates+hoops+cache+帧图，含便服剔除与覆盖统计）、
 渲染 smoke、目击拼图确定性与缺帧占位。
 """
@@ -268,6 +270,86 @@ def test_find_landing_no_track() -> None:
     assert find_landing(cache, _event(), (250, 50), Path("x"))[1] == "no_track"
 
 
+# ---------- v4：持球点窗口截断 + 队色硬守卫 ----------
+
+
+def test_find_landing_held_window_excludes_post_net(tmp_path: Path) -> None:
+    # Arrange：轨迹延到入网后；B 框（筐下人，195≤x≤285 只接 fi≥18 的球）
+    # 在 fi 13..22 全程可链——v3 会种子链 B 并 trace 到帧 15，v4 截断后
+    # 窗口内最后持球点仍在 A（fi=12，x=90），必须取 A
+    persons: list[tuple[Box, ...]] = []
+    for fi in range(N_FRAMES):
+        boxes = [Box(0, 0, 100, 100)]
+        if 13 <= fi <= 22:
+            boxes.append(Box(195, 20, 285, 140))
+        persons.append(tuple(boxes))
+    cache = _shot_cache(balls_end=25, persons=persons)
+    # Act
+    path, reason, fi, box = find_landing(cache, _event(), (250, 50), tmp_path / "frames")
+    # Assert：入网后轨迹点不参与持球判定，主路仍取投篮者 A
+    assert (path, reason) == ("trace", "")
+    assert fi == 15 and box == Box(0, 0, 100, 100)
+
+
+def test_find_landing_truncated_empty_track_no_landing(tmp_path: Path) -> None:
+    # Arrange：轨迹起点 fi=18（sec 3.6 > anchor−0.5）但全程有人框 A——
+    # v3 能持球链 A 并 trace 命中，v4 截断为空 → 无种子；兜底 0.4s<0.8 → 双无
+    persons: list[tuple[Box, ...]] = [(Box(0, 0, 100, 100),)] * N_FRAMES
+    balls: list[tuple[Detection, ...]] = [()] * N_FRAMES
+    for fi in range(18, 22):
+        balls[fi] = (_ball(0.9, 50 + (fi - 18) * 20, 50, fi),)
+    cache = _cache(balls, persons)
+    # Act
+    path, reason, fi, box = find_landing(cache, _event(), (130, 50), tmp_path / "frames")
+    # Assert
+    assert (path, reason, fi, box) == ("", "no_landing", -1, None)
+
+
+def test_find_landing_team_mismatch_rejected(tmp_path: Path) -> None:
+    # Arrange：种子/目标帧框区都填黑（串人守卫不触发），期望白 → 硬守卫剔除
+    cache = _shot_cache()
+    frames = _frame(tmp_path, FID, 12, Box(0, 0, 100, 100), "black")
+    _frame(tmp_path, FID, 15, Box(0, 0, 100, 100), "black")
+    # Act
+    got = find_landing(cache, _event(), (250, 50), frames, expect_color="白")
+    # Assert
+    assert got == ("", "team_mismatch", -1, None)
+
+
+def test_find_landing_team_mismatch_fallback_rejected(tmp_path: Path) -> None:
+    # Arrange：帧 13 起无人框 → 链断走兜底；起点帧（10）框区填黑、期望白
+    persons: list[tuple[Box, ...]] = [()] * N_FRAMES
+    for fi in range(13):
+        persons[fi] = (Box(0, 0, 100, 100),)
+    cache = _shot_cache(persons=persons)
+    frames = _frame(tmp_path, FID, 10, Box(0, 0, 100, 100), "black")
+    # Act：兜底路同样过硬守卫
+    got = find_landing(cache, _event(), (250, 50), frames, expect_color="白")
+    # Assert
+    assert got == ("", "team_mismatch", -1, None)
+
+
+def test_find_landing_team_guard_casual_passes(tmp_path: Path) -> None:
+    # Arrange：种子帧黑、落点帧中灰（判便服）——便服不触发串人守卫也不触发硬守卫
+    cache = _shot_cache()
+    frames = _frame(tmp_path, FID, 12, Box(0, 0, 100, 100), "black")
+    _frame(tmp_path, FID, 15, Box(0, 0, 100, 100), (128, 128, 128))
+    # Act
+    path, reason, fi, box = find_landing(cache, _event(), (250, 50), frames, expect_color="白")
+    # Assert：便服放行，主路命中
+    assert (path, reason) == ("trace", "")
+    assert fi == 15 and box == Box(0, 0, 100, 100)
+
+
+def test_find_landing_team_guard_disabled(tmp_path: Path) -> None:
+    # Arrange：expect_color 空（team_color 键缺失退化）→ 框色黑也不剔除
+    cache = _shot_cache()
+    frames = _frame(tmp_path, FID, 12, Box(0, 0, 100, 100), "black")
+    _frame(tmp_path, FID, 15, Box(0, 0, 100, 100), "black")
+    # Act & Assert
+    assert find_landing(cache, _event(), (250, 50), frames, expect_color="")[0] == "trace"
+
+
 # ---------- court_template_lines ----------
 
 
@@ -391,6 +473,9 @@ def test_heat_session_end_to_end(tmp_path: Path) -> None:
     assert (session / "goal_landings.json").exists()
     assert (out / "队伍_半截篮_进球热图.png").exists()
     assert (session / "heatmap_audit.png").exists()
+    # v4：无 session_facts.json → 队色硬守卫禁用（WARNING 退化 v3 行为）
+    assert report["params"]["team_color_guard"] is False
+    assert report["params"]["held_search_before_sec"] == 0.5
 
 
 def test_heat_session_no_roster_raises(tmp_path: Path) -> None:
