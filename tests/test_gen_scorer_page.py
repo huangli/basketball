@@ -1332,3 +1332,31 @@ class TestBuildHtmlClickMerge:
         assert "row.draggable = true" in html
         assert "text/plain" in html
         assert "function mergeInto(" in html
+
+
+class TestBuildHtmlNoGoalTag:
+    """不算进球标签（docs/scorer-nogoal-tag/spec.md）：页面剔除假进球，导出自动过滤。"""
+
+    def _html(self) -> str:
+        return build_html([], [], "s", {}, {}, "车百鼎")
+
+    def test_nogoal_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert 'const NOGOAL = "不算进球"' in html
+        assert 'id="nogoal"' in html
+        assert 'k === "n"' in html
+
+    def test_export_strips_nogoal(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert：assignments 收集过滤哨兵 + alert 报剔除数
+        assert "t !== NOGOAL" in html
+        assert "已剔除不参与合成" in html
+
+    def test_picker_shields_n_key(self) -> None:
+        # Arrange / Act：弹条期间 N 与 1-9/E 同屏蔽（防误触静默剔除当前球）
+        html = self._html()
+        # Assert
+        assert '|| k === "n") return;' in html

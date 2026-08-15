@@ -89,6 +89,7 @@ button.sel { outline: 3px solid #fc3; }
 .teamlabel { color: #aaa; margin-right: 6px; }
 .nav { background: #444; color: #fff; }
 #skip { background: #7a5c00; color: #fff; }
+#nogoal { background: #7a2c2c; color: #fff; }
 #accept { background: #2c9e4b; color: #fff; }
 #export { background: #8a6d00; color: #fff; }
 #go { background: #2c9e4b; color: #fff; }
@@ -141,11 +142,13 @@ small { color: #999; }
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
   <button id="accept" style="display:none"></button>
   <button id="skip">跳过 (S)</button>
+  <button id="nogoal">不算进球 (N)</button>
   <button class="nav" id="prev">← 上一个</button>
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未归属</button>
   <button id="export">导出 roster.json</button>
-  <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 ←/→=翻页；SKIP 球标"无法定位"可手选</small>
+  <br><small>按键：1-9=选球员 E=采用号码预填 S=跳过 N=不算进球
+  ←/→=翻页；SKIP 球标"无法定位"可手选</small>
   <small>进度自动存 localStorage，刷新回到上次位置；导出文件名 roster.json</small>
 </div>
 <div class="stepbar" id="step2">第二步：并簇认人<small>同人的簇拖到一起，点队员名应用到整组；
@@ -168,6 +171,9 @@ const OPP = __OPP__;
 const LSKEY = "scorer_" + SESSION;
 const POSKEY = LSKEY + "_pos";
 const TOUCHKEY = LSKEY + "_touched";
+// 不算进球哨兵标签：假进球/犯规不算的球归到这里——只在页面内流转，
+// 导出 roster 时剔除（assignments/players 都不含），不挡 confirmed；可逆（改归球员即恢复）
+const NOGOAL = "不算进球";
 let marks = {};
 try { marks = JSON.parse(localStorage.getItem(LSKEY) || "{}"); } catch (e) { marks = {}; }
 // 已有 roster 归属作底，本页改动覆盖之（立哥在页面上的修改是终裁）
@@ -826,7 +832,8 @@ function exportRoster() {
   // assignments 并集 = 已有 roster 归属 + 本页全部标记（键即 candidates 的
   // format_key 产物，两端共用 roster.py 契约，此处不再拼键）
   const assignments = {};
-  for (const [k, t] of Object.entries(marks)) { if (t) assignments[k] = t; }
+  // 不算进球哨兵剔除：不进 assignments（players 自动补录循环读本对象，哨兵随之不进名单）
+  for (const [k, t] of Object.entries(marks)) { if (t && t !== NOGOAL) assignments[k] = t; }
   // players 以本页名单为准；归属到名单外标签（自由输入）的自动补录，
   // 名字/队别优先沿用已有 roster 记录，否则按标签前缀推队
   const players = PLAYERS.map(p => ({ tag: p.tag, name: p.name, team: p.team }));
@@ -846,12 +853,17 @@ function exportRoster() {
   a.download = "roster.json";
   a.click();
   const nUn = ITEMS.filter(it => it.status !== "SKIP" && !marks[it.key]).length;
+  // nNo 数全量 marks 的哨兵球——同 session 跨批次共享 localStorage，
+  // 只数本页 ITEMS 会漏报其他批次的剔除球
+  const nNo = Object.values(marks).filter(t => t === NOGOAL).length;
   alert("已下载 roster.json（归属 " + Object.keys(assignments).length +
         "/" + ITEMS.length + "，confirmed=" + confirmed +
+        (nNo ? "，不算进球 " + nNo + " 球（已剔除不参与合成）" : "") +
         (nUn ? "，还有 " + nUn + " 个非 SKIP 球未归属" : "") + "），移到 work 场次目录即可");
 }
 document.getElementById("go").onclick = freeAssign;
 document.getElementById("skip").onclick = skip;
+document.getElementById("nogoal").onclick = () => assign(NOGOAL);
 document.getElementById("prev").onclick = () => show(cur - 1);
 document.getElementById("next").onclick = () => show(cur + 1);
 document.getElementById("toun").onclick = jumpUnassigned;
@@ -861,7 +873,7 @@ document.addEventListener("keydown", (ev) => {
   if (pickerGid !== null) {
     // 弹条期间：Esc 关闭；数字键 1-9/E 屏蔽（防误触逐球归属改错球）
     if (ev.key === "Escape") { closePicker(); return; } // 弹条优先：一次 Esc 只关弹条
-    if ((k >= "1" && k <= "9") || k === "e") return;
+    if ((k >= "1" && k <= "9") || k === "e" || k === "n") return;
   }
   if (ev.key === "Escape" && pickerGid === null && mergeSrc !== null) {
     // 点选合并 Esc 取消（弹条开着时 Esc 优先只关弹条，再按一次才清点选态——
@@ -879,6 +891,7 @@ document.addEventListener("keydown", (ev) => {
     const idx = parseInt(k, 10) - 1;
     if (idx < PLAYERS.length) assign(PLAYERS[idx].tag);
   } else if (k === "s") skip();
+  else if (k === "n") assign(NOGOAL);
   else if (k === "e") {
     const vis = visible();
     if (vis.length && cur < vis.length && vis[cur].prefill_tag) assign(vis[cur].prefill_tag);
