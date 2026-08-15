@@ -1202,3 +1202,30 @@ class TestBuildHtmlStepBars:
         # Assert
         assert 'id="step2"' in html
         assert 'getElementById("step2")' in html
+
+
+class TestBuildHtmlDeleteCluster:
+    """删簇（docs/scorer-three-step/spec.md）：deleted 墓碑子键，组从簇区隐藏不动归属。"""
+
+    def _html(self) -> str:
+        entries = build_entries(
+            [_goal()], [_candidate()], None, "", "", cluster_map={"a.mp4#4.1": 1}
+        )
+        page_clusters = build_page_clusters([_cluster()], entries)
+        return build_html(entries, [], "s", {}, {}, "地平线", clusters=page_clusters)
+
+    def test_delete_cluster_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert "function deleteCluster(" in html
+        assert "deleted:" in html
+        assert "clState.deleted" in html
+        assert "删除簇#" in html
+
+    def test_deleted_subkey_loaded_and_saved(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert：加载白名单与 saveClState 合并分支都带上 deleted
+        assert '"deleted"' in html
+        assert "stored.deleted" in html

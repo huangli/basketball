@@ -159,16 +159,17 @@ let touched = {};
 try { touched = JSON.parse(localStorage.getItem(TOUCHKEY) || "{}"); } catch (e) { touched = {}; }
 const CLSTATE_KEY = LSKEY + "_clusters";
 // 簇合并页面态：merges=被并cid→组id，clAssign=组id→tag（仅作合并预填来源，
-// 显示/折叠判定一律以 marks 为准），collapsed=显式折叠（true/false 都存）
-let clState = { merges: {}, clAssign: {}, collapsed: {} };
+// 显示/折叠判定一律以 marks 为准），collapsed=显式折叠（true/false 都存），
+// deleted=删簇墓碑（gid→true，只加不减；删的是显示组，不动球和归属）
+let clState = { merges: {}, clAssign: {}, collapsed: {}, deleted: {} };
 try {
   const rawCl = JSON.parse(localStorage.getItem(CLSTATE_KEY) || "{}");
   if (rawCl && typeof rawCl === "object") {
-    for (const sub of ["merges", "clAssign", "collapsed"]) {
+    for (const sub of ["merges", "clAssign", "collapsed", "deleted"]) {
       if (rawCl[sub] && typeof rawCl[sub] === "object") clState[sub] = rawCl[sub];
     }
   }
-} catch (e) { clState = { merges: {}, clAssign: {}, collapsed: {} }; }
+} catch (e) { clState = { merges: {}, clAssign: {}, collapsed: {}, deleted: {} }; }
 let pickerGid = null; // 合并弹条：非 null = 该组行正弹选人条
 let collapseAll = null; // 总开关：null=随规则 / true=全折 / false=全展（瞬态，刷新回规则；
                         // 点击后 null→true→false→true… 两态循环回不到"随规则"系有意
@@ -202,6 +203,7 @@ function saveClState(del) {
   // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
   // del = { merges: [...], clAssign: [...] } 待删键——读回合并会把本地已删的键
   // 从 stored 复活，必须在合并后再删（拆开/合并吸收依赖此语义）
+  //（deleted 墓碑只加不减，del 清单无需扩展）
   let stored = {};
   try { stored = JSON.parse(localStorage.getItem(CLSTATE_KEY) || "{}"); }
   catch (e) { stored = {}; }
@@ -209,6 +211,7 @@ function saveClState(del) {
     merges: Object.assign({}, stored.merges || {}, clState.merges),
     clAssign: Object.assign({}, stored.clAssign || {}, clState.clAssign),
     collapsed: Object.assign({}, stored.collapsed || {}, clState.collapsed),
+    deleted: Object.assign({}, stored.deleted || {}, clState.deleted),
   };
   for (const k of (del && del.merges) || []) delete merged.merges[k];
   for (const k of (del && del.clAssign) || []) delete merged.clAssign[k];
@@ -240,7 +243,11 @@ function computeGroups() {
   }
   const pos = new Map(CLUSTERS.map((cl, i) => [cl.cluster_id, i]));
   // ?? 0 兜底：localStorage 残留失效簇 id 时 pos.get 为 undefined，防 NaN 序不稳
-  return [...byGid.values()].sort((a, b) => (pos.get(a.gid) ?? 0) - (pos.get(b.gid) ?? 0));
+  // 删簇墓碑过滤在折叠成显示组之后：删的是立哥肉眼所见的行；
+  // merges 链不动（groupIdOf 照常解析，逐球区"簇#N"标注保留）
+  return [...byGid.values()]
+    .filter(g => !clState.deleted[String(g.gid)])
+    .sort((a, b) => (pos.get(a.gid) ?? 0) - (pos.get(b.gid) ?? 0));
 }
 function groupTag(g) {
   // 组内非空 marks 众数（显示"归的人"唯一口径；不读 clAssign）
@@ -372,6 +379,18 @@ function splitGroup(gid) {
     .filter(k => groupIdOf(parseInt(k, 10)) === gid);
   for (const k of doomed) delete clState.merges[k];
   saveClState({ merges: doomed, clAssign: [] });
+  show(cur);
+}
+function deleteCluster(gid) {
+  // 删簇 = 墓碑隐藏显示组：只移除分组视图，ITEMS/marks/touched/clAssign 一律不动
+  // （簇只是分组预填，组内球在逐球区照常核对）；无页内撤销，找回=清站点数据
+  const g = computeGroups().find(x => x.gid === gid);
+  if (!g) return;
+  if (!confirm("删除簇#" + gid + "？组内 " + g.keys.length +
+               " 球的归属不变，可在第三步逐球核对")) return;
+  clState.deleted[String(gid)] = true;
+  if (pickerGid === gid) pickerGid = null; // 顺手清悬挂弹条状态（组已不渲染）
+  saveClState();
   show(cur);
 }
 function mergeInto(srcGid, dstGid) {
@@ -512,6 +531,12 @@ function renderClusters() {
         row.appendChild(b);
       }
     }
+    const del = document.createElement("button");
+    del.textContent = "删除";
+    del.className = "nav";
+    del.title = "移除该簇分组（不动球和归属）";
+    del.onclick = () => deleteCluster(g.gid);
+    row.appendChild(del);
     if (pickerGid === g.gid) {
       const pk = document.createElement("div");
       pk.className = "picker";
