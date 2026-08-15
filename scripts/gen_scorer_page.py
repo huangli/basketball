@@ -97,6 +97,8 @@ button.sel { outline: 3px solid #fc3; }
 .stepbar { color: #fc3; font-size: 14px; margin: 10px 0 2px; }
 .stepbar small { color: #999; margin-left: 8px; font-size: 12px; }
 .renamebtn { font-size: 12px; padding: 4px 8px; }
+#reviewbar { margin: 4px 0; }
+#reviewbar button { font-size: 14px; padding: 6px 10px; }
 #crop { max-width: 44vw; max-height: 68vh; background: #000; }
 video { max-width: 48vw; max-height: 68vh; background: #000; }
 .badge { color: #fc3; }
@@ -137,6 +139,7 @@ small { color: #999; }
 误分组的簇点"删除"移除（不动球和归属）</small></div>
 <div id="clusters"></div>
 <div class="stepbar">第三步：逐球核对<small>选核对对象，判错直接点正确球员</small></div>
+<div id="reviewbar"></div>
 <img id="crop" alt="投篮者裁图">
 <video id="v" autoplay loop muted playsinline></video>
 <script>
@@ -228,6 +231,81 @@ function renamePlayer(tag) {
   nameOvr[tag] = p.name;
   saveNames();
   show(cur);
+}
+const REVIEW_KEY = LSKEY + "_review";
+// 按人核对：{ target: "" }；""=全部（切回全部=写空串不删键，理由同 names 键），
+// "__none__"=未归属，其余=球员 tag（含名单外自由输入 tag，无 name 纯显示 tag）
+let review = { target: "" };
+try {
+  const rawR = JSON.parse(localStorage.getItem(REVIEW_KEY) || "{}");
+  if (rawR && typeof rawR === "object" && typeof rawR.target === "string") {
+    review.target = rawR.target;
+  }
+} catch (e) { review = { target: "" }; }
+function saveReview() {
+  // 读回再合并写（沿用 save() 模式）
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(REVIEW_KEY) || "{}"); }
+  catch (e) { stored = {}; }
+  review = Object.assign(stored, review);
+  localStorage.setItem(REVIEW_KEY, JSON.stringify(review));
+}
+function reviewTargets() {
+  // 核对对象候选 = 当前 marks 里有归属球的 tag（按 ITEMS 序去重；含名单外 tag）
+  const seen = [];
+  for (const it of ITEMS) {
+    const t = marks[it.key];
+    if (t && !seen.includes(t)) seen.push(t);
+  }
+  return seen;
+}
+function visible() {
+  // 可见集 = 按核对对象过滤的 ITEMS 子集；ITEMS 本体不动（spec 边界）
+  if (review.target === "") return ITEMS;
+  if (review.target === "__none__") return ITEMS.filter(it => !marks[it.key]);
+  return ITEMS.filter(it => marks[it.key] === review.target);
+}
+function posKey() {
+  // 位置按核对对象分键（不同对象下同索引指向不同球，不分键会错位）；
+  // 全部沿用旧 _pos 键兼容存量
+  return review.target === "" ? POSKEY
+    : POSKEY + "_" + encodeURIComponent(review.target);
+}
+function reviewTarget(tag) {
+  // 切核对对象：持久 + 定位（有位置记录回记录；无则按人=第一个球，
+  // 全部/未归属=第一个未归属球）；集空交给 show 的空态分支回退全部
+  review.target = tag;
+  saveReview();
+  const vis = visible();
+  let start = parseInt(localStorage.getItem(posKey()) || "-1", 10);
+  if (isNaN(start) || start < 0 || start >= vis.length) {
+    start = (tag !== "" && tag !== "__none__")
+      ? 0 : vis.findIndex(it => !marks[it.key]);
+  }
+  show(start >= 0 ? start : 0);
+}
+function renderReviewBar() {
+  // 核对对象行：全部 / 各已归属球员（marks 里有球才列）/ 未归属；选中态 sel 高亮
+  const bar = document.getElementById("reviewbar");
+  bar.innerHTML = "";
+  const lab = document.createElement("span");
+  lab.textContent = "核对对象：";
+  lab.className = "teamlabel";
+  bar.appendChild(lab);
+  const mk = (text, target) => {
+    const b = document.createElement("button");
+    b.textContent = text;
+    b.className = "nav";
+    if (review.target === target) b.classList.add("sel");
+    b.onclick = () => reviewTarget(target);
+    bar.appendChild(b);
+  };
+  mk("全部", "");
+  for (const t of reviewTargets()) {
+    const p = PLAYERS.find(x => x.tag === t);
+    mk(t + (p && p.name ? "=" + p.name : ""), t);
+  }
+  mk("未归属", "__none__");
 }
 function saveClState(del) {
   // 子键分别读回再合并写（嵌套对象整体浅合并会丢多页防护粒度；spec 数据契约）；
@@ -323,6 +401,8 @@ function renderPlayers() {
   // 按队分行（对手队 OPP/半截篮/便服），找人不用扫全名单（2026-08-09 立哥要求）
   const box = document.getElementById("players");
   box.innerHTML = "";
+  const vis = visible(); // sel 高亮读可见集当前项（按人核对时 ITEMS[cur] 不是当前球）
+  const curKey = vis.length && cur < vis.length ? vis[cur].key : null;
   const numbered = PLAYERS.map((p, idx) => [p, idx]);
   const KNOWN_TEAMS = [OPP, "半截篮", "便服"];
   for (const tm of KNOWN_TEAMS) {
@@ -359,7 +439,7 @@ function renderPlayers() {
         ev.dataTransfer.setData("text/player-tag", p.tag);
         ev.dataTransfer.effectAllowed = "move";
       };
-      if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
+      if (curKey && marks[curKey] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
       const rn = document.createElement("button");
@@ -392,7 +472,7 @@ function renderPlayers() {
         ev.dataTransfer.setData("text/player-tag", p.tag);
         ev.dataTransfer.effectAllowed = "move";
       };
-      if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
+      if (curKey && marks[curKey] === p.tag) b.classList.add("sel");
       b.onclick = () => assign(p.tag);
       div.appendChild(b);
       const rn = document.createElement("button");
@@ -616,18 +696,35 @@ function clusterAssign(cid, tag) {
   show(cur);
 }
 function show(i) {
-  if (!ITEMS.length) return;
-  cur = Math.max(0, Math.min(i, ITEMS.length - 1));
-  const it = ITEMS[cur];
+  let vis = visible();
+  let flash = "";
+  if (!vis.length && review.target !== "") {
+    // 空可见集（改归离集/持久 target 失效）→ 提示并自动切回全部（spec 空态契约；
+    // 不得像旧版 !ITEMS.length 早退那样停在旧画面）
+    flash = review.target === "__none__" ? "未归属清零，已切回全部 | "
+      : "此人核对完毕，已切回全部 | ";
+    review.target = "";
+    saveReview();
+    vis = visible();
+  }
+  if (!vis.length) return; // ITEMS 本身为空（无球）：旧行为不变
+  cur = Math.max(0, Math.min(i, vis.length - 1));
+  const it = vis[cur];
   const img = document.getElementById("crop");
   if (it.crop) { img.src = it.crop; img.style.display = "inline-block"; }
   else { img.removeAttribute("src"); img.style.display = "none"; }
   const v = document.getElementById("v");
   if (it.clip) { v.src = it.clip; v.style.display = "inline-block"; v.play().catch(() => {}); }
   else { v.pause(); v.removeAttribute("src"); v.load(); v.style.display = "none"; }
-  localStorage.setItem(POSKEY, String(cur));
-  let info = `第 ${cur + 1}/${ITEMS.length} 个 | 已归属 ${nDone()}/${ITEMS.length}` +
-    ` | ${it.file} t=${it.anchor_time}s`;
+  localStorage.setItem(posKey(), String(cur));
+  let info = flash + `第 ${cur + 1}/${vis.length} 个`;
+  if (review.target !== "") {
+    // 进度行带核对对象后缀（有真名则 tag=真名）；全部模式不带
+    const rp = PLAYERS.find(x => x.tag === review.target);
+    info += "（核对：" + (review.target === "__none__" ? "未归属"
+      : review.target + (rp && rp.name ? "=" + rp.name : "")) + "）";
+  }
+  info += ` | 已归属 ${nDone()}/${ITEMS.length} | ${it.file} t=${it.anchor_time}s`;
   if (it.cluster_id) info += ` | 簇#${groupIdOf(it.cluster_id)}`;
   // 预填优先级：号码匹配（K3 读号）> 颜色 team_guess；歧义不预填
   const ab = document.getElementById("accept");
@@ -650,31 +747,42 @@ function show(i) {
     marks[it.key] ? "当前归属: " + marks[it.key] : "未归属";
   renderPlayers();
   renderClusters();
+  renderReviewBar();
 }
 function assign(tag) {
-  if (!ITEMS.length) return;
-  marks[ITEMS[cur].key] = tag;
-  touched[ITEMS[cur].key] = true;
+  const vis = visible();
+  if (!vis.length) return;
+  marks[vis[cur].key] = tag;
+  touched[vis[cur].key] = true;
   save();
-  let nxt = ITEMS.findIndex((x, idx) => idx > cur && !marks[x.key]);
-  if (nxt < 0) nxt = ITEMS.findIndex(x => !marks[x.key]);
+  if (review.target !== "") {
+    // 按人/未归属模式：改归后球离集，落原索引位置的新当前项（[i] 即下一个），到尾停末尾
+    show(cur);
+    return;
+  }
+  // 全部模式 = 现状：跳下一个未归属球（全局 findIndex）
+  let nxt = vis.findIndex((x, idx) => idx > cur && !marks[x.key]);
+  if (nxt < 0) nxt = vis.findIndex(x => !marks[x.key]);
   show(nxt >= 0 ? nxt : cur);
 }
 function skip() {
-  let nxt = ITEMS.findIndex((x, idx) => idx > cur && !marks[x.key]);
-  if (nxt < 0) nxt = (cur + 1) % ITEMS.length;
+  const vis = visible();
+  if (!vis.length) return;
+  let nxt = vis.findIndex((x, idx) => idx > cur && !marks[x.key]);
+  if (nxt < 0) nxt = (cur + 1) % vis.length;
   show(nxt);
 }
 function freeAssign() {
   const inp = document.getElementById("free");
   const tag = inp.value.trim();
   if (!tag) return;
+  if (tag === "__none__") { inp.value = ""; return; } // 保留特殊值，防撞未归属集语义
   inp.value = "";
   assign(tag);
 }
 function jumpUnassigned() {
-  const n = ITEMS.findIndex(it => !marks[it.key]);
-  show(n >= 0 ? n : cur);
+  // 跳到未归属 = 切到未归属核对对象（spec 手工清单：两者一致）
+  reviewTarget("__none__");
 }
 function exportRoster() {
   // assignments 并集 = 已有 roster 归属 + 本页全部标记（键即 candidates 的
@@ -726,7 +834,10 @@ document.addEventListener("keydown", (ev) => {
     const idx = parseInt(k, 10) - 1;
     if (idx < PLAYERS.length) assign(PLAYERS[idx].tag);
   } else if (k === "s") skip();
-  else if (k === "e" && ITEMS.length && ITEMS[cur].prefill_tag) assign(ITEMS[cur].prefill_tag);
+  else if (k === "e") {
+    const vis = visible();
+    if (vis.length && cur < vis.length && vis[cur].prefill_tag) assign(vis[cur].prefill_tag);
+  }
   else if (ev.key === "ArrowLeft") show(cur - 1);
   else if (ev.key === "ArrowRight") show(cur + 1);
 });
@@ -735,10 +846,13 @@ document.addEventListener("click", (ev) => {
   if (ev.target && ev.target.closest && ev.target.closest(".picker")) return;
   closePicker();
 });
-// 启动：优先回到上次位置；无记录则跳到第一个未归属球
-let start = parseInt(localStorage.getItem(POSKEY) || "-1", 10);
-if (isNaN(start) || start < 0 || start >= ITEMS.length) {
-  start = ITEMS.findIndex(it => !marks[it.key]);
+// 启动：恢复核对对象（其集无球时 show 空态分支自动回退全部）→ 读该对象的位置键；
+// 无记录则：全部/未归属=第一个未归属球，按人=第一个球
+const vis0 = visible();
+let start = parseInt(localStorage.getItem(posKey()) || "-1", 10);
+if (isNaN(start) || start < 0 || start >= vis0.length) {
+  start = (review.target !== "" && review.target !== "__none__")
+    ? 0 : vis0.findIndex(it => !marks[it.key]);
 }
 show(start >= 0 ? start : 0);
 </script>

@@ -1251,3 +1251,34 @@ class TestBuildHtmlRename:
         html = self._html()
         # Assert：改名钮只挂队伍区（含兜底行）按钮旁，簇区/弹条不加
         assert "renamePlayer(p.tag)" in html
+
+
+class TestBuildHtmlReviewByPlayer:
+    """按人核对（docs/scorer-three-step/spec.md）：_review 键 + 可见集过滤 + 位置分键。"""
+
+    def _html(self) -> str:
+        return build_html([], [], "s", {}, {}, "车百鼎")
+
+    def test_review_state_present(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert '"_review"' in html
+        assert "function reviewTarget(" in html
+        assert "function visible(" in html
+        assert "function renderReviewBar(" in html
+        assert "function posKey(" in html
+
+    def test_review_bar_and_special_value(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert
+        assert "核对对象" in html
+        assert "__none__" in html
+        assert 'id="reviewbar"' in html
+
+    def test_free_input_rejects_none_sentinel(self) -> None:
+        # Arrange / Act：自由输入拒绝 __none__（防撞未归属特殊值）
+        html = self._html()
+        # Assert
+        assert 'tag === "__none__"' in html
