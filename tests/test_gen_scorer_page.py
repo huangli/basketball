@@ -642,7 +642,9 @@ class TestBuildHtml:
         assert "team-casual" in html
         assert "function teamClass(" in html
         assert "b.className = teamClass(p.team)" in html
-        assert '[OPP, "半截篮", "便服"]' in html
+        assert "const KNOWN_TEAMS = [OPP, " in html
+        # 兜底行：roster team 与当前场次三行不符的队员归"其他"，不静默消失
+        assert "其他（team 口径不符）" in html
 
 
 class TestMain:

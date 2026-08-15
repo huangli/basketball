@@ -255,7 +255,8 @@ function renderPlayers() {
   const box = document.getElementById("players");
   box.innerHTML = "";
   const numbered = PLAYERS.map((p, idx) => [p, idx]);
-  for (const tm of [OPP, "半截篮", "便服"]) {
+  const KNOWN_TEAMS = [OPP, "半截篮", "便服"];
+  for (const tm of KNOWN_TEAMS) {
     const row = numbered.filter(([p]) => p.team === tm);
     if (!row.length) continue;
     const div = document.createElement("div");
@@ -264,6 +265,26 @@ function renderPlayers() {
     lab.className = "teamlabel";
     div.appendChild(lab);
     for (const [p, idx] of row) {
+      const b = document.createElement("button");
+      b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
+        (p.name ? "=" + p.name : "");
+      b.className = teamClass(p.team);
+      if (ITEMS.length && marks[ITEMS[cur].key] === p.tag) b.classList.add("sel");
+      b.onclick = () => assign(p.tag);
+      div.appendChild(b);
+    }
+    box.appendChild(div);
+  }
+  // 兜底行：roster team 与当前三行都不匹配的队员（如场次改名后复用旧 roster，
+  // team 还是旧对手名）——不归行会静默消失，归"其他"行保证可选（2026-08-15 终审）
+  const rest = numbered.filter(([p]) => !KNOWN_TEAMS.includes(p.team));
+  if (rest.length) {
+    const div = document.createElement("div");
+    const lab = document.createElement("span");
+    lab.textContent = "其他（team 口径不符）：";
+    lab.className = "teamlabel";
+    div.appendChild(lab);
+    for (const [p, idx] of rest) {
       const b = document.createElement("button");
       b.textContent = (idx < 9 ? (idx + 1) + " " : "") + p.tag +
         (p.name ? "=" + p.name : "");
