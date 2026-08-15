@@ -128,8 +128,8 @@
 <h3>第 4 步：出片 <span class="tag">机器</span></h3>
 <pre>video build --session 20260805_车百鼎 --all</pre>
 <ul>
-  <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。</li>
-  <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。</li>
+  <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。多批次场次自动合并跨批片段，每球员/队伍只出一个合集；某球员或某队伍在选定批次里没球会 WARNING 跳过，不中断其他人（全都没球才会报错不出片）。</li>
+  <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。只看某一批：加 <code>--batch 2</code>——只出这一批的片段，不合并其他批。</li>
   <li>成品在 <code>output\20260805_车百鼎\</code>：队伍 <code>队伍_XX_进球集锦.mp4</code>，个人 <code>&lt;队伍&gt;_&lt;姓名&gt;_进球合集.mp4</code>，片段按拍摄时间排序。</li>
   <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久；几十球规模估计几分钟到十几分钟（暂无整场实测，跑完一次后补准数）。</li>
 </ul>
