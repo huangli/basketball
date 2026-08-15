@@ -860,7 +860,7 @@ document.addEventListener("keydown", (ev) => {
   const k = ev.key.toLowerCase();
   if (pickerGid !== null) {
     // 弹条期间：Esc 关闭；数字键 1-9/E 屏蔽（防误触逐球归属改错球）
-    if (ev.key === "Escape") closePicker();
+    if (ev.key === "Escape") { closePicker(); return; } // 弹条优先：一次 Esc 只关弹条
     if ((k >= "1" && k <= "9") || k === "e") return;
   }
   if (ev.key === "Escape" && pickerGid === null && mergeSrc !== null) {
