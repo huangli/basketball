@@ -13,6 +13,9 @@ work/
 # 旧工作区归档（workspace-layout 迁入的一次性产物）
 archive/work_legacy/
 
+# 进球热力图成品（可再生成，不入库）
+*热图.png
+
 # 系统垃圾
 Thumbs.db
 Desktop.ini
