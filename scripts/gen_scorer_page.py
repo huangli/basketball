@@ -141,6 +141,7 @@ small { color: #999; }
   <span id="players"></span>
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
   <button id="accept" style="display:none"></button>
+  <button id="acceptall" title="对所有号码预填无歧义且未手改的球批量预填归属（不标已核，第三步可翻检）">接受全部号码预填</button>
   <button id="skip">跳过 (S)</button>
   <button id="nogoal">不算进球 (N)</button>
   <button class="nav" id="prev">← 上一个</button>
@@ -861,7 +862,26 @@ function exportRoster() {
         (nNo ? "，不算进球 " + nNo + " 球（已剔除不参与合成）" : "") +
         (nUn ? "，还有 " + nUn + " 个非 SKIP 球未归属" : "") + "），移到 work 场次目录即可");
 }
+function acceptAllPrefills() {
+  // 一键全收号码预填（read-numbers-batch）：仅 prefill_tag 非空（号码唯一命中）
+  // 且未手改（非 touched）的球写入 marks；不标 touched——预填非终裁，
+  // 簇级选人仍可覆盖、第三步逐球核对可翻检。歧义球（prefill_tag 为空 +
+  // prefill_note="ambiguous"）与 SKIP 球（无预填）天然不满足条件。
+  let n = 0, nAmb = 0, nTouched = 0;
+  for (const it of ITEMS) {
+    if (it.prefill_note === "ambiguous") nAmb++;
+    if (!it.prefill_tag) continue;
+    if (touched[it.key]) { nTouched++; continue; }
+    if (marks[it.key] === it.prefill_tag) continue; // 幂等：已是该预填不重复计数
+    marks[it.key] = it.prefill_tag;
+    n++;
+  }
+  save();
+  show(cur);
+  alert("已接受 " + n + " 个号码预填（歧义 " + nAmb + " / 已手改 " + nTouched + " 跳过）");
+}
 document.getElementById("go").onclick = freeAssign;
+document.getElementById("acceptall").onclick = acceptAllPrefills;
 document.getElementById("skip").onclick = skip;
 document.getElementById("nogoal").onclick = () => assign(NOGOAL);
 document.getElementById("prev").onclick = () => show(cur - 1);

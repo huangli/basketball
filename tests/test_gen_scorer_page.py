@@ -1360,3 +1360,39 @@ class TestBuildHtmlNoGoalTag:
         html = self._html()
         # Assert
         assert '|| k === "n") return;' in html
+
+
+class TestAcceptAllPrefills:
+    """「接受全部号码预填」按钮（docs/read-numbers-batch/ Phase 2）。"""
+
+    def test_button_rendered_with_handler(self) -> None:
+        html = build_html([], [], "s", {}, {}, "地平线")
+        assert 'id="acceptall"' in html
+        assert "接受全部号码预填" in html
+        assert 'getElementById("acceptall").onclick = acceptAllPrefills' in html
+
+    def test_guard_conditions_locked(self) -> None:
+        # 守卫口径锁定：仅 prefill_tag 非空且未 touched 的球；不写 touched；
+        # 歧义球计数跳过；幂等（已是该预填不重复计数）
+        html = build_html([], [], "s", {}, {}, "地平线")
+        start = html.index("function acceptAllPrefills")
+        body = html[start : html.index("document.getElementById", start)]
+        assert "if (!it.prefill_tag) continue;" in body
+        assert "if (touched[it.key])" in body
+        assert 'it.prefill_note === "ambiguous"' in body
+        assert "marks[it.key] = it.prefill_tag;" in body
+        assert "touched[it.key] = true" not in body  # 批量接受不标已核（预填非终裁）
+
+    def test_acceptall_js_syntax_node_check(self, tmp_path: pathlib.Path) -> None:
+        # node 不在 PATH 则跳过（沿用现有同款模式，防模板改动引入 JS 语法错）
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node 不在 PATH")
+        html = build_html([], [], "s", {}, {}, "地平线")
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        js_path = tmp_path / "page.js"
+        js_path.write_text(script, encoding="utf-8")
+        proc = subprocess.run(  # noqa: S603 node 路径来自 shutil.which，可信
+            [node, "--check", str(js_path)], capture_output=True, text=True, check=False
+        )
+        assert proc.returncode == 0, proc.stderr
