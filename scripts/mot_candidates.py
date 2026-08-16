@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 BALL_MODEL_PATH: str = "models/abdullahtarek_ball.pt"
 BALL_CLS: int = 0
+HOOP_CLS: int = 2  # abdullahtarek 模型 Hoop 类 id（与 detect_hoops.HOOP_CLS 同源同值）
 PERSON_MODEL_PATH: str = "models/yolov8n.pt"
 PERSON_CLS: int = 0
 
@@ -176,8 +177,11 @@ def detect_frame(
     person_model: YOLO,
     img_path: str,
     frame_idx: int,
-) -> tuple[list[Detection], list[list[int]]]:
-    """单帧检测所有球和人物。
+) -> tuple[list[Detection], list[list[int]], list[dict[str, Any]]]:
+    """单帧检测所有球、筐和人物。
+
+    球模型一次推理同取 Ball+Hoop 两类（实测仅 +1.7% 成本，docs/detect-hoops-cache/），
+    筐检测顺带落缓存，detect_hoops 阶段据此免重复推理。
 
     Args:
         ball_model: 球检测 YOLO 模型。
@@ -186,7 +190,10 @@ def detect_frame(
         frame_idx: 帧在列表中的 0-based 索引。
 
     Returns:
-        (球检测列表, 人物框列表)。
+        (球检测列表, 人物框列表, 筐检测列表)。
+        筐条目 {"conf","cx","cy"}：量化口径复刻 detect_hoops.detect_hoop_frame——
+        cx/cy 用 int() 截断取整（不用 round），conf 存原始 float 不截断，
+        保证缓存路径与逐帧直检路径产物逐点一致（docs/detect-hoops-cache/spec.md B1）。
     """
     sec: float = parse_sec(img_path)
 
@@ -194,7 +201,7 @@ def detect_frame(
         img_path,
         conf=CONF_BALL,
         imgsz=IMGSZ_BALL,
-        classes=[BALL_CLS],
+        classes=[BALL_CLS, HOOP_CLS],
         verbose=False,
     )
     rp = person_model(
@@ -206,7 +213,12 @@ def detect_frame(
     )
 
     balls: list[Detection] = []
+    hoops: list[dict[str, Any]] = []
     for b in rb[0].boxes:
+        if int(b.cls[0]) == HOOP_CLS:
+            x1, y1, x2, y2 = (int(v) for v in b.xyxy[0])
+            hoops.append({"conf": float(b.conf[0]), "cx": (x1 + x2) // 2, "cy": (y1 + y2) // 2})
+            continue
         box: list[int] = [round(v) for v in b.xyxy[0].tolist()]
         balls.append(
             Detection(
@@ -221,13 +233,14 @@ def detect_frame(
 
     persons: list[list[int]] = [[round(v) for v in b.xyxy[0].tolist()] for b in rp[0].boxes]
 
-    return balls, persons
+    return balls, persons, hoops
 
 
 def save_detection_cache(
     fid: str,
     all_balls: list[list[Detection]],
     all_persons: list[list[list[int]]],
+    all_hoops: list[list[dict[str, Any]]],
 ) -> None:
     """把检测结果落盘为 JSON 缓存。
 
@@ -235,6 +248,8 @@ def save_detection_cache(
         fid: 文件 ID。
         all_balls: 每帧的球检测列表。
         all_persons: 每帧的人物框列表。
+        all_hoops: 每帧的筐检测列表（{"conf","cx","cy"}；detect_hoops 消费，
+            mot 自身不消费）。
     """
     path: str = CACHE_PATTERN.format(fid)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -255,6 +270,7 @@ def save_detection_cache(
             for frame_dets in all_balls
         ],
         "persons": all_persons,
+        "hoops": all_hoops,
     }
     try:
         atomic_write_json(path, payload, what="检测缓存")
@@ -266,6 +282,10 @@ def load_detection_cache(
     fid: str, expected_frames: int
 ) -> tuple[list[list[Detection]], list[list[list[int]]]] | None:
     """读取检测缓存；帧数不符或结构损坏均视为失效，重检兜底。
+
+    hoops 键（筐检测，docs/detect-hoops-cache/）为增量可选键：本函数不校验
+    （无 hoops 键的旧缓存仍算命中，mot 自身不消费，不为加键触发全量重跑）；
+    由 detect_hoops 读取时自行判读与校验。
 
     Args:
         fid: 文件 ID。
@@ -655,10 +675,12 @@ def run_pipeline(
         t0: float = time.time()
         all_balls = []
         all_persons = []
+        all_hoops: list[list[dict[str, Any]]] = []
         for i, fp in enumerate(frames):
-            balls, persons = detect_frame(ball_model, person_model, fp, i)
+            balls, persons, hoops = detect_frame(ball_model, person_model, fp, i)
             all_balls.append(balls)
             all_persons.append(persons)
+            all_hoops.append(hoops)
             if (i + 1) % PROGRESS_LOG_EVERY == 0:
                 logger.info("  检测进度: %s 第%d/%d帧", fid, i + 1, len(frames))
         elapsed: float = time.time() - t0
@@ -670,7 +692,7 @@ def run_pipeline(
             avg_balls,
             total_dets,
         )
-        save_detection_cache(fid, all_balls, all_persons)
+        save_detection_cache(fid, all_balls, all_persons, all_hoops)
 
     tracks: list[Track] = run_mot(all_balls)
     long_tracks: list[Track] = [t for t in tracks if t.length >= STATIC_WINDOW]

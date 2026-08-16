@@ -49,7 +49,8 @@ tests/test_goal_heatmap.py（并行 session 施工中）。
 
 - 缓存命中路径：构造含 hoops 键的假缓存（tmp_path + monkeypatch
   CACHE_PATTERN/帧目录），断言不走 detect_hoop_frame（monkeypatch 计数 0 次），
-  且 ≥0.25 过滤正确（0.24 被滤、0.25 保留、0.15 存而不入）。
+  且 conf 过滤正确——**严格大于 0.25**（与 ultralytics NMS `> conf_thres` 一致，
+  utils/nms.py:81）：0.25 恰等被滤、0.24 被滤、0.26 保留、0.15 存而不入。
 - 旧缓存回退：无 hoops 键缓存 → 断言走逐帧分支（detect_hoop_frame 被调），
   产物与无缓存全新跑一致。
 - 损坏回退：hoops 键类型错（str/dict）→ 回退不崩，WARNING 有记录；

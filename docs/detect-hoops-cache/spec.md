@@ -39,15 +39,16 @@
      不为加键触发 2.4h 全量重跑）；帧数/结构校验语义不变。
 2. **detect_hoops 缓存优先、逐帧补检回退**：
    - 逐 fid 先读 `work/detect/<fid>_mot_cache.json`：存在、可读、帧数匹配且
-     含 hoops 键 → 取筐检测，按 `CONF=0.25` 过滤后走现有
+     含 hoops 键 → 取筐检测，按 `CONF=0.25` 过滤（严格大于，同 ultralytics NMS）后走现有
      `track_hoop`/`interpolate_gaps`（一律不改）；
    - 旧缓存（无 hoops 键）/ 缓存缺失 / 结构损坏 → 回退现行逐帧 YOLO 补检，
      记 INFO/WARNING 一行说明走了哪条路；
    - YOLO 模型改为**懒加载**：全批缓存命中时 detect_hoops 不加载模型。
 3. **等价性论证（写进实施注释）**：ultralytics 的 conf 过滤发生在 NMS **之前**
    （`non_max_suppression` 先按 conf_thres 筛框，再做按类分组的 batched NMS）。
-   conf 过滤逐框独立，故同模型、同帧、同 imgsz 下"存 ≥0.15 再滤 ≥0.25"与
-   "直接 conf=0.25"产出集合一致；NMS 按分数降序处理、低分框不可能抑制高分框，
+   conf 过滤逐框独立，故同模型、同帧、同 imgsz 下"存 ≥0.15 再滤 >0.25"与
+   "直接 conf=0.25"产出集合一致（过滤为严格大于，与 ultralytics NMS
+   `> conf_thres` 一致，utils/nms.py:81）；NMS 按分数降序处理、低分框不可能抑制高分框，
    且按类独立，多取 Hoop 类不影响 Ball 类输出——该论断由
    成功标准 2 的候选 diff 实测兜底，不靠推理担保。
 

@@ -2,7 +2,7 @@
 
 依据 `docs/detect-hoops-cache/spec.md` / `plan.md`。
 
-## Task 1：mot_candidates 顺带存筐（plan Step 1）
+## Task 1：mot_candidates 顺带存筐（plan Step 1）✅ 2026-08-16
 
 **Description：** `detect_frame` 球模型 `classes=[BALL_CLS, HOOP_CLS]`（新增
 HOOP_CLS=2 常量，注释与 detect_hoops 同源对齐），返回值加 hoops 列表；
@@ -10,28 +10,29 @@ HOOP_CLS=2 常量，注释与 detect_hoops 同源对齐），返回值加 hoops 
 `load_detection_cache` 不校验该键（旧缓存仍命中，不触发全量重跑）。
 
 **Acceptance criteria：**
-- [ ] 新缓存含 hoops 键，条目为 {"conf","cx","cy"}，阈值口径 CONF_BALL=0.15；
+- [x] 新缓存含 hoops 键，条目为 {"conf","cx","cy"}，阈值口径 CONF_BALL=0.15；
       cx/cy 用 int() 截断、conf 存原始 float（复刻 detect_hoop_frame，review01 B1）
-- [ ] Ball/Person 检测逻辑与缓存既有三键（frames/balls/persons）零改动
-- [ ] 旧缓存（无 hoops 键）跑 mot_candidates 仍命中不重演（日志为证）
+- [x] Ball/Person 检测逻辑与缓存既有三键（frames/balls/persons）零改动
+- [x] 旧缓存（无 hoops 键）跑 mot_candidates 仍命中不重演（日志为证）
 
 **Verification：** `ruff check scripts/mot_candidates.py` + `pytest -q` 全绿
 **Dependencies：** None
 **Files：** `scripts/mot_candidates.py`
 **Scope：** S
 
-## Task 2：detect_hoops 缓存优先 + 回退 + 懒加载（plan Step 2）
+## Task 2：detect_hoops 缓存优先 + 回退 + 懒加载（plan Step 2）✅ 2026-08-16
 
 **Description：** 新增 `load_hoop_frames(fid)`（复用 mot.CACHE_PATTERN 与
-mot.parse_sec，CONF=0.25 过滤）；事件循环逐 fid 选路：缓存命中走查表，
-缺失/损坏/无 hoops 键回退逐帧 YOLO（detect_hoop_frame 原样保留）；
-YOLO 模型改懒加载。track_hoop/interpolate_gaps/输出 schema 不动。
+mot.parse_sec，CONF 严格大于过滤——与 ultralytics NMS `> conf_thres` 一致）；
+事件循环逐 fid 选路：缓存命中走查表，缺失/损坏/无 hoops 键回退逐帧 YOLO
+（detect_hoop_frame 原样保留）；YOLO 模型改懒加载。
+track_hoop/interpolate_gaps/输出 schema 不动。
 
 **Acceptance criteria：**
-- [ ] 三分支选路各有一行日志（命中/回退原因）
-- [ ] 全批缓存命中时不加载 YOLO 模型
-- [ ] hoops.json 与现行 schema 同构（key/detected/track/window/anchor 字段不变）
-- [ ] load_hoop_frames 元素级校验：元素损坏（缺 cx/cy、类型错）回退 None
+- [x] 三分支选路各有一行日志（命中/回退原因）
+- [x] 全批缓存命中时不加载 YOLO 模型
+- [x] hoops.json 与现行 schema 同构（key/detected/track/window/anchor 字段不变）
+- [x] load_hoop_frames 元素级校验：元素损坏（缺 cx/cy、类型错）回退 None
       不半路崩
 
 **Verification：** `ruff check scripts/detect_hoops.py` + `pytest -q` 全绿
@@ -39,47 +40,51 @@ YOLO 模型改懒加载。track_hoop/interpolate_gaps/输出 schema 不动。
 **Files：** `scripts/detect_hoops.py`
 **Scope：** M
 
-## Task 3：单测四用例（plan Step 3）
+## Task 3：单测四用例（plan Step 3）✅ 2026-08-16
 
 **Description：** tests/test_detect_hoops.py 追加：缓存命中（检测函数 0 调用 +
-0.25 过滤边界 0.24/0.25/0.15）、旧缓存回退（走逐帧且产物一致）、
-hoops 键损坏回退（不崩 + WARNING）、hoops 为 list 但元素损坏回退。
+conf 严格大于过滤边界 0.25 恰等被滤/0.24 被滤/0.26 保留/0.15 存而不入）、
+旧缓存回退（走逐帧且产物一致）、hoops 键损坏回退（不崩 + WARNING）、
+hoops 为 list 但元素损坏回退。
 
 **Acceptance criteria：**
-- [ ] 四个用例全过；现有 test_detect_hoops 用例不回归
-- [ ] mot_cache 消费方测试不回归：test_crop_scorers / test_scorer_landings /
+- [x] 四个用例全过；现有 test_detect_hoops 用例不回归
+- [x] mot_cache 消费方测试不回归：test_crop_scorers / test_scorer_landings /
   test_release_probe / test_run_session（不改其代码，只验证）
 
-**Verification：** `pytest tests/test_detect_hoops.py -q` 与 `pytest -q` 全绿
+**Verification：** `pytest tests/test_detect_hoops.py -q` 与 `pytest -q` 全绿（11 用例）
 **Dependencies：** Task 2
 **Files：** `tests/test_detect_hoops.py`
 **Scope：** S
 
-## Task 4：子集重放验证（plan Step 4，spec 成功标准 1/2/5）
+## Task 4：子集重放验证（plan Step 4，spec 成功标准 1/2/5）✅ 2026-08-16
 
-**Description：** 选 ≥3 fid（detected true/false 均覆盖），备份→重建缓存→
-逐 fid detect_hoops + pilot_candidates 至 work/diag/，diff 封存产物。
+**Description：** 选 3 fid（0001/0002 纯 detected=true，0035 各一 true/false），
+备份→重建缓存→逐 fid detect_hoops + pilot_candidates 至 work/diag/，diff 封存产物。
 
 **Acceptance criteria：**
-- [ ] hoops 轨迹 diff：key 集合、detected、track 逐点与 hoops_batch1.json 完全相等
-- [ ] candidates diff：对应 fid 记录与 candidates_batch1.json 一致
-- [ ] detect_hoops 缓存命中单 fid 墙钟记录（秒级），写入 review
-- [ ] 验证后备份缓存恢复原位，work/diag 产物不入库
+- [x] hoops 轨迹 diff：key 集合、detected、track 逐点与 hoops_batch1.json 完全相等
+      （8 事件零差异，含 detected=false 事件）
+- [x] candidates diff：对应 fid 记录与 candidates_batch1.json 一致（15 条零差异）
+- [x] detect_hoops 缓存命中单 fid 墙钟记录：~2 秒/fid（原逐帧补检 1~2 分钟/fid，
+      批级 38~49 分钟 → 秒级），写入 review
+- [x] 验证后备份缓存恢复原位并删除 bak_2026-08-16，work/diag 产物已清理不入库
 
 **Verification：** diff 结果为零差异 + 日志存档
 **Dependencies：** Task 3
 **Files：** 无新增（work/ 下验证产物）
 **Scope：** S
 
-## Checkpoint：功能完成 = diff 全零 + 关口全绿，提请审查
+## Checkpoint：功能完成 = diff 全零 + 关口全绿 ✅，提请审查
 
 ## Task 5：文档与收尾（plan Step 5）
 
 **Description：** 主文档 §2 与 AGENTS.md 检测流水线各一句同步；todo 回填；
-spec-reviewer 审查产出 review01.md；按逻辑单元 commit（只 add 本功能文件）。
+spec-reviewer 审查产出 reviewNN.md；按逻辑单元 commit（只 add 本功能文件）。
 
 **Acceptance criteria：**
-- [ ] 文档同步两句落盘（不碰 docs/heatmap/）
+- [x] 文档同步两句落盘（不碰 docs/heatmap/；执行前 git status 确认热图 session
+      已提交 2d1211c，无在途冲突）
 - [ ] spec-reviewer 审查通过，reviewNN.md 落 docs/detect-hoops-cache/（编号递增）
 - [ ] commit 完成，不 push；立哥知悉性能观察值
 

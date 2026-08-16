@@ -39,8 +39,8 @@
  ⑥ goals.json → 合成  build_highlight.py 按规格切片、concat（--out 按场次注入尺寸）
 ```
 
-脚本与产物对应：`extract_frames.py`(①) → `mot_candidates.py`(②③) → `pilot_candidates.py`(候选清单) →
-`detect_hoops.py`(筐轨迹) → `vlm_judge_events.py`(④ 事件级，**2026-08-01 起停用留档**；`vlm_filter.py` 为候选级旧协议) →
+脚本与产物对应：`extract_frames.py`(①) → `mot_candidates.py`(②③，顺带存筐检测入缓存) → `pilot_candidates.py`(候选清单) →
+`detect_hoops.py`(筐轨迹，**2026-08-16 起缓存优先**：mot 缓存含 hoops 键时免重复推理、秒级完成，旧缓存回退逐帧补检，见 `docs/detect-hoops-cache/`) → `vlm_judge_events.py`(④ 事件级，**2026-08-01 起停用留档**；`vlm_filter.py` 为候选级旧协议) →
 `gen_review_clips.py`(⑤) → `gen_label_page.py`(标注页) → 人工标注 →
 `build_highlight.py`(⑥)。模型在 `models/`，缓存在 `work/detect/`。
 

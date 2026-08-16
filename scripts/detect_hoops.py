@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""筐补检：对候选事件帧区间运行 abdullahtarek 的 Hoop 类检测，产出筐轨迹。
+"""筐补检：对候选事件帧区间取 Hoop 类检测，产出筐轨迹。
 
-背景：主检测缓存（work/detect/<fid>_mot_cache.json）只存了 Ball 类结果，
-没有筐位置。本脚本按候选聚类出事件，对事件窗口内每帧补检 Hoop，
-为 VLM 输入裁剪与审核视频裁剪提供"筐在哪"（hoops.json）。
+背景：主检测缓存（work/detect/<fid>_mot_cache.json）自 2026-08-16 起由
+mot_candidates 顺带存 Hoop 类结果（"hoops" 键，docs/detect-hoops-cache/）。
+本脚本按候选聚类出事件，事件窗口内每帧**优先读缓存**；旧缓存（无 hoops 键）/
+缓存缺失/损坏则回退逐帧 YOLO 补检（模型懒加载，全批缓存命中时不加载）。
+两条路径产物逐点一致（缓存量化口径复刻 detect_hoop_frame）。
+用途：为 VLM 输入裁剪与审核视频裁剪提供"筐在哪"（hoops.json）。
 
 输入：candidates.json（fid/label/t0/dur/ac/cx/cy）
 输出：hoops.json（schema 见下，下游 vlm_filter / gen_review_clips 共用此契约）
@@ -28,6 +31,7 @@ detected=false 时 track 为 []。
 """
 
 import itertools
+import json
 import logging
 import os
 import sys
@@ -171,6 +175,67 @@ def detect_hoop_frame(model: Any, img_path: str) -> list[tuple[int, int]]:  # no
     return centers
 
 
+def load_hoop_frames(fid: str, expected_frames: int) -> list[list[tuple[int, int]]] | None:
+    """从 mot 检测缓存读事件无关的全帧筐检测（docs/detect-hoops-cache/）。
+
+    缓存量化口径与 detect_hoop_frame 一致（int 截断 cx/cy + 原始 conf），
+    此处按 CONF 过滤（严格大于，与 ultralytics NMS 的 `> conf_thres` 一致，
+    utils/nms.py:81）后与逐帧直检产物逐点等价。任何一环不符即回退 None
+    （调用方走逐帧 YOLO 补检），不半路崩（rules.md §0.2）。
+
+    Args:
+        fid: 文件 ID。
+        expected_frames: 当前帧目录下的帧数（与缓存 frames 字段比对）。
+
+    Returns:
+        每帧筐中心列表（与排序后帧 glob 索引对齐）；缓存缺失/旧版/损坏返回 None。
+    """
+    path: str = mot.CACHE_PATTERN.format(fid)
+    if not os.path.exists(path):
+        logger.info("  %s: 筐检测无缓存，逐帧补检", fid)
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload: Any = json.load(f)
+        if not isinstance(payload, dict):
+            logger.warning("  %s: 缓存结构损坏（顶层非 dict），逐帧补检", fid)
+            return None
+        if payload.get("frames") != expected_frames:
+            logger.info("  %s: 缓存帧数不符，逐帧补检", fid)
+            return None
+        hoops_raw: Any = payload.get("hoops")
+        if hoops_raw is None:
+            logger.info("  %s: 旧缓存无 hoops 键，逐帧补检", fid)
+            return None
+        if not isinstance(hoops_raw, list) or len(hoops_raw) != expected_frames:
+            logger.warning("  %s: 缓存 hoops 结构损坏，逐帧补检", fid)
+            return None
+        out: list[list[tuple[int, int]]] = []
+        for frame_hoops in hoops_raw:
+            if not isinstance(frame_hoops, list):
+                raise TypeError(f"hoops 帧条目非 list: {type(frame_hoops)}")
+            centers = []
+            for h in frame_hoops:
+                conf, cx, cy = h["conf"], h["cx"], h["cy"]
+                if not all(
+                    isinstance(v, (int, float)) and not isinstance(v, bool) for v in (conf, cx, cy)
+                ):
+                    raise TypeError(f"hoops 条目字段类型错: {h}")
+                if conf > CONF:
+                    centers.append((int(cx), int(cy)))
+            out.append(centers)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("  %s: 缓存 hoops 读取失败(%s)，逐帧补检", fid, exc)
+        return None
+    logger.info(
+        "  %s: 筐检测命中 mot 缓存（%d 帧，含筐 %d 帧）",
+        fid,
+        expected_frames,
+        sum(1 for c in out if c),
+    )
+    return out
+
+
 def _event_window(members: list[dict[str, Any]], max_sec: float) -> list[float]:
     """事件窗口：[首候选-2s, 末候选+dur+2s]，clamp 到 [0, max_sec]。"""
     w0: float = max(0.0, members[0]["t0"] - EVENT_BEFORE_SEC)
@@ -238,7 +303,8 @@ def main() -> int:
         logger.error("数据损坏 run_id=%s: %s", run_id, exc, exc_info=True)
         return 1
 
-    model: Any = YOLO(mot.BALL_MODEL_PATH)
+    model: Any = None  # 懒加载：全批缓存命中时不加载 YOLO（docs/detect-hoops-cache/）
+    hoop_cache: dict[str, list[list[tuple[int, int]]] | None] = {}  # 逐 fid 选路结果
     events: list[dict[str, Any]] = []
     fids: list[str] = sorted({r["fid"] for r in records})
     for fid in fids:
@@ -272,10 +338,19 @@ def main() -> int:
                     raise BasketballPipelineError(f"{ev['fid']}: 无帧目录")
                 secs: list[float] = [mot.parse_sec(p) for p in frames]
                 window: list[float] = _event_window(ev["members"], secs[-1])
+                if ev["fid"] not in hoop_cache:
+                    hoop_cache[ev["fid"]] = load_hoop_frames(ev["fid"], len(frames))
+                hoop_frames = hoop_cache[ev["fid"]]
                 per_frame: list[tuple[float, list[tuple[int, int]]]] = []
-                for p, s in zip(frames, secs, strict=True):
+                for i, (p, s) in enumerate(zip(frames, secs, strict=True)):
                     if window[0] <= s <= window[1]:
-                        per_frame.append((s, detect_hoop_frame(model, p)))
+                        if hoop_frames is not None:
+                            centers = hoop_frames[i]
+                        else:
+                            if model is None:
+                                model = YOLO(mot.BALL_MODEL_PATH)
+                            centers = detect_hoop_frame(model, p)
+                        per_frame.append((s, centers))
                 track: list[tuple[float, int, int, str]] = track_hoop(
                     per_frame, ev["anchor"], ev["anchor_sec"]
                 )
