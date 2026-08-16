@@ -1060,3 +1060,122 @@ class TestRelocate:
         assert rc == 0
         assert run_recorder[0][0][2] == "素材目录"
         assert pathlib.Path.cwd() == launch
+
+
+class TestClean:
+    """clean：清单 + yes 确认 + 守卫（docs/video-clean/spec.md）。"""
+
+    def _tree(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        with_state: bool = True,
+        srcdir: str = "",
+    ) -> pathlib.Path:
+        """造工作区树：output/s1/x.mp4 + work/s1/goals_batch1.json(+state) + 素材目录。
+
+        返回素材目录。
+        """
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "output" / "s1").mkdir(parents=True)
+        (tmp_path / "output" / "s1" / "x.mp4").write_bytes(b"0")
+        sess = tmp_path / "work" / "s1"
+        sess.mkdir(parents=True)
+        (sess / "goals_batch1.json").write_text("{}", encoding="utf-8")
+        src = tmp_path / "素材"
+        src.mkdir()
+        (src / "a.mp4").write_bytes(b"0")
+        if with_state:
+            _write_json(sess / "video_cli.json", {"srcdir": srcdir or str(src)})
+        return src
+
+    def _yes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("builtins.input", lambda prompt="": "yes")
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    def test_dry_run_deletes_nothing(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange
+        src = self._tree(tmp_path, monkeypatch)
+        # Act
+        rc = video.main(["clean", "--dry-run"])
+        # Assert：零删除
+        assert rc == 0
+        assert (tmp_path / "output" / "s1" / "x.mp4").is_file()
+        assert (tmp_path / "work" / "s1" / "goals_batch1.json").is_file()
+        assert (src / "a.mp4").is_file()
+
+    def test_confirm_yes_clears_all(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange
+        src = self._tree(tmp_path, monkeypatch)
+        self._yes(monkeypatch)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：output/work 内容清空但目录保留；源视频目录整目录消失
+        assert rc == 0
+        assert (tmp_path / "output").is_dir() and not list((tmp_path / "output").iterdir())
+        assert (tmp_path / "work").is_dir() and not list((tmp_path / "work").iterdir())
+        assert not src.exists()
+
+    def test_non_yes_aborts(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Arrange：只输 "y"（非精确 yes）
+        src = self._tree(tmp_path, monkeypatch)
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：零删除
+        assert rc == 0
+        assert (src / "a.mp4").is_file()
+        assert (tmp_path / "output" / "s1" / "x.mp4").is_file()
+
+    def test_no_state_skips_srcdir(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：无 video_cli.json（无 srcdir 来源）
+        src = self._tree(tmp_path, monkeypatch, with_state=False)
+        self._yes(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：output/work 照常清；源视频不动；有 WARNING
+        assert rc == 0
+        assert not list((tmp_path / "work").iterdir())
+        assert (src / "a.mp4").is_file()
+        assert "不猜路径" in caplog.text or "srcdir" in caplog.text
+
+    def test_guard_refuses_repo_root(
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：srcdir 指向仓库根（恶意/配错）
+        self._tree(tmp_path, monkeypatch, srcdir=str(video.REPO_ROOT))
+        self._yes(monkeypatch)
+        caplog.set_level(logging.WARNING)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：拒删仓库根（它还在），output/work 照常清
+        assert rc == 0
+        assert video.REPO_ROOT.is_dir()
+        assert not list((tmp_path / "output").iterdir())
+        assert "守卫拒删" in caplog.text
+
+    def test_non_tty_refuses(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Arrange：非交互 stdin 且非 dry-run
+        src = self._tree(tmp_path, monkeypatch)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：退出 1，零删除
+        assert rc == 1
+        assert (src / "a.mp4").is_file()
+        assert (tmp_path / "output" / "s1" / "x.mp4").is_file()

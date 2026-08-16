@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -59,6 +60,8 @@ CASUAL_TEAM: str = "便服"
 # 多批次 build 的合并 goals 中间产物（work/<场次>/ 下，每次 build 重写——素材流动）
 # 命名不以 goals 开头——避开 discover_batches 的 goals*.json 扫描，防 WARNING 噪音
 MERGED_GOALS_NAME: str = "merged_goals_cli.json"
+# clean 清空的输出根（work/ 用既有 WORK_ROOT；两根本身保留只清内容）
+OUTPUT_ROOT: Path = Path("output")
 # 批次 goals 文件名双轨：goals.json（旧布局批次 1）/ goals_batchK.json（现行布局）
 GOALS_BATCH_RE: re.Pattern[str] = re.compile(r"^goals_batch(\d+)\.json$")
 
@@ -764,6 +767,138 @@ def _cmd_photo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dir_stats(path: Path) -> tuple[int, int]:
+    """递归统计目录总字节数与文件数（os.scandir；单点失败 WARNING 按 0 计不中断）。
+
+    Args:
+        path: 目标目录。
+
+    Returns:
+        (总字节数, 文件数)。
+    """
+    total: int = 0
+    nfiles: int = 0
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        sub_size, sub_n = _dir_stats(Path(entry.path))
+                        total += sub_size
+                        nfiles += sub_n
+                    elif entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                        nfiles += 1
+                except OSError as exc:
+                    logger.warning("统计跳过 %s: %s", entry.path, exc)
+    except OSError as exc:
+        logger.warning("统计跳过 %s: %s", path, exc)
+    return total, nfiles
+
+
+def _fmt_gb(n: int) -> str:
+    """字节数 → GB 两位小数字符串（清单展示用）。"""
+    return f"{n / (1024**3):.2f}GB"
+
+
+def _collect_srcdir_targets() -> list[Path]:
+    """从各场次 state 收集源视频目录（清 work 之前先读）；逐个过守卫，不合格剔除。
+
+    守卫（拒删并 ERROR/WARNING）：srcdir = 仓库根**或是仓库根的祖先**
+    （`p == REPO_ROOT or p in REPO_ROOT.parents`，防 rmtree 连仓库一起删；
+    srcdir 是仓库根的子目录属合法，如素材目录就挂在仓库根下）/ 盘符根 /
+    不存在或不是目录。无 state 或无 srcdir → WARNING 不猜路径。
+
+    Returns:
+        过守卫的源视频目录列表（去重，按 state 文件名序）。
+    """
+    targets: list[Path] = []
+    for state_path in sorted(WORK_ROOT.glob(f"*/{STATE_NAME}")):
+        try:
+            data: Any = read_json(state_path, what=f"state {state_path.name}")
+        except (BasketballPipelineError, OSError) as exc:
+            logger.warning("state 读取失败，跳过其 srcdir: %s (%s)", state_path, exc)
+            continue
+        src: Any = data.get("srcdir") if isinstance(data, dict) else None
+        if not src or not isinstance(src, str):
+            continue
+        p: Path = Path(src).resolve()
+        if p == REPO_ROOT or p in REPO_ROOT.parents:
+            logger.error("srcdir 守卫拒删（指向仓库根或其祖先）: %s", p)
+            continue
+        if p.parent == p:
+            logger.error("srcdir 守卫拒删（盘符根）: %s", p)
+            continue
+        if not p.is_dir():
+            logger.warning("srcdir 不存在或不是目录，跳过: %s", p)
+            continue
+        if p not in targets:
+            targets.append(p)
+    if not targets:
+        logger.warning("未从任何 state 读到 srcdir——源视频目录不删（不猜路径）")
+    return targets
+
+
+def _cmd_clean(args: argparse.Namespace) -> int:
+    """clean：清空 output/ 内容 + work/ 内容 + 源视频目录（列清单 + yes 精确确认）。
+
+    顺序：先收集源视频目录（读 state.srcdir，在清 work 前）→ 列三分组清单
+    （路径/大小/文件数）→ --dry-run 或确认词非精确 yes 则零删除。单目标删除
+    失败记 ERROR 继续其余，结尾汇总，有失败退出 1。非 tty 拒绝执行（防挂起
+    在确认输入）。
+    """
+    srcdirs: list[Path] = _collect_srcdir_targets()
+    groups: list[tuple[str, list[Path]]] = [
+        ("output/", sorted(OUTPUT_ROOT.iterdir()) if OUTPUT_ROOT.is_dir() else []),
+        ("work/", sorted(WORK_ROOT.iterdir()) if WORK_ROOT.is_dir() else []),
+        ("源视频", srcdirs),
+    ]
+    plan: list[Path] = []
+    total_bytes: int = 0
+    logger.info("=== clean 清单 ===")
+    for label, paths in groups:
+        logger.info("[%s] %d 项", label, len(paths))
+        for p in paths:
+            try:
+                size, nfiles = _dir_stats(p) if p.is_dir() else (p.stat().st_size, 1)
+            except OSError as exc:
+                # 统计失败按 0 展示不中断（spec 口径）；目标仍进 plan 照常尝试删除
+                logger.warning("统计跳过 %s: %s", p, exc)
+                size, nfiles = 0, 0
+            total_bytes += size
+            plan.append(p)
+            logger.info("  %s  %s  %d 文件", p, _fmt_gb(size), nfiles)
+    logger.info("合计释放: %s", _fmt_gb(total_bytes))
+    if not plan:
+        logger.info("无可清理内容")
+        return 0
+    if args.dry_run:
+        logger.info("DRY-RUN：未删除任何内容")
+        return 0
+    if not sys.stdin.isatty():
+        logger.error("非交互环境拒绝执行 clean（防挂起在确认输入）；先看 --dry-run")
+        return 1
+    ans: str = input("以上全部删除（含源视频，不可恢复）。输入 yes 确认: ")
+    if ans != "yes":
+        logger.info("未确认（需精确输入 yes），未动任何文件")
+        return 0
+    failed: list[str] = []
+    for p in plan:
+        try:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+        except OSError as exc:
+            logger.error("删除失败: %s (%s)", p, exc)
+            failed.append(str(p))
+    if failed:
+        logger.error("clean 完成但有 %d 项删除失败: %s", len(failed), failed)
+        return 1
+    logger.info("clean 完成：释放 %s，工作区已恢复全新", _fmt_gb(total_bytes))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """构建三级 argparse：prog → 子命令 → 各自参数。"""
     ap = argparse.ArgumentParser(
@@ -834,6 +969,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ph.add_argument("--dry-run", action="store_true", help="只打印不执行")
     ph.set_defaults(func=_cmd_photo)
+
+    cl = sub.add_parser(
+        "clean", help="清空 output/work/源视频，恢复全新工作区（列清单 + yes 确认）"
+    )
+    cl.add_argument("--dry-run", action="store_true", help="只列清单不删除")
+    cl.set_defaults(func=_cmd_clean)
     return ap
 
 
