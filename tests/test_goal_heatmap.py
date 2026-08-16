@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -23,14 +24,18 @@ from geom import Box
 from goal_heatmap import (
     HeatLanding,
     HoopEvent,
+    bin_points,
     build_audit_grid,
     court_template_lines,
+    filter_in_court,
     find_landing,
     flip_threshold,
     heat_session,
+    hex_centers,
     hoop_xy_at,
     load_hoops,
     render_team_heatmap,
+    render_team_heatmap_hex,
     to_rel_m,
 )
 from mot_candidates import Detection
@@ -469,13 +474,16 @@ def test_heat_session_end_to_end(tmp_path: Path) -> None:
     assert rec["rel_xy_m"][0] == pytest.approx((50 - 1000) / 100 * 1.75)
     assert rec["rel_xy_m"][1] == pytest.approx((100 - 402) / 100 * 1.75)
     assert rec["flipped"] is False  # 单球 cx=1000，中位阈值=1000，不大于不翻
-    # 产物：JSON + 热图 PNG + 目击拼图
+    # 产物：JSON + 暗场/蜂巢热图 PNG + 目击拼图
     assert (session / "goal_landings.json").exists()
     assert (out / "队伍_半截篮_进球热图.png").exists()
+    assert (out / "队伍_半截篮_进球热图_蜂巢.png").exists()
     assert (session / "heatmap_audit.png").exists()
     # v4：无 session_facts.json → 队色硬守卫禁用（WARNING 退化 v3 行为）
     assert report["params"]["team_color_guard"] is False
     assert report["params"]["held_search_before_sec"] == 0.5
+    # v4.1：合成落点 rel≈(-16.6, -5.3) 界外 → 渲染层过滤，JSON 原始数据不动
+    assert report["summary"]["out_of_bounds"] == 1
 
 
 def test_heat_session_no_roster_raises(tmp_path: Path) -> None:
@@ -503,6 +511,52 @@ def test_render_team_heatmap_empty(tmp_path: Path) -> None:
     out = tmp_path / "h.png"
     render_team_heatmap([], "车百鼎", "s1", out)
     assert out.exists()
+
+
+# ---------- v4.1：双风格渲染 + 界外过滤 ----------
+
+
+def test_filter_in_court_known() -> None:
+    # Arrange：界内 1 点；越界 4 点（横向 ±、纵向上下各一）
+    pts = [(0.0, 2.0), (8.2, 3.0), (-9.0, 1.0), (0.0, 13.5), (0.0, -2.5)]
+    # Act
+    kept, dropped = filter_in_court(pts)
+    # Assert：余量 0.5m——|dx|>8.0、dy∉[−2.075,12.925] 剔除
+    assert kept == [(0.0, 2.0)]
+    assert len(dropped) == 4
+    # 边界值恰好在线上不过滤
+    kept2, dropped2 = filter_in_court([(8.0, 12.925), (-8.0, -2.075)])
+    assert len(kept2) == 2 and not dropped2
+
+
+def test_hex_binning_deterministic() -> None:
+    # Arrange：固定视野生成网格；两个近点同格、远点异格
+    centers = hex_centers(-8.0, 8.0, -2.5, 7.9)
+    assert centers.shape[1] == 2 and len(centers) > 100
+    pts = np.array([[0.10, 2.0], [0.05, 2.1], [5.0, 6.0]])
+    # Act
+    counts = bin_points(pts, centers)
+    # Assert：近点归同格（计数 2），远点独占；重放结果一致
+    assert sorted(counts.values()) == [1, 2]
+    assert bin_points(pts, centers) == counts
+
+
+def test_render_team_heatmap_hex_smoke(tmp_path: Path) -> None:
+    # Arrange & Act：有点集出图
+    out = tmp_path / "hex.png"
+    render_team_heatmap_hex([(1.0, 3.0), (1.1, 3.1), (-2.0, 5.5)], "半截篮", "s1", out, oob=1)
+    # Assert
+    assert out.exists() and out.stat().st_size > 10000
+
+
+def test_render_team_heatmap_hex_empty_and_out_of_view(tmp_path: Path) -> None:
+    # 空点集 + 视野外（dy>7.9）界内点：出图不炸，视野外点 WARNING 不入图
+    out = tmp_path / "hex_empty.png"
+    render_team_heatmap_hex([], "车百鼎", "s1", out)
+    assert out.exists()
+    out2 = tmp_path / "hex_ov.png"
+    render_team_heatmap_hex([(0.0, 9.0), (1.0, 3.0)], "车百鼎", "s1", out2)
+    assert out2.exists()
 
 
 def test_build_audit_grid_deterministic(tmp_path: Path) -> None:

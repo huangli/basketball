@@ -5,7 +5,8 @@
     work/detect/<fid>_mot_cache.json、work/frames/<fid>/f_*.jpg（串人守卫 + 目击拼图）、
     work/<场次>/session_facts.json 的 team_color 键（队色硬守卫映射，缺失则守卫禁用）
 输出：work/<场次>/goal_landings.json（逐球落点 + 筐锚相对坐标）、
-    output/<场次>/队伍_<team>_进球热图.png（每队一张）、
+    output/<场次>/队伍_<team>_进球热图.png（暗场霓虹主图，每队一张）、
+    output/<场次>/队伍_<team>_进球热图_蜂巢.png（蜂巢副图，每队一张）、
     work/<场次>/heatmap_audit.png（目击拼图，固定种子抽 15 球）
 依赖：crop_scorers / mot_candidates / roster / release_probe / scorer_landings 只读复用；
     matplotlib 渲染（Agg 后端，已装，无新依赖）
@@ -32,10 +33,13 @@ import random
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
 
 from crop_scorers import (
     SAMPLE_FPS,
@@ -72,8 +76,29 @@ COVERAGE_MIN_RATIO: float = 0.55  # 覆盖率过关线（分母 = roster 已归�
 AUDIT_SAMPLE_N: int = 15  # 目击拼图抽样球数
 AUDIT_SEED: int = 20260815  # 目击抽样固定种子（可复现）
 TEAM_CASUAL: str = "便服"  # roster 中便服队不进热图
-HEAT_BIN_M: float = 0.25  # 密度网格边长（米）
-HEAT_SIGMA_M: float = 0.8  # 密度高斯平滑 sigma（米）
+# ---- v4.1 渲染常量（暗场霓虹 + 蜂巢双风格，spec v4.1 写死）----
+INCOURT_MARGIN_M: float = 0.5  # 界外过滤余量（米）：落点超 FIBA 半场 + 此余量判界外（尺度锚噪声）
+DARK_BG: str = "#0b1026"  # 暗场底（近黑深蓝）
+DARK_LINE_GLOW: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.10)  # 场地线发光打底
+DARK_LINE_CORE: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.85)  # 场地线核心
+DARK_RIM: str = "#ff5a3c"  # 筐圈霓虹橙
+DARK_SIGMA_M: float = 0.9  # 连续 KDE 高斯 sigma（米，不分箱）
+DARK_GAMMA: float = 1.2  # 密度归一后 gamma（>1 压暗中低密度，稀疏点防整条雾带）
+DARK_GRID_STEP_M: float = 0.05  # KDE 网格步长（米）
+DARK_VIEW_X: tuple[float, float] = (-8.3, 8.3)  # 暗场视野（画满全场）
+DARK_VIEW_Y: tuple[float, float] = (-2.6, 12.9)
+HEX_R_M: float = 0.6  # 蜂巢六边形外接圆半径（米）
+HEX_VIEW_X: tuple[float, float] = (-8.0, 8.0)  # 蜂巢视野（固定，不做动态外扩——S1）
+HEX_VIEW_Y: tuple[float, float] = (
+    -2.5,
+    7.9,
+)  # 纵向收窄（稀疏数据防上半空白）；越界点 WARNING 不入图——S2
+HEX_EMPTY_FILL: str = "#F3F4F6"  # 空蜂巢格底色（报纸灰底纹理）
+HEX_COURT_LINE: str = "#AEB4BD"  # 场地线淡灰（压蜂巢纹理之上）
+HEX_RIM_LINE: str = "#8B9199"  # 筐/篮板稍深灰
+HEX_TITLE: str = "#333333"
+HEX_SUB: str = "#777777"
+RENDER_DPI: int = 220  # 双风格统一输出 DPI
 _OPPOSITE_TEAM: dict[str, str] = {
     "黑": "白",
     "白": "黑",
@@ -433,65 +458,71 @@ def court_template_lines() -> dict[str, Any]:
     }
 
 
-def _gaussian_blur(grid: np.ndarray, sigma_bins: float) -> np.ndarray:
-    """可分离高斯平滑（手写，避免 scipy 依赖）。
+def filter_in_court(
+    rel_points: list[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """渲染层界外过滤（v4.1 写死）：落点超 FIBA 半场 + INCOURT_MARGIN_M 判界外。
+
+    界外点是上游人框高尺度锚的已知噪声（实测 |dx| 最大 11.9m，物理不可能）；
+    只过滤渲染输入，goal_landings.json 原始数据不动（留追查）。
 
     Args:
-        grid: 2D 密度网格。
-        sigma_bins: 平滑 sigma（格数）。
+        rel_points: 筐锚相对坐标（米）列表。
 
     Returns:
-        平滑后的网格。
+        (界内点, 界外点) 两个列表。
     """
-    r: int = max(1, int(3 * sigma_bins))
-    k: np.ndarray = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma_bins) ** 2)
-    k /= k.sum()
-    grid = np.apply_along_axis(lambda row: np.convolve(row, k, mode="same"), 0, grid)
-    return np.apply_along_axis(lambda row: np.convolve(row, k, mode="same"), 1, grid)
+    x_lim: float = COURT_HALF_W + INCOURT_MARGIN_M
+    y_lo: float = -COURT_RIM_TO_BASELINE_M - INCOURT_MARGIN_M
+    y_hi: float = COURT_HALF_LEN_M - COURT_RIM_TO_BASELINE_M + INCOURT_MARGIN_M
+    kept: list[tuple[float, float]] = []
+    dropped: list[tuple[float, float]] = []
+    for p in rel_points:
+        (kept if abs(p[0]) <= x_lim and y_lo <= p[1] <= y_hi else dropped).append(p)
+    return kept, dropped
 
 
-def render_team_heatmap(
-    rel_points: list[tuple[float, float]], team: str, session: str, out_path: Path
-) -> None:
-    """渲染单队热图 PNG：FIBA 半场模板 + 高斯密度 + 落点散点。
+def _subtitle(session: str, n: int, oob: int) -> str:
+    """图副标（J1 口径统一）：n=X 球（界外 Y 球未入图），Y=0 省略括号段。"""
+    base: str = f"场次 {session} · n={n} 球"
+    return base + (f"（界外 {oob} 球未入图）" if oob else "")
 
-    Args:
-        rel_points: 该队全部落点的相对坐标（米）。
-        team: 队名（标题与文件名用）。
-        session: 场次 ID。
-        out_path: 输出 PNG 路径。
-    """
-    import matplotlib
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def _kde_grid(points: list[tuple[float, float]]) -> tuple[np.ndarray, list[float]]:
+    """连续高斯 KDE（不分箱，稀疏点不糊格）：返回密度网格与 extent。"""
+    xs: np.ndarray = np.arange(DARK_VIEW_X[0], DARK_VIEW_X[1] + DARK_GRID_STEP_M, DARK_GRID_STEP_M)
+    ys: np.ndarray = np.arange(DARK_VIEW_Y[0], DARK_VIEW_Y[1] + DARK_GRID_STEP_M, DARK_GRID_STEP_M)
+    gx, gy = np.meshgrid(xs, ys)
+    d: np.ndarray = np.zeros_like(gx)
+    s2: float = 2.0 * DARK_SIGMA_M**2
+    for px, py in points:
+        d += np.exp(-((gx - px) ** 2 + (gy - py) ** 2) / s2)
+    return d, [float(xs[0]), float(xs[-1]), float(ys[0]), float(ys[-1])]
+
+
+def _draw_court_dark(ax: Axes) -> None:
+    """暗场霓虹场地线：白色低透明粗线打底 + 白细线核心（发光感）。"""
     from matplotlib import patches
 
-    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "sans-serif"]
-    plt.rcParams["axes.unicode_minus"] = False
+    def _glow(seg: tuple[tuple[float, float], tuple[float, float]]) -> None:
+        ax.plot(
+            [seg[0][0], seg[1][0]],
+            [seg[0][1], seg[1][1]],
+            color=DARK_LINE_GLOW,
+            lw=6.0,
+            solid_capstyle="round",
+            zorder=3,
+        )
+        ax.plot(
+            [seg[0][0], seg[1][0]],
+            [seg[0][1], seg[1][1]],
+            color=DARK_LINE_CORE,
+            lw=1.3,
+            solid_capstyle="round",
+            zorder=3,
+        )
 
-    fig, ax = plt.subplots(figsize=(9, 8))
-    lines = court_template_lines()
-    if rel_points:
-        xs = np.array([p[0] for p in rel_points])
-        ys = np.array([p[1] for p in rel_points])
-        x_edges = np.arange(-COURT_HALF_W, COURT_HALF_W + HEAT_BIN_M, HEAT_BIN_M)
-        y_edges = np.arange(
-            -COURT_RIM_TO_BASELINE_M, COURT_HALF_LEN_M - COURT_RIM_TO_BASELINE_M, HEAT_BIN_M
-        )
-        grid, _, _ = np.histogram2d(ys, xs, bins=[y_edges, x_edges])
-        grid = _gaussian_blur(grid, HEAT_SIGMA_M / HEAT_BIN_M)
-        # 低密度区掩掉（hot 色图 0 值发黑，不掩会全场罩灰底）
-        masked = np.ma.masked_where(grid < 0.05 * grid.max(), grid)
-        ax.imshow(
-            masked,
-            extent=[-COURT_HALF_W, COURT_HALF_W, y_edges[0], y_edges[-1]],
-            origin="lower",
-            cmap="hot",
-            alpha=0.65,
-            aspect="auto",
-        )
-        ax.scatter(xs, ys, s=42, facecolors="none", edgecolors="white", linewidths=1.2)
+    lines: dict[str, Any] = court_template_lines()
     for seg in (
         lines["baseline"],
         lines["midline"],
@@ -499,32 +530,355 @@ def render_team_heatmap(
         *lines["three_corners"],
         lines["backboard"],
     ):
-        ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], color="black", lw=1.5)
+        _glow(seg)
     px1, py1, px2, py2 = lines["paint"]
-    ax.add_patch(patches.Rectangle((px1, py1), px2 - px1, py2 - py1, fill=False, lw=1.5))
+    for lw, c in ((6.0, DARK_LINE_GLOW), (1.3, DARK_LINE_CORE)):
+        ax.add_patch(
+            patches.Rectangle(
+                (px1, py1), px2 - px1, py2 - py1, fill=False, lw=lw, edgecolor=c, zorder=3
+            )
+        )
     arc_c, arc_r = lines["freethrow_arc"]
-    ax.add_patch(patches.Arc(arc_c, arc_r * 2, arc_r * 2, theta1=0, theta2=180, lw=1.5))
+    for lw, c in ((6.0, DARK_LINE_GLOW), (1.3, DARK_LINE_CORE)):
+        ax.add_patch(
+            patches.Arc(
+                arc_c, arc_r * 2, arc_r * 2, theta1=0, theta2=180, lw=lw, edgecolor=c, zorder=3
+            )
+        )
     theta = np.linspace(
         math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
         180 - math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
-        60,
+        120,
+    )
+    for lw, c in ((6.0, DARK_LINE_GLOW), (1.3, DARK_LINE_CORE)):
+        ax.plot(
+            THREE_R_M * np.cos(np.radians(theta)),
+            THREE_R_M * np.sin(np.radians(theta)),
+            color=c,
+            lw=lw,
+            solid_capstyle="round",
+            zorder=3,
+        )
+    rim_c, rim_r = lines["rim"]
+    for lw, alpha in ((6.0, 0.20), (2.0, 0.95)):
+        ax.add_patch(
+            patches.Circle(
+                rim_c, rim_r, fill=False, edgecolor=DARK_RIM, lw=lw, alpha=alpha, zorder=4
+            )
+        )
+
+
+def render_team_heatmap(
+    rel_points: list[tuple[float, float]],
+    team: str,
+    session: str,
+    out_path: Path,
+    oob: int = 0,
+) -> None:
+    """渲染单队暗场霓虹热图 PNG（v4.1 主图风格，spec v4.1 写死）。
+
+    近黑深蓝底 + 双层发光场地线 + 连续 KDE（σ=0.9m）归一 gamma 压暗 +
+    全透明→青→黄→红 colormap + 落点白点深描边；零刻度边框，画满全场。
+
+    Args:
+        rel_points: 该队界内落点相对坐标（米，调用方已 filter_in_court）。
+        team: 队名（标题用）。
+        session: 场次 ID（副标用）。
+        out_path: 输出 PNG 路径。
+        oob: 界外未入图球数（副标"界外 Y 球未入图"，0 省略）。
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LinearSegmentedColormap
+
+    plt.rcParams["font.family"] = "Microsoft YaHei"
+    plt.rcParams["axes.unicode_minus"] = False
+
+    neon_cmap = LinearSegmentedColormap.from_list(
+        "neon_dark",
+        [
+            (0.00, (0.0, 0.0, 0.0, 0.0)),
+            (0.18, (0.0, 0.85, 1.0, 0.45)),
+            (0.55, (1.0, 0.88, 0.15, 0.75)),
+            (1.00, (1.0, 0.12, 0.08, 0.92)),
+        ],
+    )
+
+    span_x: float = DARK_VIEW_X[1] - DARK_VIEW_X[0]
+    span_y: float = DARK_VIEW_Y[1] - DARK_VIEW_Y[0]
+    fig_w: float = 10.0
+    ax_h_frac: float = 0.885  # 顶部留给标题
+    fig = plt.figure(figsize=(fig_w, fig_w * span_y / span_x / ax_h_frac), facecolor=DARK_BG)
+    ax = fig.add_axes([0.02, 0.02, 0.96, ax_h_frac - 0.04])
+    ax.set_facecolor(DARK_BG)
+
+    if rel_points:
+        d, extent = _kde_grid(rel_points)
+        d = (d / d.max()) ** DARK_GAMMA
+        ax.imshow(
+            d,
+            extent=extent,
+            origin="lower",
+            cmap=neon_cmap,
+            vmin=0,
+            vmax=d.max(),
+            aspect="auto",
+            interpolation="bilinear",
+            zorder=2,
+        )
+    _draw_court_dark(ax)
+    if rel_points:
+        ax.scatter(
+            [p[0] for p in rel_points],
+            [p[1] for p in rel_points],
+            s=46,
+            facecolors="white",
+            edgecolors=DARK_BG,
+            linewidths=1.4,
+            zorder=5,
+        )
+    ax.set_xlim(DARK_VIEW_X)
+    ax.set_ylim(DARK_VIEW_Y)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    fig.text(
+        0.05,
+        0.972,
+        f"队伍_{team}_进球热图",
+        color="white",
+        fontsize=26,
+        fontweight="bold",
+        ha="left",
+        va="top",
+    )
+    fig.text(
+        0.05,
+        0.918,
+        _subtitle(session, len(rel_points), oob),
+        color=(1.0, 1.0, 1.0, 0.55),
+        fontsize=13,
+        ha="left",
+        va="top",
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=RENDER_DPI, facecolor=DARK_BG)
+    plt.close(fig)
+
+
+def hex_centers(x0: float, x1: float, y0: float, y1: float) -> np.ndarray:
+    """生成覆盖视野的 pointy-top 六边形中心网格（行距 1.5R，列距 √3R，奇数行右移半列）。
+
+    Returns:
+        (n, 2) 中心坐标数组。
+    """
+    w: float = math.sqrt(3.0) * HEX_R_M  # 列距 = 六边形宽
+    dy: float = 1.5 * HEX_R_M  # 行距
+    centers: list[tuple[float, float]] = []
+    j: int = 0
+    y: float = y0 - HEX_R_M
+    while y <= y1 + HEX_R_M:
+        x: float = x0 - w + (j % 2) * (w / 2.0)
+        while x <= x1 + w:
+            centers.append((x, y))
+            x += w
+        y += dy
+        j += 1
+    return np.array(centers)
+
+
+def bin_points(points: np.ndarray, centers: np.ndarray) -> dict[int, int]:
+    """把每个落点归到最近六边形中心，返回 {格索引: 进球数}。"""
+    counts: dict[int, int] = {}
+    for p in points:
+        idx: int = int(np.argmin((centers[:, 0] - p[0]) ** 2 + (centers[:, 1] - p[1]) ** 2))
+        counts[idx] = counts.get(idx, 0) + 1
+    return counts
+
+
+def _draw_court_hex(ax: Axes) -> None:
+    """蜂巢风场地线：淡灰细线压在热力层之上（防盖线）。"""
+    from matplotlib import patches
+
+    lines: dict[str, Any] = court_template_lines()
+    for seg in (
+        lines["baseline"],
+        lines["midline"],
+        *lines["sidelines"],
+        *lines["three_corners"],
+        lines["backboard"],
+    ):
+        ax.plot(
+            [seg[0][0], seg[1][0]],
+            [seg[0][1], seg[1][1]],
+            color=HEX_COURT_LINE,
+            lw=1.2,
+            zorder=3,
+            solid_capstyle="round",
+        )
+    px1, py1, px2, py2 = lines["paint"]
+    ax.add_patch(
+        patches.Rectangle(
+            (px1, py1), px2 - px1, py2 - py1, fill=False, ec=HEX_COURT_LINE, lw=1.2, zorder=3
+        )
+    )
+    arc_c, arc_r = lines["freethrow_arc"]
+    ax.add_patch(
+        patches.Arc(
+            arc_c, arc_r * 2, arc_r * 2, theta1=0, theta2=180, ec=HEX_COURT_LINE, lw=1.2, zorder=3
+        )
+    )
+    theta = np.linspace(
+        math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
+        180 - math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
+        80,
     )
     ax.plot(
         THREE_R_M * np.cos(np.radians(theta)),
         THREE_R_M * np.sin(np.radians(theta)),
-        color="black",
-        lw=1.5,
+        color=HEX_COURT_LINE,
+        lw=1.2,
+        zorder=3,
     )
     rim_c, rim_r = lines["rim"]
-    ax.add_patch(patches.Circle(rim_c, rim_r, fill=False, color="red", lw=2))
-    ax.set_xlim(-COURT_HALF_W - 0.4, COURT_HALF_W + 0.4)
-    ax.set_ylim(-COURT_RIM_TO_BASELINE_M - 1.0, COURT_HALF_LEN_M - COURT_RIM_TO_BASELINE_M + 0.5)
+    ax.add_patch(patches.Circle(rim_c, rim_r, fill=False, ec=HEX_RIM_LINE, lw=1.6, zorder=4))
+
+
+def render_team_heatmap_hex(
+    rel_points: list[tuple[float, float]],
+    team: str,
+    session: str,
+    out_path: Path,
+    oob: int = 0,
+) -> None:
+    """渲染单队蜂巢热图 PNG（v4.1 副图风格，spec v4.1 写死）。
+
+    白底 + 全视野浅灰空蜂巢纹理 + pointy-top 格（R=0.6m）按进球数截断
+    YlOrRd 着色、≥2 球格标数字；淡灰场地线压上；竖向 colorbar。
+    视野横向固定 x∈[−8,8]（不做动态外扩）；dy > 视野上限的界内点
+    WARNING 且不入图（防 argmin 归格错位篡改分布——S2）。
+
+    Args:
+        rel_points: 该队界内落点相对坐标（米，调用方已 filter_in_court）。
+        team: 队名（标题用）。
+        session: 场次 ID（副标用）。
+        out_path: 输出 PNG 路径。
+        oob: 界外未入图球数（副标用）。
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import colors as mcolors
+    from matplotlib import patches
+
+    plt.rcParams["font.family"] = "Microsoft YaHei"
+    plt.rcParams["axes.unicode_minus"] = False
+
+    view_pts: list[tuple[float, float]] = []
+    hidden: int = oob
+    for p in rel_points:
+        if p[1] <= HEX_VIEW_Y[1]:
+            view_pts.append(p)
+        else:
+            hidden += 1
+            logger.warning(
+                "蜂巢视野外界内点不入图（防归格错位）: team=%s rel=(%.1f, %.1f)", team, p[0], p[1]
+            )
+
+    centers: np.ndarray = hex_centers(*HEX_VIEW_X, *HEX_VIEW_Y)
+    counts: dict[int, int] = bin_points(np.array(view_pts, dtype=float).reshape(-1, 2), centers)
+    vmax: int = max(2, max(counts.values(), default=0))
+
+    base = plt.get_cmap("YlOrRd")
+    cmap = mcolors.LinearSegmentedColormap.from_list(
+        "YlOrRd_trunc", [base(0.10 + 0.82 * t) for t in np.linspace(0, 1, 256)]
+    )
+    norm = mcolors.Normalize(vmin=1, vmax=vmax)
+
+    x_range: float = HEX_VIEW_X[1] - HEX_VIEW_X[0]
+    y_range: float = HEX_VIEW_Y[1] - HEX_VIEW_Y[0]
+    fig_w: float = 10.0
+    axes_h: float = fig_w * (y_range / x_range) * 0.92  # 右侧留给 colorbar
+    fig, ax = plt.subplots(figsize=(fig_w, axes_h + 1.1))
+
+    for c in centers:
+        ax.add_patch(
+            patches.RegularPolygon(
+                tuple(c),
+                6,
+                radius=HEX_R_M,
+                orientation=math.pi / 2,
+                facecolor=HEX_EMPTY_FILL,
+                edgecolor="white",
+                lw=1.0,
+                zorder=1,
+            )
+        )
+    for idx, n in counts.items():
+        rgba = cmap(norm(n))
+        ax.add_patch(
+            patches.RegularPolygon(
+                tuple(centers[idx]),
+                6,
+                radius=HEX_R_M,
+                orientation=math.pi / 2,
+                facecolor=rgba,
+                edgecolor="white",
+                lw=1.2,
+                zorder=2,
+            )
+        )
+        if n >= 2:
+            lum: float = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]
+            ax.text(
+                centers[idx][0],
+                centers[idx][1],
+                str(n),
+                ha="center",
+                va="center",
+                fontsize=11,
+                fontweight="bold",
+                color="white" if lum < 0.62 else "#4A3200",
+                zorder=5,
+            )
+    _draw_court_hex(ax)
+    ax.set_xlim(HEX_VIEW_X)
+    ax.set_ylim(HEX_VIEW_Y)
     ax.set_aspect("equal")
-    ax.set_title(f"{session} 队伍_{team}_进球热图（n={len(rel_points)}）")
-    ax.set_xlabel("米（筐心为原点）")
-    ax.set_ylabel("米（离筐向场内）")
+    ax.axis("off")
+
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    cbar = fig.colorbar(
+        sm, ax=ax, ticks=list(range(1, vmax + 1)), fraction=0.035, pad=0.02, shrink=0.55
+    )
+    cbar.set_label("进球数", fontsize=12, color=HEX_TITLE)
+    cbar.ax.tick_params(labelsize=10, colors=HEX_SUB, length=0)
+    cbar.outline.set_visible(False)
+
+    fig.text(
+        0.055,
+        0.945,
+        f"{team} · 进球热图",
+        fontsize=21,
+        fontweight="bold",
+        color=HEX_TITLE,
+        ha="left",
+        va="top",
+    )
+    fig.text(
+        0.055,
+        0.885,
+        _subtitle(session, len(view_pts), hidden),
+        fontsize=12.5,
+        color=HEX_SUB,
+        ha="left",
+        va="top",
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    fig.savefig(out_path, dpi=RENDER_DPI, facecolor="white", bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
 
 
@@ -797,6 +1151,21 @@ def heat_session(
             teams_dist[r.team] = teams_dist.get(r.team, 0) + 1
         else:
             uncovered_by_reason[r.reason] = uncovered_by_reason.get(r.reason, 0) + 1
+    # v4.1：渲染层界外过滤（原始 JSON 数据不动，逐球 WARNING + summary 计数）
+    team_pts: dict[str, list[tuple[float, float]]] = {}
+    oob_count: int = 0
+    for team in sorted(teams_dist):
+        all_pts: list[tuple[float, float]] = [
+            r.rel_xy_m for r in final if r.covered and r.team == team and r.rel_xy_m is not None
+        ]
+        kept, dropped = filter_in_court(all_pts)
+        for p in dropped:
+            logger.warning(
+                "界外落点不入图（尺度锚噪声）: team=%s rel=(%.1f, %.1f)", team, p[0], p[1]
+            )
+        oob_count += len(dropped)
+        team_pts[team] = kept
+
     report: dict[str, Any] = {
         "session": session_dir.name,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -820,19 +1189,25 @@ def heat_session(
             "teams": teams_dist,
             "casual_excluded": uncovered_by_reason.get("casual_team", 0),
             "hoop_degraded": sum(1 for r in final if r.hoop_degraded),
+            "out_of_bounds": oob_count,
         },
         "landings": [asdict(r) for r in final],
     }
     out_json: Path = session_dir / "goal_landings.json"
     atomic_write_json(out_json, report, what="goal_landings.json")
 
-    for team in sorted(teams_dist):
-        pts: list[tuple[float, float]] = [
-            r.rel_xy_m for r in final if r.covered and r.team == team and r.rel_xy_m is not None
-        ]
+    for team in sorted(team_pts):
+        pts = team_pts[team]
+        team_oob: int = sum(
+            1 for r in final if r.covered and r.team == team and r.rel_xy_m is not None
+        ) - len(pts)
         png: Path = out_dir / f"队伍_{team}_进球热图.png"
-        render_team_heatmap(pts, team, session_dir.name, png)
-        logger.info("热图已出: %s（n=%d）", png, len(pts))
+        png_hex: Path = out_dir / f"队伍_{team}_进球热图_蜂巢.png"
+        render_team_heatmap(pts, team, session_dir.name, png, oob=team_oob)
+        render_team_heatmap_hex(pts, team, session_dir.name, png_hex, oob=team_oob)
+        logger.info(
+            "热图已出（暗场+蜂巢）: %s / %s（n=%d，界外 %d）", png, png_hex, len(pts), team_oob
+        )
     audit_keys: list[str] = build_audit_grid(
         final, events, frames_dir, session_dir / "heatmap_audit.png"
     )
@@ -849,10 +1224,11 @@ def heat_session(
     )
     logger.info("路径分布: %s；未覆盖原因: %s", by_path, uncovered_by_reason)
     logger.info(
-        "分队: %s；筐端阈值 cx=%s；hoops 退化 %d",
+        "分队: %s；筐端阈值 cx=%s；hoops 退化 %d；界外未入图 %d",
         teams_dist,
         threshold,
         report["summary"]["hoop_degraded"],
+        oob_count,
     )
     logger.info("报告已落盘: %s", out_json)
     return report

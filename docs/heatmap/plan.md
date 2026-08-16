@@ -1,9 +1,7 @@
-# plan：进球热区图 · v3 球队热图 → v4 框人纠偏
+# plan：进球热区图 · v3 球队热图 → v4 框人纠偏 → v4.1 渲染双风格
 
-依据：`docs/heatmap/spec.md` v4（v3 经 review10/11 两轮审查通过；
-v3 目击验收失败——立哥判"框到的人不是进球人"，机检 27/67 队色相反，
-根因=持球点种子取到入网后筐下人；v4 修复待两轮审查）。
-v1/v2 的 plan 随双证伪封存（release_probe.py / scorer_landings.py 留档不删）。
+依据：`docs/heatmap/spec.md` v4.1（v4 经 review14/15 两轮审查通过并实跑，
+立哥裁决保持 0.5s 口径；v4.1 渲染升级经 review16 审查修订）。
 
 ## 实施顺序与理由
 
@@ -11,8 +9,9 @@ v1/v2 的 plan 随双证伪封存（release_probe.py / scorer_landings.py 留档
 Task 1 落点+坐标（goal_heatmap.py 核心，纯机器）     [v3 已完成]
    → Task 2 渲染热图 + 目击拼图（同脚本渲染段）        [v3 已完成]
    → Task 3 实跑 + 立哥目击验收                        [v3 失败：框错人]
-   → Task 5 v4 修复（种子窗口 + 队色硬守卫）+ 重跑验收
-   → Task 3' calib-report.md → Task 4 文档联动
+   → Task 5 v4 修复（种子窗口 + 队色硬守卫）+ 重跑      [已完成，18.7% 裁决接受]
+   → Task 6 v4.1 渲染双风格（暗场主图 + 蜂巢副图）
+   → Task 3' 目击验收 + calib-report.md（立哥暂缓）→ Task 4 文档联动
 ```
 
 Task 5 改动面小（goal_heatmap.py 一个函数 + 常量 + 单测），但触及落点
@@ -106,6 +105,30 @@ Task 5 改动面小（goal_heatmap.py 一个函数 + 常量 + 单测），但触
   team_of_box 存在共模盲区——判色系统性错则守卫与复核同盲，v3 已抽样
   可视化确认判色准确，报告声明此依赖）** → 立哥判新拼图
 - Verify：ruff + pytest 绿 + 机检复核 + 目击验收（成功标准见 spec v4）
+
+### Task 6：v4.1 渲染双风格（goal_heatmap.py 渲染段替换 + 单测）
+
+- 依据：4 风格打样（work/heatmap_style_{dark,wood,hex,zones}.py 留档），
+  立哥选定暗场霓虹 + 蜂巢；打样已验证的坑必须带进生产版：
+  稀疏点用连续 KDE 不分箱 + gamma 压暗（dark）、自写蜂巢网格不用
+  ax.hexbin（等比拉伸变形）、热力层压场地线之下/灰线压蜂巢之上
+- 改动（只动 goal_heatmap.py 渲染段 + 测试）：
+  1. `render_team_heatmap` 原位替换为暗场霓虹实现（签名不变：
+     pts/team/session/out——既有 smoke 测试不破）
+  2. 新增 `render_team_heatmap_hex`（同签名）+
+     `hex_centers`/`bin_points` 纯函数（可测）
+  3. 新增 `filter_in_court(pts)` 界外过滤（余量 0.5m 模块常量），
+     heat_session 渲染前统一过滤，逐球 WARNING + summary 记
+     `out_of_bounds` 数；JSON 原始数据不动
+  4. 全部渲染参数提为模块常量（σ=0.9/gamma=1.2/HEX_R=0.6/配色/视野）
+  5. heat_session 每队出双图；中文字体 rcParams 进渲染函数内设置
+  6. 蜂巢生产版固定 x∈[−8,8]（弃用打样右缘动态外扩，S1）；dy > 7.9 的
+     界内点如出现 → WARNING 且不入蜂巢图（仍入暗场主图，S2）
+  7. 两风格副标统一 `n=X 球（界外 Y 球未入图）`（Y=0 省略括号段，J1）
+- 单测：双风格 smoke（空点集/有点集出 PNG）、filter_in_court 已知输入、
+  hex 归格确定性；既有 25 测保持绿
+- 重跑本场出正式双风格图 → 立哥过目（output 旧简笔图被同名覆盖，J4 已告）
+- Verify：ruff + pytest 绿 + PNG 人工开图 + spec-reviewer 审 spec 修订
 
 ### Task 4：文档联动
 
