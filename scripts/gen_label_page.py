@@ -147,7 +147,7 @@ const EVENTS = __EVENTS__;
 const SESSION = "__SESSION__";
 const OUTNAME = "__OUTNAME__";
 const BEFORE = __BEFORE__, AFTER = __AFTER__;
-const LSKEY = "label_" + SESSION;
+const LSKEY = "label_" + SESSION + "__LSUFFIX__";
 const POSKEY = LSKEY + "_pos";
 let marks = {};
 try { marks = JSON.parse(localStorage.getItem(LSKEY) || "{}"); } catch (e) { marks = {}; }
@@ -279,7 +279,12 @@ document.getElementById("no").onclick = () => mark("no");
 document.getElementById("prev").onclick = () => show(cur - 1);
 document.getElementById("next").onclick = () => show(cur + 1);
 document.getElementById("toun").onclick = jumpUnmarked;
-document.getElementById("sound").onclick = () => { v.muted = !v.muted; show(cur); };
+// 声音开关只切 muted：欢呼是判球信号，不能在判读瞬间重载片段
+// （show() 会进度归零、倍速掉回 1x、视角翻回全景——label-page-fixes Bug①）
+document.getElementById("sound").onclick = () => {
+  v.muted = !v.muted;
+  document.getElementById("sound").textContent = v.muted ? "声音：关" : "声音：开";
+};
 document.getElementById("wide").onclick = toggleWide;
 document.getElementById("export").onclick = exportGoals;
 document.addEventListener("keydown", (ev) => {
@@ -319,7 +324,8 @@ def build_html(events: list[dict[str, Any]], session: str, batch: int | None = N
             不改调用方原 dict）。
         session: 场次名（页面标题与 localStorage 键后缀）。
         batch: 批次号；给了导出文件名即 goals_batchK.json（移动即接入 CLI），
-            不给维持旧名 goals_<场次>.json（旧布局/adhoc/手工调用）。
+            localStorage 进度键也带 _batchK 后缀（跨批隔离，label-page-fixes
+            Bug②）；不给维持旧名 goals_<场次>.json 与旧键（旧布局/adhoc/手工调用）。
 
     Returns:
         label.html 全文。
@@ -342,6 +348,7 @@ def build_html(events: list[dict[str, Any]], session: str, batch: int | None = N
     return (
         _HTML.replace("__EVENTS__", json.dumps(enriched, ensure_ascii=False))
         .replace("__SESSION__", session)
+        .replace("__LSUFFIX__", f"_batch{batch}" if batch is not None else "")
         .replace("__OUTNAME__", out_name)
         .replace("__BEFORE__", str(CLIP_BEFORE_SEC))
         .replace("__AFTER__", str(CLIP_AFTER_SEC))

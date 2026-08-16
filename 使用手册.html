@@ -108,6 +108,7 @@
   <li><b>移动</b>（关键！）：把它放进 <code>work\20260805_车百鼎\</code> 目录即可，无需改名。若浏览器因重名存成 <code>goals_batch1 (1).json</code>，把多余的 <code> (1)</code> 去掉——CLI 只认 <code>goals_batchK.json</code> 这个精确命名。</li>
 </ol>
 <div class="tip"><b>提示</b>2026-08-14 之前生成的旧标注页导出仍是 <code>goals_&lt;场次&gt;.json</code>（不带批次），需要人工改成 <code>goals_batchK.json</code>；新生成的页面无此问题。</div>
+<div class="warn"><b>注意</b>标注进度存在浏览器里、<b>按批次隔离</b>（2026-08-16 起各批页面进度互不影响）。仅 <b>2026-08-16 之前生成的旧页面</b>重新生成时会换存储键、该批进度清零——那种情况先点导出把 goals 文件下载备份；之后的页面重生成键不变、进度无损。</div>
 
 <h3>第 3 步：认人 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
 <pre>video people --session 20260805_车百鼎 --batch 1</pre>

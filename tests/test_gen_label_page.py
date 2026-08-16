@@ -248,3 +248,30 @@ def test_groups_skips_events_missing_fields(
     # Assert：残缺事件跳过并记 WARNING，合法事件正常成组
     assert groups == {"f1#e2": 1, "f1#e3": 1}
     assert caplog.text.count("跳过同回合分组") == 3
+
+
+def test_sound_toggle_does_not_reload_clip() -> None:
+    # Bug①（label-page-fixes）：声音开关只切 muted，不调 show() 重置进度/倍速/视角
+    html = build_html([_event()], "s", batch=1)
+    start = html.index('getElementById("sound").onclick')
+    stmt = html[start : html.index("};", start)]  # onclick 整条语句（可多行）
+    assert "show(" not in stmt
+    assert "v.muted = !v.muted" in stmt
+    assert "textContent" in stmt  # 按钮文本就地更新
+
+
+def test_localstorage_keys_isolated_per_batch() -> None:
+    # Bug②（label-page-fixes）：批次页存储键带 _batchK 后缀，跨批进度/位置不串
+    h2 = build_html([_event()], "s", batch=2)
+    h3 = build_html([_event()], "s", batch=3)
+    assert 'const LSKEY = "label_" + SESSION + "_batch2";' in h2
+    assert 'const LSKEY = "label_" + SESSION + "_batch3";' in h3
+    # POSKEY 由 LSKEY 派生，随之隔离
+    assert 'const POSKEY = LSKEY + "_pos";' in h2
+
+
+def test_localstorage_keys_unchanged_without_batch() -> None:
+    # 不传 batch（旧布局/adhoc/手工调用）：旧键逐字节不变
+    html = build_html([_event()], "s")
+    assert 'const LSKEY = "label_" + SESSION + "";' in html
+    assert "_batch" not in html.split("const LSKEY", 1)[1].splitlines()[0]
