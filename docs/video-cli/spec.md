@@ -10,6 +10,7 @@ scripts/ 已 14 个脚本，跑场次靠翻文档记参数（run_session / crop_
 python scripts/video.py score <素材目录> --session <场次ID> [--batch-size N] [--fids a,b,c] [--force] [--dry-run]
 python scripts/video.py people --session <场次ID> [--batch K] [--rawdir PATH] [--read-numbers] [--max-reads N] [--players-file PATH] [--skip-cluster] [--dry-run]
 python scripts/video.py build --session <场次ID> [--batch K] [--rawdir PATH] [--scorer X | --team T | --all] [--dry-run]
+python scripts/video.py clean [--dry-run]
 ```
 
 **成功标准**：
@@ -76,6 +77,14 @@ session_facts.json 只存尺寸/fps/文件清单，**不含素材目录**，而 
 - 尺寸：读 `work/<S>/session_facts.json` 逐文件 width/height 做主比例判定 → 比例 ≈16:9 出 `1920x1080`、≈4:3 出 `1440x1080`（容差 ±1%）；**混比例或未知比例 → 报错退出 1 并列出各文件比例**（混比例须分别合成是立哥定的规格，CLI 不自动选）
 - 透传：`build_highlight.py --goals ... --roster work/<S>/roster.json（存在才传） --rawdir <rawdir> --out <W>x<H> [--scorer X | --team T]`；输出目录 output/<场次>/ 由 build_highlight 自定（goals.json 的 session 字段），CLI 不管
 - **收尾热图（2026-08-16，docs/heatmap/spec.md v4.2）**：非 dry-run 且合集全部成功后，懒 import goal_heatmap 调 `heat_session(session_dir)`（目录推导 None 默认收在 goal_heatmap 侧），每队出暗场主图 + 分区副图两张 PNG 落 output/<场次>/；roster.json 缺失 INFO 跳过（未认人=预期常态）；热图任何异常 log ERROR 留痕但 build 返回码不变（附属产物不阻塞主链）；dry-run 只打印该步不执行
+
+### clean（2026-08-15 新增，docs/video-clean/spec.md）
+
+- 一键清场等下次视频：清空 `output/` 内容 + `work/` 内容 + 源视频目录；output/work 目录本身保留
+- 源视频目录从各场次 `work/<场次>/video_cli.json` 的 srcdir 收集（清 work 前先读）；无 state/srcdir → WARNING 跳过不猜路径
+- 防误删：逐条列清单（路径/大小/文件数）→ 键盘精确输入 `yes` 才动手；`--dry-run` 只列清单；非 tty 拒绝执行退出 1
+- 守卫：srcdir = 仓库根或其祖先 / 盘符根 / 不存在 → 拒删该目录并 ERROR/WARNING，其余目标照常
+- 逐目标容错：单个删除失败记 ERROR 继续其余，结尾汇总，有失败退出 1
 
 ### 错误处理（rules.md 鲁棒优先）
 

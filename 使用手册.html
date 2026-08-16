@@ -183,13 +183,20 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
     <td>实测约 <b>20 分钟</b>（122 球 / 20 个合集）</td>
     <td><code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；roster 未确认全会被拒</td>
   </tr>
+  <tr>
+    <td><code>video clean</code></td>
+    <td>清场等下一场：清空 output、work、源视频目录（<b>全部场次一起，不分场次</b>）</td>
+    <td>秒级（先列清单）</td>
+    <td>先 <code>--dry-run</code> 看清单；真跑需键盘输入 <code>yes</code> 确认；<b>源视频删了不可恢复</b></td>
+  </tr>
 </table>
+<div class="warn"><b>注意</b><code>video clean</code> 不分场次、全部清空：output 里所有场次的成品合集、work 全部中间产物、源视频目录一起删，删了不可恢复。<b>成品发出去之前别 clean。</b></div>
 <div class="tip"><b>提示</b><code>video</code> 在任意目录都能跑。新装的 PowerShell 窗口若不识别，关掉重开即可。</div>
 
 <h2>三、文件都放哪</h2>
 <table>
   <tr><th>位置</th><th>内容</th></tr>
-  <tr><td><code>20260805车百鼎\</code>（素材目录）</td><td>原始视频，只读不动</td></tr>
+  <tr><td><code>20260805车百鼎\</code>（素材目录）</td><td>原始视频，处理时只读不动；<code>video clean</code> 确认后会整目录删除</td></tr>
   <tr><td><code>work\20260805_车百鼎\</code></td><td>本场全部中间产物：goals_batchK.json（你标注的）、roster.json（你确认的）、candidates_batchK.json / review_batchK / scorers_bK（机器的）</td></tr>
   <tr><td><code>work\frames\</code>、<code>work\detect\</code></td><td>抽帧与检测缓存（跨批共享，断点续跑靠它们）</td></tr>
   <tr><td><code>output\20260805_车百鼎\</code></td><td>成品合集 + 进球热图（暗场/分区双图），发球友的就从这里拿</td></tr>
