@@ -34,3 +34,5 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .ruff_cache/
+# 进球热图 PNG 不入库（成品可再生成；含主图/分区/蜂巢等全部风格后缀）
+output/*/*热图*.png

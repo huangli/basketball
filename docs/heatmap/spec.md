@@ -1,9 +1,9 @@
-# spec：进球热区图（v4.1：框人纠偏 + 渲染双风格）
+# spec：进球热区图（v4.2：分区副图 + build 阶段集成）
 
-日期：2026-08-16 · 前置：`docs/heatmap/research.md`、本文件 v1/v2/v3/v4 修订史
-提出：立哥 · 状态：v4.1（2026-08-16）——v4 已经两轮审查（review14/15）+
-立哥批准并实跑（20/107 = 18.7%，立哥裁决接受 0.5s 口径）；v4.1 渲染升级为
-**暗场霓虹 + 蜂巢双风格**（打样选定），待 spec-reviewer 审查
+日期：2026-08-16 · 前置：`docs/heatmap/research.md`、本文件 v1/v2/v3/v4/v4.1 修订史
+提出：立哥 · 状态：v4.2（2026-08-16）——v4.1 已实施提交（0e8b40c）；
+v4.2 两项：**副图蜂巢→分区统计替换**（立哥看图选定）+ **热图并入
+video build 阶段自动生成**（立哥指令）；待 spec-reviewer 两轮审查
 
 ## 修订史
 
@@ -26,7 +26,11 @@
   覆盖率跌破 55% 由立哥裁决接受；目击验收暂缓（立哥：先不管人，下次继续）
 - v4.1（2026-08-16）：渲染升级——立哥判旧渲染"看起来很 low"，4 风格
   打样（暗场霓虹/木地板/蜂巢/分区统计，work/heatmap_style_*.py 留档）
-  后选定**暗场霓虹 + 蜂巢双风格**固化为正式渲染（见"v4.1 渲染"节）
+  后选定**暗场霓虹 + 蜂巢双风格**固化为正式渲染（见"v4.1 渲染"节）。
+  已实施提交（0e8b40c）：实跑 3 球界外过滤，双风格各 2 张入库 output/
+- v4.2（本版，2026-08-16）：① 立哥看打样分区图后定**副图蜂巢→分区统计
+  替换**（蜂巢渲染器下线，上线不足一天无用户依赖）；② 立哥指令
+  **热图并入 video build 阶段**自动生成（见"v4.2 分区副图与 build 集成"节）
 - v1/v2 的 Q1/Q2 双门槛验证框架随 v2 证伪封存；release_probe.py /
   scorer_landings.py 留档（复算依据），不再发展
 
@@ -108,6 +112,67 @@
   图上副标统一写 `n=X 球（界外 Y 球未入图）`（Y=0 省略括号段），
   防"热图 n 与集锦球数对不上"的对账困惑（J1）
 - 渲染参数全部模块常量（σ/gamma/HEX_R/配色/视野），rules.md 禁魔法值
+
+## v4.2 分区副图与 build 集成（2026-08-16，写死）
+
+**副图替换（蜂巢 → 分区统计）**：`render_team_heatmap_hex` 及 HEX_* 常量、
+hex_centers/bin_points 全部下线（蜂巢上线不足一天，无用户依赖），
+由 `render_team_heatmap_zones` 接替，输出
+`output/<场次>/队伍_XX_进球热图_分区.png`（替换 `_蜂巢.png`）。
+分区口径（打样 work/heatmap_style_zones.py 的生产化，偏差写死）：
+
+- **10 区几何照打样**：合理冲撞区（r=1.25m）/禁区其余/中距离左中右/
+  底角左右/45°三分左右（分角 50°）/弧顶三分；`build_zones()`/（多边形 +
+  标注位）与 `zone_of(x, y)`（归区）为纯函数可测；每区按占全队比例
+  单色系填色（强度 = 0.25+0.75·√(占比/最大占比)，0 球区最浅 tint 保结构），
+  区中心标"区名 / n球 / （占比%）"，底角区端线外标注+引线，落点小灰点叠加。
+  **打样 bug 修正（写死）**：打样 zone_of 的 inside3 判定在 |x|>6.6 分支
+  取值写反（应为恒 False 却写成 y≤corner_y）——底角条带被错判线内、
+  corner 分支成死代码；生产版修正为
+  `inside3 = (|x|≤6.6 且 r≤6.75)`（角条区恒在线外），底角三分正确归
+  corner 区（对当前数据无影响：无角条落点）
+- **界外点与暗场统一走 filter_in_court**——打样的"横向超界收拢到边线内
+  归类显示"**弃用**（生产版不收拢不错位）；**余量带残余口径（S2 写死）**：
+  filter_in_court 余量 0.5m 放行的点（|dx|∈(7.5,8.0] 或 dy<0）按 zone_of
+  现行规则归最近语义区（计数守恒、散点位置如实；ra/paint 多边形只覆盖
+  y≥0，余量带点可能归到多边形不含它的区——视为界外噪声归就近区，
+  报告注明；当前实测 dy≈+1.9~+4.5 无实害）；
+  副标统一 `_subtitle` 口径（场次 · n=X 球（界外 Y 球未入图）），
+  打样的"对<对手>"副标弃用（build 阶段不知对手，K3 不写死）
+- **队色系不写死队名（K3）**：固定调色板 [暖红系， 深蓝系， 深绿系， 紫系]
+  按队名字典序分配（字典序 = Unicode 码位序，J3；可复现；>4 队取模循环；
+  半截篮 U+534A < 车百鼎 U+8F66 → 暖红/深蓝，与打样图一致），
+  标题/最深色同系
+- 视野 x∈[−8.2,8.2]、y∈[−2.7,13.1] 画满半场（分区多边形覆盖全场，
+  无蜂巢的视野外归格错位问题；filter_in_court 已把 dy 限在 ≤12.925）
+
+**build 阶段集成（立哥指令）**：`video build` 非 dry-run 且合集合成
+全部成功后，自动调 `goal_heatmap.heat_session` 出双风格图：
+
+- 触发位置：`_cmd_build` 合集循环全部完成后、返回前；**在成功分支内
+  懒 import goal_heatmap**（S4 更正：video.py 顶层无 matplotlib/numpy，
+  goal_heatmap 顶层会拉入 crop_scorers 的 cv2/numpy/PIL——懒 import 防
+  score/people/photo 白付导入成本）；dry-run 只 _log_dry_step 打印不执行
+- **roster.json 缺失 → INFO 跳过**（J1：尚未认人是预期常态非异常，
+  WARNING 留给 roster 存在但损坏等真异常；--all 路径 roster 必在，
+  不受影响）
+- **目录推导写死 goal_heatmap 侧（S3）**：`heat_session` 的
+  detect_dir/frames_dir/out_dir 三参加 None 默认（None → session_dir
+  同级 detect/、frames/、repo output/<场次>——推导逻辑从 main() 收进
+  heat_session，video.py 不复制布局知识）；video.py 只传 session_dir
+- **热图失败不阻塞 build**：heat_session 异常捕获后 log ERROR
+  （含 run_id 与异常上下文）+ build 返回码不变（附属产物不阻塞主链；
+  不静默——rules.md §0.2）；**build 收尾 log 一行热图结果**
+  （出图/跳过/失败，J2/J5——"build 完成"与"热图没出"并存时可发现）
+- **重算副作用写死（J2）**：每次触发全量重算并重写
+  goal_landings.json / heatmap_audit.png / output PNG（同输入确定性、
+  原子写，无数据风险）；耗时秒级~十秒级（逐 fid 读 mot_cache JSON +
+  逐球 _team_at 读帧图 + 目击拼图读帧），build 变慢时不要误判合集卡住
+- team_color 守卫沿用 session_facts 注入口径
+  （键缺失 → 守卫禁用 WARNING，v4 已定）
+- 文档联动（强制）：使用手册.html build 节补热图产物说明；
+  `docs/video-cli/spec.md` §build 补热图步骤；AGENTS.md 统一入口 CLI
+  行 "build=合集合成" → "build=合集合成+热图"
 
 ## 目标
 
@@ -195,9 +260,11 @@
    - 逐球：落点两路并集 → 筐端归一化相对坐标 → 输出
      `work/20260805_车百鼎/goal_landings.json`（每球：event_key/team/
      路径（trace|track_start）/landing_px/rel_xy_m/flipped/覆盖状态）
-   - 渲染（v4.1 双风格）：暗场霓虹主图 `队伍_XX_进球热图.png` +
-     蜂巢副图 `队伍_XX_进球热图_蜂巢.png`，每队两张落 `output/<场次>/`
-     （口径见"v4.1 渲染"节；界外点渲染层过滤 + WARNING + summary 计数）
+   - 渲染（v4.2 双风格）：暗场霓虹主图 `队伍_XX_进球热图.png` +
+     分区统计副图 `队伍_XX_进球热图_分区.png`，每队两张落 `output/<场次>/`
+     （口径见"v4.1 渲染"与"v4.2"节；界外点渲染层过滤 + WARNING +
+     summary 计数）；**通常不由本脚本单独触发——`video build` 阶段自动
+     生成（v4.2 集成），本脚本 CLI 保留作单独重跑入口**
    - 抽样目击：随机（固定种子）抽 15 个覆盖球，生成目击拼图
      `work/20260805_车百鼎/heatmap_audit.png`——每球并列：**落点帧**
      （叠加人框矩形 + 落点十字）+ **锚点帧缩略**（供比对投篮者，O3）+
@@ -219,7 +286,9 @@
   覆盖的选择性偏差在报告中声明，不宣称"不歪分布"）
 - 不改 `scripts/` 下 `goal_heatmap.py` 以外任何文件的对外行为
   （crop_scorers 的 find_held_box 等保持原样，v4 窗口截断在
-  goal_heatmap 内做）；不改 roster/goals 等任何产物
+  goal_heatmap 内做）；**v4.2 例外（S1 写死）**：video.py 仅在
+  `_cmd_build` 成功返回前追加热图触发（懒 import + 异常不阻塞），
+  不改其既有命令拼装/过滤/返回码语义；不改 roster/goals 等任何产物
   （session_facts.json 追加 `team_color` 键除外——按场次注入模式）
 - 不做视频叠加/逐球回放校验页（一张拼图搞定目击）
 
@@ -236,12 +305,14 @@
   ① 人框是真人且是投篮者本人或紧贴出手点（对照锚点帧）；
   ② 映射后落点在半场界内且距筐心 ≤10m
   ——不过则记档收敛（热力图路线整体证伪，四次出手到此为止）
-- **产出**：每队双风格 PNG（暗场主图 + 蜂巢副图）+ goal_landings.json +
+- **产出**：每队双风格 PNG（暗场主图 + 分区副图）+ goal_landings.json +
   calib-report.md
 - 质量门：ruff format/check 干净、pytest 全绿（v4 新增单测：
   持球点窗口截断用例（入网后点不参与）、队色硬守卫剔除/便服放行/
-  守卫禁用退化用例；v4.1 新增：双风格渲染 smoke（空点集/有点集出图）、
-  界外过滤已知输入、hex 归格纯函数用例）
+  守卫禁用退化用例；v4.1 新增：暗场渲染 smoke（空点集/有点集出图）、
+  界外过滤已知输入；v4.2 新增：zone_of 归区已知输入、build_zones
+  几何合法性、分区渲染 smoke、video build 集成——热图自动触发/
+  失败不阻塞/roster 缺失跳过/dry-run 不执行）
 
 ## 依赖与环境
 

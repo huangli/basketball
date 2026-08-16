@@ -3,6 +3,8 @@
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
 输出：透传调用 run_session / crop_scorers / cluster_scorers / gen_scorer_page /
     build_highlight / rank_photos / gen_photo_page 七个底层脚本；
+    build 收尾追加 in-process 调 goal_heatmap.heat_session 出热图双风格
+    （v4.2 集成；懒 import，附属产物失败不阻塞主链）；
     状态文件 work/<场次>/video_cli.json。
 依赖：scripts/pipe_common.py（read_json/atomic_write_json/configure_logging/new_run_id）、
     scripts/errors.py、scripts/roster.py（validate_roster）；命令拼装契约见
@@ -504,7 +506,7 @@ def _confirmed_keys(goals_path: Path) -> set[str]:
             continue
         try:
             keys.add(format_key(g["file"], g["anchor_time"]))
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             # 缺键/类型坏（str anchor_time 走 f"{t:.1f}" 抛 ValueError）都跳过——
             # 结构校验是 build_highlight 的职责，此处只预算命中
             continue
@@ -658,10 +660,41 @@ def _cmd_build(args: argparse.Namespace) -> int:
         logger.error("已完成步骤: %s", completed or "（无）")
         return 1
     if args.dry_run:
-        logger.info("DRY-RUN 共 %d 步（未执行，--out %s）", dry_count, out_size)
+        _log_dry_step(
+            Step(
+                "热图双风格（goal_heatmap）",
+                (str(SCRIPT_DIR / "goal_heatmap.py"), "--sessiondir", str(session_dir)),
+            )
+        )
+        logger.info("DRY-RUN 共 %d 步（未执行，--out %s）", dry_count + 1, out_size)
     else:
         logger.info("build 完成（%d 步，--out %s）", len(completed), out_size)
+        _run_heatmap_step(session_dir, roster_path)
     return 0
+
+
+def _run_heatmap_step(session_dir: Path, roster_path: Path) -> None:
+    """build 收尾触发热图双风格（v4.2 集成，docs/heatmap/spec.md；附属产物不阻塞主链）。
+
+    roster.json 缺失 = 尚未认人（预期常态）INFO 跳过；heat_session 任何异常
+    log ERROR 留痕但本函数不抛出、build 返回码不变（不静默——rules.md §0.2）。
+    目录推导（detect/frames/output）收在 goal_heatmap.heat_session 侧（S3），
+    此处只传 session_dir。
+
+    Args:
+        session_dir: work/<场次> 目录。
+        roster_path: 该场次 roster.json 路径。
+    """
+    if not roster_path.is_file():
+        logger.info("热图跳过：roster.json 不存在（先跑 people 认人）")
+        return
+    import goal_heatmap  # 懒 import（S4）：防 score/people/photo 白付 cv2/numpy 导入成本
+
+    try:
+        goal_heatmap.heat_session(session_dir)
+        logger.info("热图已出（暗场+分区双风格）: output/%s/", session_dir.name)
+    except Exception:  # 附属产物任何失败都不阻塞主链，但必须留痕
+        logger.error("热图生成失败（build 主链不受影响）: %s", session_dir.name, exc_info=True)
 
 
 def _cmd_photo(args: argparse.Namespace) -> int:

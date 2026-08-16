@@ -1,7 +1,9 @@
-# plan：进球热区图 · v3 球队热图 → v4 框人纠偏 → v4.1 渲染双风格
+# plan：进球热区图 · v3 → v4 框人纠偏 → v4.1 渲染 → v4.2 分区+build 集成
 
-依据：`docs/heatmap/spec.md` v4.1（v4 经 review14/15 两轮审查通过并实跑，
-立哥裁决保持 0.5s 口径；v4.1 渲染升级经 review16 审查修订）。
+依据：`docs/heatmap/spec.md` v4.2（v4 经 review14/15 两轮审查通过并实跑，
+立哥裁决保持 0.5s 口径；v4.1 经 review16 审查修订并提交 0e8b40c；
+v4.2 经 review17 审查修订：S1 边界条同步/S2 余量带归区口径/S3 目录推导
+写死 goal_heatmap 侧/S4 懒 import 更正 + J1-J5）。
 
 ## 实施顺序与理由
 
@@ -10,7 +12,8 @@ Task 1 落点+坐标（goal_heatmap.py 核心，纯机器）     [v3 已完成]
    → Task 2 渲染热图 + 目击拼图（同脚本渲染段）        [v3 已完成]
    → Task 3 实跑 + 立哥目击验收                        [v3 失败：框错人]
    → Task 5 v4 修复（种子窗口 + 队色硬守卫）+ 重跑      [已完成，18.7% 裁决接受]
-   → Task 6 v4.1 渲染双风格（暗场主图 + 蜂巢副图）
+   → Task 6 v4.1 渲染双风格（暗场主图 + 蜂巢副图）      [已完成 0e8b40c]
+   → Task 7 v4.2 分区副图替换蜂巢 + video build 集成
    → Task 3' 目击验收 + calib-report.md（立哥暂缓）→ Task 4 文档联动
 ```
 
@@ -129,6 +132,36 @@ Task 5 改动面小（goal_heatmap.py 一个函数 + 常量 + 单测），但触
   hex 归格确定性；既有 25 测保持绿
 - 重跑本场出正式双风格图 → 立哥过目（output 旧简笔图被同名覆盖，J4 已告）
 - Verify：ruff + pytest 绿 + PNG 人工开图 + spec-reviewer 审 spec 修订
+
+### Task 7：v4.2 分区副图 + build 集成（goal_heatmap.py + video.py）
+
+- 依据：立哥看打样选定分区统计替换蜂巢（style_zones 图）；立哥指令
+  热图以后在 build 阶段自动生成
+- goal_heatmap.py：
+  1. 删除 render_team_heatmap_hex / hex_centers / bin_points /
+     HEX_* 常量（蜂巢下线），新增 `build_zones()` / `zone_of(x,y)`
+     纯函数 + `render_team_heatmap_zones`（签名同主图渲染 + oob 参数）——
+     打样 work/heatmap_style_zones.py 生产化：界外收拢逻辑弃用（输入已
+     filter_in_court）、对手副标弃用（统一 _subtitle）、队色系调色板按
+     队名字典序分配（ZONE_PALETTES 模块常量，不写死队名）
+  2. heat_session 渲染循环：副图改 `队伍_XX_进球热图_分区.png`
+- video.py `_cmd_build`：非 dry-run 合集全成后，成功分支内**懒 import**
+  goal_heatmap 调 heat_session（S4）；**目录推导在 goal_heatmap 侧**——
+  heat_session 三目录取 None 默认（推导从 main() 收进函数，video.py 只传
+  session_dir，S3）；roster.json 缺失 **INFO** 跳过（J1）；异常捕获
+  log ERROR 不改返回码；收尾 log 一行热图结果（出图/跳过/失败，J2/J5）；
+  dry-run 只 _log_dry_step
+- 单测：zone_of 10 区代表点归区（含余量带 dy<0 归就近区）、build_zones
+  区数/标注位/多边形闭合、分区渲染 smoke/empty、调色板分配确定性；
+  tests/test_video.py 增 build 集成 4 测（monkeypatch **goal_heatmap.
+  heat_session**——懒 import 后 video 经模块属性调用，patch 模块本体即
+  生效，S3 联动）：自动触发/失败不阻塞/roster 缺失跳过/dry-run 不执行；
+  既有测试保持绿（hex 相关测试删除）
+- 文档联动（同 Task 提交）：使用手册.html build 节、
+  docs/video-cli/spec.md §build、AGENTS.md 统一入口行
+- 重跑：`video build --session 20260805_车百鼎` 或单独跑 goal_heatmap
+  验证双图 → 立哥过目
+- Verify：ruff + pytest 全绿 + PNG 人工开图 + spec-reviewer 审文档
 
 ### Task 4：文档联动
 

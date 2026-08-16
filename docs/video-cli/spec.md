@@ -75,6 +75,7 @@ session_facts.json 只存尺寸/fps/文件清单，**不含素材目录**，而 
 - `--all`：读 work/<S>/roster.json（走 roster.py validate_roster 校验），遍历 players 逐人 --scorer <tag> + 遍历出现过的 team 逐队 --team，顺序 subprocess；**零命中跳过**——展开前以选定批次 confirmed 键集（roster.format_key）与 assignments 求交预检，零命中球员/队伍 WARNING 跳过不调用，全部零命中 → 报错退出 1；**便服队不入分队合集**——展开 team 时跳过「便服」并记 WARNING（口径同 build_highlight「--team 便服 报错退出 1」契约；便服球员的个人合集照常出）；roster 不存在 → 报错退出 1 并提示先跑 people。**注意 build_highlight 对 --roster 强制所有 assignment confirmed=true，未确认 roster 会被底层拒收退出 1**（报错自下而上冒出即可，CLI 不重复校验）
 - 尺寸：读 `work/<S>/session_facts.json` 逐文件 width/height 做主比例判定 → 比例 ≈16:9 出 `1920x1080`、≈4:3 出 `1440x1080`（容差 ±1%）；**混比例或未知比例 → 报错退出 1 并列出各文件比例**（混比例须分别合成是立哥定的规格，CLI 不自动选）
 - 透传：`build_highlight.py --goals ... --roster work/<S>/roster.json（存在才传） --rawdir <rawdir> --out <W>x<H> [--scorer X | --team T]`；输出目录 output/<场次>/ 由 build_highlight 自定（goals.json 的 session 字段），CLI 不管
+- **收尾热图（2026-08-16，docs/heatmap/spec.md v4.2）**：非 dry-run 且合集全部成功后，懒 import goal_heatmap 调 `heat_session(session_dir)`（目录推导 None 默认收在 goal_heatmap 侧），每队出暗场主图 + 分区副图两张 PNG 落 output/<场次>/；roster.json 缺失 INFO 跳过（未认人=预期常态）；热图任何异常 log ERROR 留痕但 build 返回码不变（附属产物不阻塞主链）；dry-run 只打印该步不执行
 
 ### 错误处理（rules.md 鲁棒优先）
 

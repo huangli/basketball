@@ -6,7 +6,8 @@ flip_threshold 两端切分、to_rel_m 坐标换算（含翻转）、find_landin
 窗口截断——入网后点不链种子/截断空轨迹直接 no_landing、队色硬守卫——主路
 与兜底相反剔除/便服放行/expect_color 空禁用退化）、heat_session 端到端
 （合成 roster+goals+candidates+hoops+cache+帧图，含便服剔除与覆盖统计）、
-渲染 smoke、目击拼图确定性与缺帧占位。
+界外过滤已知输入、zone_of 归区/build_zones 几何、渲染 smoke（暗场/分区）、
+目击拼图确定性与缺帧占位。
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import numpy as np
 import pytest
 from PIL import Image
 
@@ -24,19 +24,19 @@ from geom import Box
 from goal_heatmap import (
     HeatLanding,
     HoopEvent,
-    bin_points,
     build_audit_grid,
+    build_zones,
     court_template_lines,
     filter_in_court,
     find_landing,
     flip_threshold,
     heat_session,
-    hex_centers,
     hoop_xy_at,
     load_hoops,
     render_team_heatmap,
-    render_team_heatmap_hex,
+    render_team_heatmap_zones,
     to_rel_m,
+    zone_of,
 )
 from mot_candidates import Detection
 from release_probe import GoalEvent
@@ -477,7 +477,7 @@ def test_heat_session_end_to_end(tmp_path: Path) -> None:
     # 产物：JSON + 暗场/蜂巢热图 PNG + 目击拼图
     assert (session / "goal_landings.json").exists()
     assert (out / "队伍_半截篮_进球热图.png").exists()
-    assert (out / "队伍_半截篮_进球热图_蜂巢.png").exists()
+    assert (out / "队伍_半截篮_进球热图_分区.png").exists()
     assert (session / "heatmap_audit.png").exists()
     # v4：无 session_facts.json → 队色硬守卫禁用（WARNING 退化 v3 行为）
     assert report["params"]["team_color_guard"] is False
@@ -513,7 +513,7 @@ def test_render_team_heatmap_empty(tmp_path: Path) -> None:
     assert out.exists()
 
 
-# ---------- v4.1：双风格渲染 + 界外过滤 ----------
+# ---------- v4.1/v4.2：渲染 + 界外过滤 ----------
 
 
 def test_filter_in_court_known() -> None:
@@ -529,34 +529,53 @@ def test_filter_in_court_known() -> None:
     assert len(kept2) == 2 and not dropped2
 
 
-def test_hex_binning_deterministic() -> None:
-    # Arrange：固定视野生成网格；两个近点同格、远点异格
-    centers = hex_centers(-8.0, 8.0, -2.5, 7.9)
-    assert centers.shape[1] == 2 and len(centers) > 100
-    pts = np.array([[0.10, 2.0], [0.05, 2.1], [5.0, 6.0]])
-    # Act
-    counts = bin_points(pts, centers)
-    # Assert：近点归同格（计数 2），远点独占；重放结果一致
-    assert sorted(counts.values()) == [1, 2]
-    assert bin_points(pts, centers) == counts
+def test_zone_of_known() -> None:
+    # 10 区代表点归区（含余量带 dy<0 归就近区——spec v4.2 S2 口径）
+    cases = [
+        ((0.0, 0.5), "ra"),
+        ((0.0, -1.0), "ra"),  # 余量带 dy<0：r=1.0 ≤ 1.25 归 ra（计数守恒）
+        ((0.0, 3.0), "paint"),
+        ((0.0, 5.5), "mid_c"),
+        ((-4.5, 2.0), "mid_l"),
+        ((4.5, 2.0), "mid_r"),
+        ((-7.0, 0.5), "corner_l"),
+        ((7.0, 0.5), "corner_r"),
+        ((-6.2, 4.5), "p45_l"),  # atan2(6.2, 4.5) ≈ 54° > 50° 分角
+        ((6.2, 4.5), "p45_r"),
+        ((0.0, 8.0), "top"),
+        ((2.0, 8.5), "top"),  # atan2(2, 8.5) ≈ 13° < 50°
+    ]
+    for (x, y), expected in cases:
+        assert zone_of(x, y) == expected, f"({x}, {y})"
 
 
-def test_render_team_heatmap_hex_smoke(tmp_path: Path) -> None:
-    # Arrange & Act：有点集出图
-    out = tmp_path / "hex.png"
-    render_team_heatmap_hex([(1.0, 3.0), (1.1, 3.1), (-2.0, 5.5)], "半截篮", "s1", out, oob=1)
+def test_build_zones_geometry() -> None:
+    zones = build_zones()
+    # 10 区、键唯一、多边形闭合可行（≥3 顶点）、标注位齐备
+    assert len(zones) == 10
+    keys = [z.key for z in zones]
+    assert len(set(keys)) == 10
+    assert all(len(z.poly) >= 3 for z in zones)
+    assert all(len(z.label) == 2 for z in zones)
+    # 绘制顺序：ra 在 paint 之后（压在禁区色块之上）
+    assert keys.index("ra") > keys.index("paint")
+
+
+def test_render_team_heatmap_zones_smoke(tmp_path: Path) -> None:
+    # Arrange & Act：有点集出图（含界外计数副标）
+    out = tmp_path / "zones.png"
+    render_team_heatmap_zones(
+        [(1.0, 3.0), (1.1, 3.1), (-2.0, 5.5)], "半截篮", "s1", out, oob=1, palette_idx=0
+    )
     # Assert
     assert out.exists() and out.stat().st_size > 10000
 
 
-def test_render_team_heatmap_hex_empty_and_out_of_view(tmp_path: Path) -> None:
-    # 空点集 + 视野外（dy>7.9）界内点：出图不炸，视野外点 WARNING 不入图
-    out = tmp_path / "hex_empty.png"
-    render_team_heatmap_hex([], "车百鼎", "s1", out)
+def test_render_team_heatmap_zones_empty(tmp_path: Path) -> None:
+    # 空点集也出分区结构图
+    out = tmp_path / "zones_empty.png"
+    render_team_heatmap_zones([], "车百鼎", "s1", out, palette_idx=1)
     assert out.exists()
-    out2 = tmp_path / "hex_ov.png"
-    render_team_heatmap_hex([(0.0, 9.0), (1.0, 3.0)], "车百鼎", "s1", out2)
-    assert out2.exists()
 
 
 def test_build_audit_grid_deterministic(tmp_path: Path) -> None:

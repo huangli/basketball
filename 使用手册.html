@@ -131,7 +131,8 @@
   <li><code>--all</code>：roster 里逐人出个人合集 + 逐队出队伍集锦（便服队自动跳过）。多批次场次自动合并跨批片段，每球员/队伍只出一个合集；某球员或某队伍在选定批次里没球会 WARNING 跳过，不中断其他人（全都没球才会报错不出片）。</li>
   <li>只要单人：<code>--scorer 红队-7号</code>；只要单队：<code>--team 红队</code>。只看某一批：加 <code>--batch 2</code>——只出这一批的片段，不合并其他批。</li>
   <li>成品在 <code>output\20260805_车百鼎\</code>：队伍 <code>队伍_XX_进球集锦.mp4</code>，个人 <code>&lt;队伍&gt;_&lt;姓名&gt;_进球合集.mp4</code>，片段按拍摄时间排序。</li>
-  <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久。实测（车百鼎：122 球、18 人 + 2 队共 20 个合集）约 <b>20 分钟</b>。</li>
+  <li><b>合集合成完会自动出进球热图</b>（同目录，每队两张）：<code>队伍_XX_进球热图.png</code>（暗场热力图）+ <code>队伍_XX_进球热图_分区.png</code>（分区统计：禁区/中距离/底角/45°/弧顶各占几球）。没认过人（无 roster）会跳过热图只出合集；热图出岔子不影响合集本身（日志会记）。</li>
+  <li><b>耗时</b>：分钟级。每球切一条 6 秒片段并重编码到 1080p，球越多越久。实测（车百鼎：122 球、18 人 + 2 队共 20 个合集）约 <b>20 分钟</b>；热图只多花十几秒。</li>
 </ul>
 
 <h3>第 5 步（可选）：精彩照片 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
@@ -163,7 +164,7 @@
   </tr>
   <tr>
     <td><code>video build</code></td>
-    <td>合成合集</td>
+    <td>合成合集 + 进球热图（暗场/分区双图）</td>
     <td>实测约 <b>20 分钟</b>（122 球 / 20 个合集）</td>
     <td><code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；roster 未确认全会被拒</td>
   </tr>
@@ -176,7 +177,7 @@
   <tr><td><code>20260805车百鼎\</code>（素材目录）</td><td>原始视频，只读不动</td></tr>
   <tr><td><code>work\20260805_车百鼎\</code></td><td>本场全部中间产物：goals_batchK.json（你标注的）、roster.json（你确认的）、candidates_batchK.json / review_batchK / scorers_bK（机器的）</td></tr>
   <tr><td><code>work\frames\</code>、<code>work\detect\</code></td><td>抽帧与检测缓存（跨批共享，断点续跑靠它们）</td></tr>
-  <tr><td><code>output\20260805_车百鼎\</code></td><td>成品合集，发球友的就从这里拿</td></tr>
+  <tr><td><code>output\20260805_车百鼎\</code></td><td>成品合集 + 进球热图（暗场/分区双图），发球友的就从这里拿</td></tr>
 </table>
 
 <h2>四、成品规格（已定型，不用管）</h2>

@@ -747,6 +747,95 @@ class TestBuild:
         assert rc == 0
 
 
+class TestBuildHeatmap:
+    """build 收尾热图触发（v4.2，docs/heatmap/spec.md）：合集全成后自动调
+    goal_heatmap.heat_session；roster 缺失 INFO 跳过；热图失败不阻塞主链；
+    dry-run 不执行。"""
+
+    def _setup(self, session_dir: pathlib.Path, *, roster: bool = True) -> pathlib.Path:
+        _write_json(session_dir / "goals_batch1.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch1.json", [])
+        _write_json(session_dir / "session_facts.json", _facts_payload())
+        if roster:
+            _write_json(
+                session_dir / "roster.json",
+                {
+                    "players": [{"tag": "红-7", "name": "", "team": "半截篮"}],
+                    "assignments": {format_key("f0.mp4", 0.5): "红-7"},
+                },
+            )
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    def _record_heatmap(self, monkeypatch: pytest.MonkeyPatch) -> list[pathlib.Path]:
+        """拦截 goal_heatmap.heat_session（懒 import 后经模块属性调用，patch 模块本体生效）。"""
+        import goal_heatmap
+
+        calls: list[pathlib.Path] = []
+        monkeypatch.setattr(goal_heatmap, "heat_session", lambda sd, *a, **k: calls.append(sd))
+        return calls
+
+    def test_heatmap_triggered_after_build(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = self._record_heatmap(monkeypatch)
+        rawdir = self._setup(session_dir)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert len(run_recorder) == 1  # 合集照常合成
+        assert calls == [
+            pathlib.Path("work") / SESSION
+        ]  # 只传 session_dir（目录推导在 goal_heatmap 侧）
+
+    def test_heatmap_failure_does_not_block(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import goal_heatmap
+
+        def boom(sd: pathlib.Path) -> None:
+            raise RuntimeError("热图炸了")
+
+        monkeypatch.setattr(goal_heatmap, "heat_session", boom)
+        rawdir = self._setup(session_dir)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0  # 附属产物失败不改 build 返回码
+        assert len(run_recorder) == 1
+
+    def test_heatmap_skipped_without_roster(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = self._record_heatmap(monkeypatch)
+        rawdir = self._setup(session_dir, roster=False)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert calls == []  # 未认人是预期常态，INFO 跳过不调 heat_session
+
+    def test_heatmap_not_run_on_dry_run(
+        self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rawdir = self._setup(session_dir)
+
+        def forbidden(*a: object, **kw: object) -> None:
+            raise AssertionError("dry-run 不得启动子进程/热图")
+
+        monkeypatch.setattr(video.subprocess, "run", forbidden)
+        import goal_heatmap
+
+        monkeypatch.setattr(goal_heatmap, "heat_session", forbidden)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--dry-run"])
+        assert rc == 0
+
+
 class TestBuildMultiBatch:
     """多批次合并合成 + --all 零命中跳过（docs/build-multi-batch/spec.md）。"""
 

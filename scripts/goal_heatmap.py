@@ -1,4 +1,4 @@
-"""球队进球热图生成器（热图 v4：v3 框人纠偏——出手前窗口 + 队色硬守卫，docs/heatmap/spec.md v4）。
+"""球队进球热图生成器（热图 v4.2：框人纠偏 + 暗场/分区双风格渲染，docs/heatmap/spec.md v4.2）。
 
 输入：work/<场次>/roster.json（已归属球，tag→team）、glob 发现的
     goals_batch*.json / candidates_batch*.json / hoops_batch*.json、
@@ -6,7 +6,7 @@
     work/<场次>/session_facts.json 的 team_color 键（队色硬守卫映射，缺失则守卫禁用）
 输出：work/<场次>/goal_landings.json（逐球落点 + 筐锚相对坐标）、
     output/<场次>/队伍_<team>_进球热图.png（暗场霓虹主图，每队一张）、
-    output/<场次>/队伍_<team>_进球热图_蜂巢.png（蜂巢副图，每队一张）、
+    output/<场次>/队伍_<team>_进球热图_分区.png（分区统计副图，每队一张）、
     work/<场次>/heatmap_audit.png（目击拼图，固定种子抽 15 球）
 依赖：crop_scorers / mot_candidates / roster / release_probe / scorer_landings 只读复用；
     matplotlib 渲染（Agg 后端，已装，无新依赖）
@@ -76,7 +76,7 @@ COVERAGE_MIN_RATIO: float = 0.55  # 覆盖率过关线（分母 = roster 已归�
 AUDIT_SAMPLE_N: int = 15  # 目击拼图抽样球数
 AUDIT_SEED: int = 20260815  # 目击抽样固定种子（可复现）
 TEAM_CASUAL: str = "便服"  # roster 中便服队不进热图
-# ---- v4.1 渲染常量（暗场霓虹 + 蜂巢双风格，spec v4.1 写死）----
+# ---- v4.1/v4.2 渲染常量（暗场霓虹主图 + 分区统计副图，spec v4.1/v4.2 写死）----
 INCOURT_MARGIN_M: float = 0.5  # 界外过滤余量（米）：落点超 FIBA 半场 + 此余量判界外（尺度锚噪声）
 DARK_BG: str = "#0b1026"  # 暗场底（近黑深蓝）
 DARK_LINE_GLOW: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.10)  # 场地线发光打底
@@ -87,17 +87,23 @@ DARK_GAMMA: float = 1.2  # 密度归一后 gamma（>1 压暗中低密度，稀�
 DARK_GRID_STEP_M: float = 0.05  # KDE 网格步长（米）
 DARK_VIEW_X: tuple[float, float] = (-8.3, 8.3)  # 暗场视野（画满全场）
 DARK_VIEW_Y: tuple[float, float] = (-2.6, 12.9)
-HEX_R_M: float = 0.6  # 蜂巢六边形外接圆半径（米）
-HEX_VIEW_X: tuple[float, float] = (-8.0, 8.0)  # 蜂巢视野（固定，不做动态外扩——S1）
-HEX_VIEW_Y: tuple[float, float] = (
-    -2.5,
-    7.9,
-)  # 纵向收窄（稀疏数据防上半空白）；越界点 WARNING 不入图——S2
-HEX_EMPTY_FILL: str = "#F3F4F6"  # 空蜂巢格底色（报纸灰底纹理）
-HEX_COURT_LINE: str = "#AEB4BD"  # 场地线淡灰（压蜂巢纹理之上）
-HEX_RIM_LINE: str = "#8B9199"  # 筐/篮板稍深灰
-HEX_TITLE: str = "#333333"
-HEX_SUB: str = "#777777"
+ZONE_RA_R_M: float = 1.25  # 合理冲撞区半径（米）
+ZONE_SPLIT_DEG: float = 50.0  # 45° 区与弧顶的分角（距正前方夹角，度）
+ZONE_VIEW_X: tuple[float, float] = (-8.2, 8.2)  # 分区图视野（画满半场）
+ZONE_VIEW_Y: tuple[float, float] = (-2.7, 13.1)
+ZONE_BG: str = "#fafaf7"  # 分区图底（近白）
+ZONE_LINE: str = "#4a4a4a"  # 场地线深灰
+ZONE_RIM: str = "#c0392b"  # 筐圈红
+ZONE_SUB: str = "#555555"  # 副标灰
+ZONE_FOOT: str = "#999999"  # 脚注浅灰
+# 分区填色调色板（浅→深 4 档 + 最深色）：按队名字典序（Unicode 码位）分配，
+# 不写死队名（K3）；>4 队取模循环
+ZONE_PALETTES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("#fbeeec", "#e8a89f", "#c0392b", "#7b241c"), "#7b241c"),  # 暖红系
+    (("#edf3fa", "#9dbede", "#2e6da4", "#11375b"), "#11375b"),  # 深蓝系
+    (("#eef7ee", "#a9d1a9", "#2e7d32", "#143d16"), "#143d16"),  # 深绿系
+    (("#f4eef7", "#cfb3dd", "#7d3c98", "#4a235a"), "#4a235a"),  # 紫系
+)
 RENDER_DPI: int = 220  # 双风格统一输出 DPI
 _OPPOSITE_TEAM: dict[str, str] = {
     "黑": "白",
@@ -668,41 +674,160 @@ def render_team_heatmap(
     plt.close(fig)
 
 
-def hex_centers(x0: float, x1: float, y0: float, y1: float) -> np.ndarray:
-    """生成覆盖视野的 pointy-top 六边形中心网格（行距 1.5R，列距 √3R，奇数行右移半列）。
+@dataclass(frozen=True, slots=True)
+class Zone:
+    """投篮分区（v4.2 副图；多边形顶点 + 标注位，build_zones 产物）。
+
+    Attributes:
+        key: 区键（ra/paint/mid_l/mid_c/mid_r/corner_l/corner_r/p45_l/p45_r/top）。
+        name: 显示名。
+        poly: 多边形顶点（米制，筐心原点）。
+        label: 标注锚点（米制）。
+    """
+
+    key: str
+    name: str
+    poly: tuple[tuple[float, float], ...]
+    label: tuple[float, float]
+
+
+def _arc_pts(r: float, deg0: float, deg1: float, n: int = 48) -> list[tuple[float, float]]:
+    """采样筐心圆弧（数学角，度，+x 轴起逆时针）。"""
+    return [
+        (r * math.cos(math.radians(a)), r * math.sin(math.radians(a)))
+        for a in np.linspace(deg0, deg1, n)
+    ]
+
+
+def build_zones() -> list[Zone]:
+    """构造 10 个分区多边形与标注位（纯几何，依赖 COURT_* 常量；spec v4.2 写死）。
 
     Returns:
-        (n, 2) 中心坐标数组。
+        10 区列表（绘制顺序即遮挡顺序：ra 在 paint 之上）。
     """
-    w: float = math.sqrt(3.0) * HEX_R_M  # 列距 = 六边形宽
-    dy: float = 1.5 * HEX_R_M  # 行距
-    centers: list[tuple[float, float]] = []
-    j: int = 0
-    y: float = y0 - HEX_R_M
-    while y <= y1 + HEX_R_M:
-        x: float = x0 - w + (j % 2) * (w / 2.0)
-        while x <= x1 + w:
-            centers.append((x, y))
-            x += w
-        y += dy
-        j += 1
-    return np.array(centers)
+    baseline_y: float = -COURT_RIM_TO_BASELINE_M
+    paint_top_y: float = PAINT_LEN_M - COURT_RIM_TO_BASELINE_M
+    corner_y: float = math.sqrt(THREE_R_M**2 - THREE_CORNER_X**2)
+    arc_at_paint: float = math.sqrt(THREE_R_M**2 - PAINT_HALF_W**2)
+    arc_x_split: float = THREE_R_M * math.sin(math.radians(ZONE_SPLIT_DEG))
+    arc_y_split: float = THREE_R_M * math.cos(math.radians(ZONE_SPLIT_DEG))
+    ray_y_at_side: float = COURT_HALF_W / math.tan(math.radians(ZONE_SPLIT_DEG))
+    mid_y: float = COURT_HALF_LEN_M - COURT_RIM_TO_BASELINE_M
+
+    phi_corner: float = math.degrees(math.atan2(corner_y, -THREE_CORNER_X))
+    phi_paint: float = math.degrees(math.atan2(arc_at_paint, PAINT_HALF_W))
+    phi_split: float = 90.0 - ZONE_SPLIT_DEG
+
+    def mirror(pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        return [(-x, y) for x, y in pts]
+
+    mid_left = [
+        (-PAINT_HALF_W, baseline_y),
+        (-THREE_CORNER_X, baseline_y),
+        (-THREE_CORNER_X, corner_y),
+        *_arc_pts(THREE_R_M, phi_corner, 180 - phi_paint),
+        (-PAINT_HALF_W, arc_at_paint),
+    ]
+    mid_center = [
+        (-PAINT_HALF_W, paint_top_y),
+        (PAINT_HALF_W, paint_top_y),
+        (PAINT_HALF_W, arc_at_paint),
+        *_arc_pts(THREE_R_M, phi_paint, 180 - phi_paint),
+        (-PAINT_HALF_W, arc_at_paint),
+    ]
+    corner_left = [
+        (-COURT_HALF_W, baseline_y),
+        (-THREE_CORNER_X, baseline_y),
+        (-THREE_CORNER_X, corner_y),
+        (-COURT_HALF_W, corner_y),
+    ]
+    p45_left = [
+        (-THREE_CORNER_X, corner_y),
+        (-COURT_HALF_W, corner_y),
+        (-COURT_HALF_W, ray_y_at_side),
+        (-arc_x_split, arc_y_split),
+        *_arc_pts(THREE_R_M, 90 + ZONE_SPLIT_DEG, phi_corner),
+    ]
+    top = [
+        (COURT_HALF_W, ray_y_at_side),
+        (COURT_HALF_W, mid_y),
+        (-COURT_HALF_W, mid_y),
+        (-COURT_HALF_W, ray_y_at_side),
+        (-arc_x_split, arc_y_split),
+        *_arc_pts(THREE_R_M, 90 + ZONE_SPLIT_DEG, phi_split),
+        (arc_x_split, arc_y_split),
+    ]
+    ra = [(ZONE_RA_R_M, 0.0), *_arc_pts(ZONE_RA_R_M, 0, 180, 36), (-ZONE_RA_R_M, 0.0)]
+
+    def z(key: str, name: str, poly: list[tuple[float, float]], label: tuple[float, float]) -> Zone:
+        return Zone(key=key, name=name, poly=tuple(poly), label=label)
+
+    return [
+        z("top", "弧顶三分", top, (0.0, 8.9)),
+        z("p45_l", "左45°三分", p45_left, (-6.5, 3.35)),
+        z("p45_r", "右45°三分", mirror(p45_left), (6.5, 3.35)),
+        z("corner_l", "左底角", corner_left, (-7.05, -2.25)),
+        z("corner_r", "右底角", mirror(corner_left), (7.05, -2.25)),
+        z("mid_l", "中距离·左", mid_left, (-4.45, 2.0)),
+        z("mid_c", "中距离·中路", mid_center, (0.0, 5.4)),
+        z("mid_r", "中距离·右", mirror(mid_left), (4.45, 2.0)),
+        z(
+            "paint",
+            "禁区（冲撞区外）",
+            [
+                (-PAINT_HALF_W, baseline_y),
+                (PAINT_HALF_W, baseline_y),
+                (PAINT_HALF_W, paint_top_y),
+                (-PAINT_HALF_W, paint_top_y),
+            ],
+            (0.0, 3.05),
+        ),
+        z("ra", "合理冲撞区", ra, (0.0, 0.62)),
+    ]
 
 
-def bin_points(points: np.ndarray, centers: np.ndarray) -> dict[int, int]:
-    """把每个落点归到最近六边形中心，返回 {格索引: 进球数}。"""
-    counts: dict[int, int] = {}
-    for p in points:
-        idx: int = int(np.argmin((centers[:, 0] - p[0]) ** 2 + (centers[:, 1] - p[1]) ** 2))
-        counts[idx] = counts.get(idx, 0) + 1
-    return counts
+def zone_of(x: float, y: float) -> str:
+    """落点分区（米制，筐心原点；spec v4.2 写死）。
+
+    输入已经 filter_in_court（余量 0.5m）；余量带点（|dx|∈(7.5,8.0] 或 dy<0）
+    按现行规则归最近语义区——计数守恒、散点如实，ra/paint 多边形只覆盖
+    y≥0，余量带点可能归到多边形不含它的区（界外噪声归就近区，报告注明）。
+
+    Args:
+        x: 横向坐标（米，右为正）。
+        y: 纵深坐标（米，向场内为正）。
+
+    Returns:
+        区键（Zone.key 之一）。
+    """
+    corner_y: float = math.sqrt(THREE_R_M**2 - THREE_CORNER_X**2)
+    paint_top_y: float = PAINT_LEN_M - COURT_RIM_TO_BASELINE_M
+    r: float = math.hypot(x, y)
+    if r <= ZONE_RA_R_M:
+        return "ra"
+    # 三分线内 = |x|≤角线 x 且距筐 ≤6.75m（角条区 |x|>6.6 恒在线外——打样
+    # 原式 inside3=(y<=corner_y) 把底角错判成线内，corner 分支成死代码，
+    # 生产版修正，底角三分正确归 corner 区）
+    inside3: bool = abs(x) <= THREE_CORNER_X and r <= THREE_R_M
+    if abs(x) <= PAINT_HALF_W and y <= paint_top_y and inside3:
+        return "paint"
+    if inside3:
+        if x < -PAINT_HALF_W:
+            return "mid_l"
+        if x > PAINT_HALF_W:
+            return "mid_r"
+        return "mid_c"
+    if abs(x) > THREE_CORNER_X and y <= corner_y:
+        return "corner_l" if x < 0 else "corner_r"
+    if math.degrees(math.atan2(abs(x), max(y, 1e-6))) > ZONE_SPLIT_DEG:
+        return "p45_l" if x < 0 else "p45_r"
+    return "top"
 
 
-def _draw_court_hex(ax: Axes) -> None:
-    """蜂巢风场地线：淡灰细线压在热力层之上（防盖线）。"""
-    from matplotlib import patches
-
+def _draw_court_zones(ax: Axes) -> None:
+    """分区风场地线：深灰细线压分区色块之上 + 红筐圈。"""
     lines: dict[str, Any] = court_template_lines()
+    line_kw: dict[str, Any] = {"color": ZONE_LINE, "lw": 1.4, "zorder": 3}
     for seg in (
         lines["baseline"],
         lines["midline"],
@@ -710,55 +835,40 @@ def _draw_court_hex(ax: Axes) -> None:
         *lines["three_corners"],
         lines["backboard"],
     ):
-        ax.plot(
-            [seg[0][0], seg[1][0]],
-            [seg[0][1], seg[1][1]],
-            color=HEX_COURT_LINE,
-            lw=1.2,
-            zorder=3,
-            solid_capstyle="round",
-        )
+        ax.plot([seg[0][0], seg[1][0]], [seg[0][1], seg[1][1]], **line_kw)
     px1, py1, px2, py2 = lines["paint"]
-    ax.add_patch(
-        patches.Rectangle(
-            (px1, py1), px2 - px1, py2 - py1, fill=False, ec=HEX_COURT_LINE, lw=1.2, zorder=3
-        )
-    )
+    ax.plot([px1, px2, px2, px1], [py1, py1, py2, py2], **line_kw)
     arc_c, arc_r = lines["freethrow_arc"]
-    ax.add_patch(
-        patches.Arc(
-            arc_c, arc_r * 2, arc_r * 2, theta1=0, theta2=180, ec=HEX_COURT_LINE, lw=1.2, zorder=3
-        )
+    ft = _arc_pts(arc_r, 0, 180, 48)
+    ax.plot([p[0] + arc_c[0] for p in ft], [p[1] + arc_c[1] for p in ft], **line_kw)
+    corner_y: float = lines["corner_y"]
+    three = _arc_pts(
+        THREE_R_M,
+        math.degrees(math.atan2(corner_y, THREE_CORNER_X)),
+        math.degrees(math.atan2(corner_y, -THREE_CORNER_X)),
+        72,
     )
-    theta = np.linspace(
-        math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
-        180 - math.degrees(math.acos(THREE_CORNER_X / THREE_R_M)),
-        80,
-    )
-    ax.plot(
-        THREE_R_M * np.cos(np.radians(theta)),
-        THREE_R_M * np.sin(np.radians(theta)),
-        color=HEX_COURT_LINE,
-        lw=1.2,
-        zorder=3,
-    )
-    rim_c, rim_r = lines["rim"]
-    ax.add_patch(patches.Circle(rim_c, rim_r, fill=False, ec=HEX_RIM_LINE, lw=1.6, zorder=4))
+    ax.plot([p[0] for p in three], [p[1] for p in three], **line_kw)
+    _rim_c, rim_r = lines["rim"]
+    rim = _arc_pts(rim_r, 0, 360, 36)
+    ax.plot([p[0] for p in rim], [p[1] for p in rim], color=ZONE_RIM, lw=2.0, zorder=4)
 
 
-def render_team_heatmap_hex(
+def render_team_heatmap_zones(
     rel_points: list[tuple[float, float]],
     team: str,
     session: str,
     out_path: Path,
     oob: int = 0,
+    palette_idx: int = 0,
 ) -> None:
-    """渲染单队蜂巢热图 PNG（v4.1 副图风格，spec v4.1 写死）。
+    """渲染单队投篮分区分布图 PNG（v4.2 副图风格，spec v4.2 写死）。
 
-    白底 + 全视野浅灰空蜂巢纹理 + pointy-top 格（R=0.6m）按进球数截断
-    YlOrRd 着色、≥2 球格标数字；淡灰场地线压上；竖向 colorbar。
-    视野横向固定 x∈[−8,8]（不做动态外扩）；dy > 视野上限的界内点
-    WARNING 且不入图（防 argmin 归格错位篡改分布——S2）。
+    半场 10 区（build_zones 纯几何）按占全队进球比例单色系填色
+    （强度 = 0.25+0.75·√(占比/最大占比)，0 球区最浅 tint 保结构），
+    区中心标"区名 / n球 / （占比%）"，底角区端线外标注+引线，
+    落点小灰点叠加，深灰场地线压顶；白底数据新闻图表风。
+    队色系 = ZONE_PALETTES 按 palette_idx 取（调用方按队名字典序传入）。
 
     Args:
         rel_points: 该队界内落点相对坐标（米，调用方已 filter_in_court）。
@@ -766,119 +876,154 @@ def render_team_heatmap_hex(
         session: 场次 ID（副标用）。
         out_path: 输出 PNG 路径。
         oob: 界外未入图球数（副标用）。
+        palette_idx: 调色板索引（取模循环）。
     """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib import colors as mcolors
-    from matplotlib import patches
+    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.patches import Polygon
 
     plt.rcParams["font.family"] = "Microsoft YaHei"
     plt.rcParams["axes.unicode_minus"] = False
 
-    view_pts: list[tuple[float, float]] = []
-    hidden: int = oob
-    for p in rel_points:
-        if p[1] <= HEX_VIEW_Y[1]:
-            view_pts.append(p)
-        else:
-            hidden += 1
-            logger.warning(
-                "蜂巢视野外界内点不入图（防归格错位）: team=%s rel=(%.1f, %.1f)", team, p[0], p[1]
-            )
+    stops, deep = ZONE_PALETTES[palette_idx % len(ZONE_PALETTES)]
+    cmap = LinearSegmentedColormap.from_list(f"zone_{palette_idx}", list(stops))
 
-    centers: np.ndarray = hex_centers(*HEX_VIEW_X, *HEX_VIEW_Y)
-    counts: dict[int, int] = bin_points(np.array(view_pts, dtype=float).reshape(-1, 2), centers)
-    vmax: int = max(2, max(counts.values(), default=0))
+    zones: list[Zone] = build_zones()
+    n: int = len(rel_points)
+    counts: dict[str, int] = {}
+    for px, py in rel_points:
+        k: str = zone_of(px, py)
+        counts[k] = counts.get(k, 0) + 1
+    max_share: float = max((c / n for c in counts.values()), default=1.0)
 
-    base = plt.get_cmap("YlOrRd")
-    cmap = mcolors.LinearSegmentedColormap.from_list(
-        "YlOrRd_trunc", [base(0.10 + 0.82 * t) for t in np.linspace(0, 1, 256)]
-    )
-    norm = mcolors.Normalize(vmin=1, vmax=vmax)
+    fig = plt.figure(figsize=(10, 9.7), facecolor="white")
+    ax = fig.add_axes((0.02, 0.055, 0.96, 0.855))
+    ax.set_facecolor(ZONE_BG)
 
-    x_range: float = HEX_VIEW_X[1] - HEX_VIEW_X[0]
-    y_range: float = HEX_VIEW_Y[1] - HEX_VIEW_Y[0]
-    fig_w: float = 10.0
-    axes_h: float = fig_w * (y_range / x_range) * 0.92  # 右侧留给 colorbar
-    fig, ax = plt.subplots(figsize=(fig_w, axes_h + 1.1))
-
-    for c in centers:
+    shade: dict[str, tuple[float, int, float]] = {}  # key → (强度 t, 计数, 占比)
+    for zone in zones:
+        c: int = counts.get(zone.key, 0)
+        share: float = c / n if n else 0.0
+        t: float = 0.0 if c == 0 else 0.25 + 0.75 * math.sqrt(share / max_share)
+        shade[zone.key] = (t, c, share)
         ax.add_patch(
-            patches.RegularPolygon(
-                tuple(c),
-                6,
-                radius=HEX_R_M,
-                orientation=math.pi / 2,
-                facecolor=HEX_EMPTY_FILL,
+            Polygon(
+                zone.poly,
+                closed=True,
+                facecolor=cmap(t),
                 edgecolor="white",
-                lw=1.0,
+                linewidth=1.6,
                 zorder=1,
             )
         )
-    for idx, n in counts.items():
-        rgba = cmap(norm(n))
-        ax.add_patch(
-            patches.RegularPolygon(
-                tuple(centers[idx]),
-                6,
-                radius=HEX_R_M,
-                orientation=math.pi / 2,
-                facecolor=rgba,
-                edgecolor="white",
-                lw=1.2,
-                zorder=2,
-            )
+
+    _draw_court_zones(ax)
+
+    if rel_points:
+        ax.scatter(
+            [p[0] for p in rel_points],
+            [p[1] for p in rel_points],
+            s=26,
+            c="#2b2b2b",
+            alpha=0.85,
+            edgecolors="white",
+            linewidths=0.9,
+            zorder=5,
         )
-        if n >= 2:
-            lum: float = 0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]
+
+    corner_y: float = math.sqrt(THREE_R_M**2 - THREE_CORNER_X**2)
+    for zone in zones:
+        t, c, share = shade[zone.key]
+        dark: bool = t > 0.55
+        name_color: str = "#f3e2de" if dark else ("#8a8a8a" if c else "#a8a8a8")
+        val_color: str = "white" if dark else ("#2b2b2b" if c else "#9a9a9a")
+        lx, ly = zone.label
+        if zone.key.startswith("corner"):  # 底角区太窄：端线外标注 + 引线
+            name_color, val_color = "#8a8a8a", "#3a3a3a"
+            ax.plot([lx, lx], [ly + 0.55, corner_y - 0.35], color="#b5b5b5", lw=0.9, zorder=2)
+        ax.text(
+            lx,
+            ly + 0.42,
+            zone.name,
+            ha="center",
+            va="center",
+            fontsize=8,
+            color=name_color,
+            zorder=6,
+        )
+        if zone.key == "ra":  # 冲撞区太小：占比并入数值行，避让筐圈
             ax.text(
-                centers[idx][0],
-                centers[idx][1],
-                str(n),
+                lx,
+                ly - 0.12,
+                f"{c}球 ({share * 100:.0f}%)",
                 ha="center",
                 va="center",
-                fontsize=11,
+                fontsize=10.5,
                 fontweight="bold",
-                color="white" if lum < 0.62 else "#4A3200",
-                zorder=5,
+                color=val_color,
+                zorder=6,
             )
-    _draw_court_hex(ax)
-    ax.set_xlim(HEX_VIEW_X)
-    ax.set_ylim(HEX_VIEW_Y)
+        else:
+            ax.text(
+                lx,
+                ly - 0.08,
+                f"{c}球",
+                ha="center",
+                va="center",
+                fontsize=12,
+                fontweight="bold",
+                color=val_color,
+                zorder=6,
+            )
+            ax.text(
+                lx,
+                ly - 0.52,
+                f"({share * 100:.0f}%)",
+                ha="center",
+                va="center",
+                fontsize=9,
+                color=val_color,
+                zorder=6,
+            )
+
+    ax.set_xlim(ZONE_VIEW_X)
+    ax.set_ylim(ZONE_VIEW_Y)
     ax.set_aspect("equal")
     ax.axis("off")
 
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    cbar = fig.colorbar(
-        sm, ax=ax, ticks=list(range(1, vmax + 1)), fraction=0.035, pad=0.02, shrink=0.55
-    )
-    cbar.set_label("进球数", fontsize=12, color=HEX_TITLE)
-    cbar.ax.tick_params(labelsize=10, colors=HEX_SUB, length=0)
-    cbar.outline.set_visible(False)
-
     fig.text(
-        0.055,
-        0.945,
-        f"{team} · 进球热图",
+        0.035,
+        0.955,
+        f"{team} · 投篮分区分布",
         fontsize=21,
         fontweight="bold",
-        color=HEX_TITLE,
+        color=deep,
         ha="left",
         va="top",
     )
     fig.text(
-        0.055,
-        0.885,
-        _subtitle(session, len(view_pts), hidden),
-        fontsize=12.5,
-        color=HEX_SUB,
+        0.035,
+        0.905,
+        _subtitle(session, n, oob) + " · 颜色深浅 = 该区进球占全队比例",
+        fontsize=11,
+        color=ZONE_SUB,
         ha="left",
         va="top",
     )
+    fig.text(
+        0.035,
+        0.018,
+        "数据：goal_landings.json 已覆盖落点（筐心为原点，单位米；散点为实测落点）",
+        fontsize=8,
+        color=ZONE_FOOT,
+        ha="left",
+        va="bottom",
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=RENDER_DPI, facecolor="white", bbox_inches="tight", pad_inches=0.15)
+    fig.savefig(out_path, dpi=RENDER_DPI, facecolor="white")
     plt.close(fig)
 
 
@@ -994,15 +1139,19 @@ def _uncovered(event_key: str, team: str, reason: str) -> HeatLanding:
 
 
 def heat_session(
-    session_dir: Path, detect_dir: Path, frames_dir: Path, out_dir: Path
+    session_dir: Path,
+    detect_dir: Path | None = None,
+    frames_dir: Path | None = None,
+    out_dir: Path | None = None,
 ) -> dict[str, Any]:
     """全量热图流程：落点两路并集 → 筐端归一化坐标 → JSON + 热图 + 目击拼图。
 
     Args:
         session_dir: work/<场次> 目录（roster/goals/candidates/hoops）。
-        detect_dir: mot_cache 目录。
-        frames_dir: 帧图根目录。
-        out_dir: 热图 PNG 输出目录（output/<场次>）。
+        detect_dir: mot_cache 目录（None → session_dir 同级 detect/）。
+        frames_dir: 帧图根目录（None → session_dir 同级 frames/）。
+        out_dir: 热图 PNG 输出目录（None → repo output/<场次>）。
+            目录推导收在本函数（S3）：video build 等调用方只传 session_dir。
 
     Returns:
         报告字典（summary / landings），已原子写入 goal_landings.json。
@@ -1011,6 +1160,9 @@ def heat_session(
         BasketballPipelineError: roster.json 缺失 / 无 goals / 无 candidates / 无 hoops。
         SchemaError: 任一输入 schema 损坏。
     """
+    detect_dir = detect_dir or session_dir.parent / "detect"
+    frames_dir = frames_dir or session_dir.parent / "frames"
+    out_dir = out_dir or session_dir.parent.parent / "output" / session_dir.name
     roster_path: Path = session_dir / "roster.json"
     if not roster_path.is_file():
         raise BasketballPipelineError(f"roster.json 不存在: {roster_path}（先完成认人导出）")
@@ -1196,17 +1348,19 @@ def heat_session(
     out_json: Path = session_dir / "goal_landings.json"
     atomic_write_json(out_json, report, what="goal_landings.json")
 
-    for team in sorted(team_pts):
+    for i, team in enumerate(sorted(team_pts)):
         pts = team_pts[team]
         team_oob: int = sum(
             1 for r in final if r.covered and r.team == team and r.rel_xy_m is not None
         ) - len(pts)
         png: Path = out_dir / f"队伍_{team}_进球热图.png"
-        png_hex: Path = out_dir / f"队伍_{team}_进球热图_蜂巢.png"
+        png_zones: Path = out_dir / f"队伍_{team}_进球热图_分区.png"
         render_team_heatmap(pts, team, session_dir.name, png, oob=team_oob)
-        render_team_heatmap_hex(pts, team, session_dir.name, png_hex, oob=team_oob)
+        render_team_heatmap_zones(
+            pts, team, session_dir.name, png_zones, oob=team_oob, palette_idx=i
+        )
         logger.info(
-            "热图已出（暗场+蜂巢）: %s / %s（n=%d，界外 %d）", png, png_hex, len(pts), team_oob
+            "热图已出（暗场+分区）: %s / %s（n=%d，界外 %d）", png, png_zones, len(pts), team_oob
         )
     audit_keys: list[str] = build_audit_grid(
         final, events, frames_dir, session_dir / "heatmap_audit.png"
@@ -1259,11 +1413,8 @@ def main(argv: list[str] | None = None) -> int:
     run_id: str = new_run_id()
     configure_logging(run_id)
     session_dir: Path = args.sessiondir
-    detect_dir: Path = args.detectdir or session_dir.parent / "detect"
-    frames_dir: Path = args.framesdir or session_dir.parent / "frames"
-    out_dir: Path = args.outdir or session_dir.parent.parent / "output" / session_dir.name
     try:
-        heat_session(session_dir, detect_dir, frames_dir, out_dir)
+        heat_session(session_dir, args.detectdir, args.framesdir, args.outdir)
     except BasketballPipelineError as e:
         logger.error("热图生成失败 run_id=%s: %s", run_id, e, exc_info=True)
         return 1

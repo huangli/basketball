@@ -1,6 +1,6 @@
-# todo：进球热区图 · v3 球队热图 → v4 框人纠偏 → v4.1 渲染双风格
+# todo：进球热区图 · v3 → v4 框人纠偏 → v4.1 渲染 → v4.2 分区+build 集成
 
-依据：spec.md v4.1 + plan.md v4.1
+依据：spec.md v4.2 + plan.md v4.2
 
 **v1/v2 状态（均已收尾记档）**：稳定段法 63.1% < 70% 证伪、轨迹法 55.7% < 90%
 证伪（经验教训 §8）；release_probe.py / scorer_landings.py 留档。
@@ -12,8 +12,10 @@
 错人 / 窗口剔 35 无种子球 / 便服 2）；阈值扫描（0.5/0.2/0.0/−0.3s）证实
 放宽窗口多收的主要是错人球，立哥定：保持 0.5s 口径、覆盖率跌破 55% 裁决
 接受；目击验收暂缓（立哥：先不管人，下次继续）。**
-**v4.1 当前状态：渲染双风格（暗场霓虹主图 + 蜂巢副图，立哥从 4 风格打样
-选定），spec/plan 已更新，待 spec-reviewer 审查 → Task 6 实施。**
+**v4.1 状态：已完成并提交 0e8b40c（暗场霓虹主图 + 蜂巢副图，界外过滤
+3 球；review16 修订落实）。**
+**v4.2 当前状态：立哥定副图蜂巢→分区统计替换 + 热图并入 video build
+阶段；spec/plan/todo 已更新，待 spec-reviewer 两轮审查 → Task 7 实施。**
 
 **全局质量门**：每个代码 Task 提交前必过 `ruff format scripts tests &&
 ruff check --fix scripts tests && pytest -q`（--fix 后复核 diff）。
@@ -40,23 +42,26 @@ ruff check --fix scripts tests && pytest -q`（--fix 后复核 diff）。
     （误差/选择性偏差/team_mismatch 剔除数/便服残余噪声/静物风险/便服/
     两端分布）
   - Verify：spec-reviewer 审报告通过
-- [ ] Task 6：v4.1 渲染双风格（暗场霓虹主图 + 蜂巢副图）
-  - render_team_heatmap 原位换暗场（签名不变）；新增 hex 渲染 +
-    hex_centers/bin_points 纯函数；filter_in_court 界外过滤（渲染层，
-    WARNING + summary 计数，JSON 不动）；渲染参数全模块常量
-  - 单测：双风格 smoke + 界外过滤 + 归格确定性；既有 25 测保持绿
-  - 重跑出正式双风格图 → 立哥过目
-  - Verify：ruff + pytest 绿 + PNG 人工开图 + spec-reviewer 审 spec 修订
-  - Files：scripts/goal_heatmap.py、tests/test_goal_heatmap.py
-- [x] Task 5：v4 框人纠偏（goal_heatmap.py + 单测 + 重跑）
-  - 已落实：team_color 注入、截断 Track 双喂、队色硬守卫、启动校验、
-    6 个新单测（25 全绿）、重跑 20/107=18.7%、阈值扫描（
-    work/heat_cutoff_sweep.py 留档）、立哥裁决保持 0.5s
-  - Files：scripts/goal_heatmap.py、tests/test_goal_heatmap.py、
-    work/20260805_车百鼎/session_facts.json（team_color 键）
-  - 注：机检复核脚本 work/color_recheck.py 随目击验收一并后补
-    （当前机检已由阈值扫描脚本覆盖：covered 20 球中队色一致 12 +
-    便服待定 8、相反 0）
+- [x] Task 6：v4.1 渲染双风格（暗场霓虹主图 + 蜂巢副图）**已提交 0e8b40c**
+  - 实跑：3 球界外过滤（|dx| 最大 11.9m），双风格各 2 张入 output/
+  - 注：蜂巢副图上线不足一天即被 v4.2 分区统计替换（立哥看图后定）
+- [ ] Task 7：v4.2 分区副图 + build 集成
+  - goal_heatmap.py：蜂巢渲染器/常量/纯函数全删；build_zones/zone_of
+    纯函数 + render_team_heatmap_zones（调色板按队名字典序，不写死队名；
+    界外收拢与对手副标弃用，统一 _subtitle）；副图改 _分区.png
+  - video.py _cmd_build：合集全成后懒 import 调 heat_session（三目录参数
+    None 默认推导收进 goal_heatmap 侧，video.py 只传 session_dir）；
+    roster 缺失 INFO 跳过；热图失败 log ERROR 不阻塞 + 收尾一行结果；
+    dry-run 只打印
+  - 单测：zone_of 归区/build_zones 几何/分区 smoke/调色板确定性 +
+    test_video.py build 集成 4 测；hex 测试删除，其余保持绿
+  - 文档联动同提交：使用手册.html、docs/video-cli/spec.md §build、
+    AGENTS.md 统一入口行
+  - 重跑验证 → 立哥过目
+  - Verify：ruff + pytest 全绿 + PNG 人工开图 + spec-reviewer 审文档
+  - Files：scripts/goal_heatmap.py、scripts/video.py、
+    tests/test_goal_heatmap.py、tests/test_video.py、使用手册.html、
+    docs/video-cli/spec.md、AGENTS.md
 - [ ] Task 4：文档联动（通过→待办勾掉 + 经验教训补 v4 结论；
   不过→记档收敛 + 待办转封存）
   - Verify：联动文档过 spec-reviewer；全部提交
