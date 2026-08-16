@@ -265,10 +265,14 @@ class TestPeople:
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
         rawdir = self._setup_batch(session_dir)
-        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        # --no-read-numbers：读号自 2026-08-16 起默认开（read-numbers-batch），
+        # 本用例锁定三段链的裸骨架，显式关掉读号保持断言面最小
+        rc = video.main(
+            ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+        )
         assert rc == 0
         assert len(run_recorder) == 3
-        # ① 裁图（无 --read-numbers 时一个读号旗标都不带）
+        # ① 裁图（--no-read-numbers 时一个读号旗标都不带）
         assert run_recorder[0][0] == [
             sys.executable,
             str(SCRIPT_DIR / "crop_scorers.py"),
@@ -367,6 +371,34 @@ class TestPeople:
         )
         assert rc == 0
         assert run_recorder[0][0][-2:] == ["--max-reads", "9"]
+
+    def test_read_numbers_default_on(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # 读号默认开（read-numbers-batch）：不传任何读号参数也应带上
+        rawdir = self._setup_batch(session_dir)
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        crop_cmd = run_recorder[0][0]
+        # 缺省 = confirmed 2 条 ×3 = 6
+        assert crop_cmd[-3:] == ["--read-numbers", "--max-reads", "6"]
+
+    def test_no_read_numbers_disables(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # 显式关闭（便服/无号场次省 token）：旗标与预算都不出现
+        rawdir = self._setup_batch(session_dir)
+        rc = video.main(
+            ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+        )
+        assert rc == 0
+        crop_cmd = run_recorder[0][0]
+        assert "--read-numbers" not in crop_cmd
+        assert "--max-reads" not in crop_cmd
 
     def test_index_omitted_when_missing(
         self,
@@ -470,7 +502,9 @@ class TestPeople:
         )
         rc = video.main(["people", "--session", SESSION])
         assert rc == 0
-        assert run_recorder[0][0][-2:] == ["--rawdir", str(src)]
+        crop_cmd = run_recorder[0][0]
+        # 读号默认开后尾部多了 --read-numbers/--max-reads，按旗标定位取 rawdir 值
+        assert crop_cmd[crop_cmd.index("--rawdir") + 1] == str(src)
 
     def test_rawdir_missing_everywhere(self, session_dir: pathlib.Path) -> None:
         self._setup_batch(session_dir)

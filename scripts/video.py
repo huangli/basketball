@@ -785,7 +785,20 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--session", required=True, help="场次 ID")
     pp.add_argument("--batch", type=int, default=None, help="限定单批次 K")
     pp.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
-    pp.add_argument("--read-numbers", action="store_true", help="K3 读号（花 token，按需开）")
+    pp.add_argument(
+        "--read-numbers", action="store_true", help="K3 读号（默认已开，显式开关保留兼容）"
+    )
+    pp.add_argument(
+        "--no-read-numbers",
+        action="store_false",
+        dest="read_numbers",
+        help="关闭 K3 读号（便服/无号场次省 token）",
+    )
+    # 缺省 True 必须靠 set_defaults 兜底：argparse 填默认值带 hasattr 守卫、
+    # 先注册者胜出——靠 --no-read-numbers 的 add_argument(default=True) 会被
+    # 先注册的 --read-numbers（store_true 隐式 default False）压住、静默不生效
+    # （read-numbers-batch review01 B1，本机实证）
+    pp.set_defaults(read_numbers=True)
     pp.add_argument(
         "--max-reads",
         type=int,
