@@ -141,7 +141,9 @@ small { color: #999; }
   <span id="players"></span>
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
   <button id="accept" style="display:none"></button>
-  <button id="acceptall" title="对所有号码预填无歧义且未手改的球批量预填归属（不标已核，第三步可翻检）">接受全部号码预填</button>
+  <button id="acceptall"
+    title="对所有号码预填无歧义且未手改的球批量预填归属（不标已核，第三步可翻检）"
+  >接受全部号码预填</button>
   <button id="skip">跳过 (S)</button>
   <button id="nogoal">不算进球 (N)</button>
   <button class="nav" id="prev">← 上一个</button>
