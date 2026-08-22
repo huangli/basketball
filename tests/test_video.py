@@ -605,6 +605,7 @@ class TestBuild:
             _write_json(
                 session_dir / "roster.json",
                 {
+                    "confirmed": True,
                     "players": [
                         {"tag": "红-7", "name": "大斌", "team": "半截篮"},
                         {"tag": "黑-A", "name": "", "team": "地平线"},
@@ -625,15 +626,18 @@ class TestBuild:
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        rawdir = self._setup(session_dir)
+        # confirmed roster 无过滤：全归属球合集，带 --roster 不带 --scorer/--team
+        # （无 roster 的默认自动模式见 TestBuildAuto）
+        rawdir = self._setup(session_dir, roster=True)
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
-        # 无过滤无 roster：全员合集，不带 --roster/--scorer/--team
         assert run_recorder[0][0] == [
             sys.executable,
             str(SCRIPT_DIR / "build_highlight.py"),
             "--goals",
             str(REL / "goals_batch1.json"),
+            "--roster",
+            str(REL / "roster.json"),
             "--rawdir",
             str(rawdir),
             "--out",
@@ -688,7 +692,7 @@ class TestBuild:
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        rawdir = self._setup(session_dir)
+        rawdir = self._setup(session_dir, roster=True)
         _write_json(session_dir / "goals_batch2.json", _goals_payload())
         _write_json(session_dir / "candidates_batch2.json", [])
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--batch", "2"])
@@ -707,6 +711,7 @@ class TestBuild:
         _write_json(
             session_dir / "roster.json",
             {
+                "confirmed": True,
                 "players": [
                     {"tag": "红-7", "name": "", "team": "半截篮"},
                     {"tag": "便-X", "name": "", "team": "便服"},
@@ -728,11 +733,16 @@ class TestBuild:
         self,
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        # 无 roster + --all：2026-08-22 起走自动模式（过滤旗标忽略 WARNING），不再拒收
         rawdir = self._setup(session_dir, roster=False)
+        _write_json(session_dir / "auto_roster.json", {"players": [], "assignments": {}})
+        caplog.set_level(logging.WARNING)
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
-        assert rc == 1
-        assert run_recorder == []  # 前置校验失败，不启动任何子进程
+        assert rc == 0
+        assert run_recorder  # 自动模式三产物链照常跑
+        assert "被忽略" in caplog.text
 
     def test_all_roster_schema_bad(self, session_dir: pathlib.Path) -> None:
         rawdir = self._setup(session_dir)
@@ -751,7 +761,7 @@ class TestBuild:
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        rawdir = self._setup(session_dir)
+        rawdir = self._setup(session_dir, roster=True)
         _write_json(session_dir / "session_facts.json", _facts_payload(2880, 2160))
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
@@ -794,6 +804,7 @@ class TestBuildHeatmap:
             _write_json(
                 session_dir / "roster.json",
                 {
+                    "confirmed": True,
                     "players": [{"tag": "红-7", "name": "", "team": "半截篮"}],
                     "assignments": {format_key("f0.mp4", 0.5): "红-7"},
                 },
@@ -850,9 +861,11 @@ class TestBuildHeatmap:
     ) -> None:
         calls = self._record_heatmap(monkeypatch)
         rawdir = self._setup(session_dir, roster=False)
+        # 自动模式（无 confirmed roster）：热图不新触发；预写空 auto_roster 使链走完
+        _write_json(session_dir / "auto_roster.json", {"players": [], "assignments": {}})
         rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
-        assert calls == []  # 未认人是预期常态，INFO 跳过不调 heat_session
+        assert calls == []  # 未认人是预期常态，不调 heat_session
 
     def test_heatmap_not_run_on_dry_run(
         self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
@@ -887,6 +900,7 @@ class TestBuildMultiBatch:
         _write_json(
             session_dir / "roster.json",
             {
+                "confirmed": True,
                 "players": [
                     {"tag": "红-7", "name": "", "team": "半截篮"},
                     {"tag": "黑-A", "name": "", "team": "地平线"},
@@ -927,6 +941,7 @@ class TestBuildMultiBatch:
         _write_json(
             session_dir / "roster.json",
             {
+                "confirmed": True,
                 "players": [
                     {"tag": "红-7", "name": "", "team": "半截篮"},
                     {"tag": "黑-A", "name": "", "team": "地平线"},
@@ -952,6 +967,7 @@ class TestBuildMultiBatch:
         _write_json(
             session_dir / "roster.json",
             {
+                "confirmed": True,
                 "players": [{"tag": "红-7", "name": "", "team": "半截篮"}],
                 "assignments": {"ghost.mp4#9.9": "红-7"},
             },
@@ -978,6 +994,293 @@ class TestBuildMultiBatch:
             ["build", "--session", SESSION, "--rawdir", str(rawdir), "--all", "--dry-run"]
         )
         # Assert
+        assert rc == 0
+        assert not (session_dir / "merged_goals_cli.json").exists()
+
+
+class TestBuildAuto:
+    """build 自动模式（无 confirmed roster，docs/build-auto-scorer/spec.md）：
+    进球片段 + 自动识别链（裁图/聚类/auto_roster）+ 逐颜色队队伍集锦 + 逐簇个人合集。"""
+
+    def _setup(self, session_dir: pathlib.Path, *, auto_roster: bool = True) -> pathlib.Path:
+        """备好单批次前置产物；auto_roster=True 时预写 auto_roster.json
+        （mock 子进程不产真文件，④ 的产物由夹具代写）。"""
+        _write_json(session_dir / "goals_batch1.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch1.json", [])
+        _write_json(session_dir / "session_facts.json", _facts_payload())
+        if auto_roster:
+            _write_json(
+                session_dir / "auto_roster.json",
+                {
+                    "confirmed": False,
+                    "players": [{"tag": "A", "name": "", "team": "黑"}],
+                    "assignments": {format_key("f0.mp4", 0.5): "A"},
+                },
+            )
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    def test_auto_chain_verbatim(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        rawdir = self._setup(session_dir)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert len(run_recorder) == 6
+        # ① 进球片段（真值表⑨，不传 --roster；自动模式不出全员集锦）
+        assert run_recorder[0][0] == [
+            sys.executable,
+            str(SCRIPT_DIR / "build_highlight.py"),
+            "--goals",
+            str(REL / "goals_batch1.json"),
+            "--rawdir",
+            str(rawdir),
+            "--out",
+            "1920x1080",
+            "--per-goal",
+        ]
+        # 自动模式不出全员集锦：唯一不带 --roster 的 build_highlight 调用是 ① --per-goal
+        no_roster_hl = [
+            c[0]
+            for c in run_recorder
+            if c[0][1].endswith("build_highlight.py") and "--roster" not in c[0]
+        ]
+        assert no_roster_hl == [run_recorder[0][0]]
+        # ② 裁图：不带 --read-numbers（自动合集允许有误，不开 K3 读号）
+        crop_cmd = run_recorder[1][0]
+        assert crop_cmd[1].endswith("crop_scorers.py")
+        assert "--read-numbers" not in crop_cmd
+        assert "--max-reads" not in crop_cmd
+        # ③ 聚类：跨批合并 --out scorers_auto/，定稿 complete/0.15，带 HTTPS_PROXY
+        assert run_recorder[2][0] == [
+            sys.executable,
+            str(SCRIPT_DIR / "cluster_scorers.py"),
+            "--candidates",
+            str(REL / "scorers_b1" / "scorer_candidates.json"),
+            "--out",
+            str(REL / "scorers_auto" / "scorer_clusters.json"),
+            "--linkage",
+            "complete",
+            "--threshold",
+            "0.15",
+        ]
+        assert run_recorder[2][1]["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+        # ④ auto_roster：带 --candidates 各批票源（簇内颜色分队多数票）
+        assert run_recorder[3][0] == [
+            sys.executable,
+            str(SCRIPT_DIR / "auto_roster.py"),
+            "--clusters",
+            str(REL / "scorers_auto" / "scorer_clusters.json"),
+            "--candidates",
+            str(REL / "scorers_b1" / "scorer_candidates.json"),
+            "--session",
+            SESSION,
+            "--out",
+            str(REL / "auto_roster.json"),
+        ]
+        # ⑤ 逐颜色队：--roster auto_roster.json + --team <队> + --allow-unconfirmed
+        team_cmd = run_recorder[4][0]
+        assert team_cmd[1].endswith("build_highlight.py")
+        assert team_cmd[team_cmd.index("--roster") + 1] == str(REL / "auto_roster.json")
+        assert team_cmd[team_cmd.index("--team") + 1] == "黑"
+        assert "--allow-unconfirmed" in team_cmd
+        # ⑥ 逐簇：--roster auto_roster.json + --scorer <tag> + --allow-unconfirmed
+        tag_cmd = run_recorder[5][0]
+        assert tag_cmd[1].endswith("build_highlight.py")
+        assert tag_cmd[tag_cmd.index("--roster") + 1] == str(REL / "auto_roster.json")
+        assert tag_cmd[tag_cmd.index("--scorer") + 1] == "A"
+        assert "--allow-unconfirmed" in tag_cmd
+
+    def test_unconfirmed_roster_triggers_auto_with_warning(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        rawdir = self._setup(session_dir)
+        _write_json(
+            session_dir / "roster.json",
+            {
+                "confirmed": False,
+                "players": [{"tag": "红-7", "name": "", "team": "半截篮"}],
+                "assignments": {},
+            },
+        )
+        caplog.set_level(logging.WARNING)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert "按未认人处理" in caplog.text
+        # ① 不传 --roster（未确认 roster 不传给 build_highlight）
+        assert "--roster" not in run_recorder[0][0]
+
+    def test_crop_idempotent_skip(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：scorer_candidates.json 已存在且可读 → ② 幂等跳过
+        rawdir = self._setup(session_dir)
+        _write_json(session_dir / "scorers_b1" / "scorer_candidates.json", {"candidates": []})
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        scripts_run = [c[0][1] for c in run_recorder]
+        assert not any(s.endswith("crop_scorers.py") for s in scripts_run)
+        # 聚类/auto_roster/逐簇照常
+        assert any(s.endswith("cluster_scorers.py") for s in scripts_run)
+
+    def test_missing_candidates_skips_identify_chain(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：批次缺 candidates.json → ① 照常，识别链整链跳过，exit 0
+        rawdir = self._setup(session_dir)
+        (session_dir / "candidates_batch1.json").unlink()
+        caplog.set_level(logging.WARNING)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert len(run_recorder) == 1  # 仅 ① --per-goal
+        assert "无可聚类候选" in caplog.text
+
+    def test_zero_clusters_skips_scorer_builds(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：auto_roster 0 簇（空 players/assignments）→ ⑤⑥ 跳过
+        rawdir = self._setup(session_dir, auto_roster=False)
+        _write_json(session_dir / "auto_roster.json", {"players": [], "assignments": {}})
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        # ①+②③④ = 4 步，无逐队/逐簇 build_highlight 调用
+        assert len(run_recorder) == 4
+        assert not any("--allow-unconfirmed" in c[0] for c in run_recorder)
+
+    def test_casual_team_excluded_from_team_highlights(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：auto_roster 两簇——A 黑队、B 便服队，均有归属球
+        rawdir = self._setup(session_dir, auto_roster=False)
+        _write_json(
+            session_dir / "auto_roster.json",
+            {
+                "confirmed": False,
+                "players": [
+                    {"tag": "A", "name": "", "team": "黑"},
+                    {"tag": "B", "name": "", "team": "便服"},
+                ],
+                "assignments": {
+                    format_key("f0.mp4", 0.5): "A",
+                    format_key("f1.mp4", 1.5): "B",
+                },
+            },
+        )
+        caplog.set_level(logging.INFO)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        # Assert：便服队不进队伍集锦循环（INFO 留痕），其簇个人合集照出
+        assert rc == 0
+        team_cmds = [c[0] for c in run_recorder if "--team" in c[0]]
+        assert [c[c.index("--team") + 1] for c in team_cmds] == ["黑"]
+        scorer_cmds = [c[0] for c in run_recorder if "--scorer" in c[0]]
+        assert [c[c.index("--scorer") + 1] for c in scorer_cmds] == ["A", "B"]
+        assert "便服队不进队伍集锦" in caplog.text
+
+    def test_identify_chain_failure_keeps_main_products_exit1(
+        self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：③ 聚类段失败（第 2 次子进程，0 起）
+        rawdir = self._setup(session_dir)
+        calls = _fail_recorder(monkeypatch, fail_at=2)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        # Assert：①② 已跑，④⑤⑥ 跳过，退出 1
+        assert rc == 1
+        assert len(calls) == 3
+
+    def test_auto_roster_product_missing_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：④ 报成功但产物缺失（异常现场）→ ERROR 退出 1
+        rawdir = self._setup(session_dir, auto_roster=False)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 1
+        assert len(run_recorder) == 4
+
+    def test_bad_roster_schema_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：roster schema 损坏 → 显式失败，不降级走自动模式
+        rawdir = self._setup(session_dir)
+        _write_json(session_dir / "roster.json", {"players": [{"tag": "x", "team": "  "}]})
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 1
+        assert run_recorder == []
+
+    def test_batch_filter_limits_goals_and_candidates(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：两批次，--batch 2 只作用于批次 2
+        rawdir = self._setup(session_dir)
+        _write_json(session_dir / "goals_batch2.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch2.json", [])
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--batch", "2"])
+        assert rc == 0
+        # ① goals 指向批次 2（单批不合并）；③ 裁图只跑批次 2；④ candidates 只有批次 2
+        assert str(REL / "goals_batch2.json") in run_recorder[0][0]
+        assert "merged_goals_cli.json" not in " ".join(run_recorder[0][0])
+        crop_cmd = next(c[0] for c in run_recorder if c[0][1].endswith("crop_scorers.py"))
+        assert str(REL / "scorers_b2") in crop_cmd
+        cluster_cmd = next(c[0] for c in run_recorder if c[0][1].endswith("cluster_scorers.py"))
+        candidates_args = [
+            cluster_cmd[i + 1] for i, v in enumerate(cluster_cmd) if v == "--candidates"
+        ]
+        assert candidates_args == [str(REL / "scorers_b2" / "scorer_candidates.json")]
+
+    def test_multi_batch_merges_goals_and_cluster_candidates(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：两批次自动模式
+        rawdir = self._setup(session_dir)
+        _write_json(session_dir / "goals_batch2.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch2.json", [])
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        # ① goals 指向合并文件
+        assert str(REL / "merged_goals_cli.json") in run_recorder[0][0]
+        # ④ 单次聚类合并两批 candidates（跨批簇标一致）
+        cluster_cmd = next(c[0] for c in run_recorder if c[0][1].endswith("cluster_scorers.py"))
+        candidates_args = [
+            cluster_cmd[i + 1] for i, v in enumerate(cluster_cmd) if v == "--candidates"
+        ]
+        assert candidates_args == [
+            str(REL / "scorers_b1" / "scorer_candidates.json"),
+            str(REL / "scorers_b2" / "scorer_candidates.json"),
+        ]
+
+    def test_dry_run_executes_nothing(
+        self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rawdir = self._setup(session_dir)
+
+        def forbidden(*a: object, **kw: object) -> None:
+            raise AssertionError("dry-run 不得启动子进程")
+
+        monkeypatch.setattr(video.subprocess, "run", forbidden)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--dry-run"])
         assert rc == 0
         assert not (session_dir / "merged_goals_cli.json").exists()
 

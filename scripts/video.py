@@ -2,9 +2,11 @@
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
 输出：透传调用 run_session / crop_scorers / cluster_scorers / gen_scorer_page /
-    build_highlight / rank_photos / gen_photo_page 七个底层脚本；
-    build 收尾追加 in-process 调 goal_heatmap.heat_session 出热图双风格
-    （v4.2 集成；懒 import，附属产物失败不阻塞主链）；
+    auto_roster / build_highlight / rank_photos / gen_photo_page 八个底层脚本；
+    build 按 roster 状态分两路（认人可选化 2026-08-22，docs/build-auto-scorer/）：
+    confirmed=true 走现状合成、收尾追加 in-process 调 goal_heatmap.heat_session
+    出热图双风格（v4.2 集成；懒 import，附属产物失败不阻塞主链），
+    缺失/未确认走自动模式（颜色分队队伍集锦 + 进球片段 + 自动个人合集，热图不触发）；
     状态文件 work/<场次>/video_cli.json。
 依赖：scripts/pipe_common.py（read_json/atomic_write_json/configure_logging/new_run_id）、
     scripts/errors.py、scripts/roster.py（validate_roster）；命令拼装契约见
@@ -331,17 +333,27 @@ def resolve_out_size(session_dir: Path) -> str:
     )
 
 
-def build_people_steps(
-    args: argparse.Namespace,
+def build_crop_argv(
     batch: Batch,
     rawdir: Path,
-    session_dir: Path,
-) -> list[Step]:
-    """拼装单批次 people 三段链：裁图 → 聚类 → 确认页（参数契约见 spec §people）。
+    *,
+    read_numbers: bool,
+    max_reads: int | None,
+) -> list[str]:
+    """拼装 crop_scorers 命令（people 三段链与 build 自动模式共用，逐项显式拼装）。
 
-    --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
-    --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
-    不传 --clusters。
+    read_numbers=True 时 --max-reads 缺省 = 该批 confirmed 球数 ×3
+    （--best-crops 默认 3，docs/scorer-reid/spec.md）；build 自动模式固定
+    read_numbers=False（读号走 K3 烧 token，自动合集允许有误，不开）。
+
+    Args:
+        batch: 批次产物路径集合。
+        rawdir: 原片目录。
+        read_numbers: 是否带 --read-numbers。
+        max_reads: 读号预算（None = 按 confirmed 球数 ×3 换算）。
+
+    Returns:
+        完整子进程命令（含 sys.executable 与脚本路径）。
     """
     crop_argv: list[str] = [
         sys.executable,
@@ -359,14 +371,32 @@ def build_people_steps(
         "--rawdir",
         str(rawdir),
     ]
-    if args.read_numbers:
+    if read_numbers:
         crop_argv.append("--read-numbers")
-        max_reads: int = (
-            args.max_reads
-            if args.max_reads is not None
+        reads: int = (
+            max_reads
+            if max_reads is not None
             else confirmed_count(batch.goals) * MAX_READS_PER_GOAL
         )
-        crop_argv.extend(["--max-reads", str(max_reads)])
+        crop_argv.extend(["--max-reads", str(reads)])
+    return crop_argv
+
+
+def build_people_steps(
+    args: argparse.Namespace,
+    batch: Batch,
+    rawdir: Path,
+    session_dir: Path,
+) -> list[Step]:
+    """拼装单批次 people 三段链：裁图 → 聚类 → 确认页（参数契约见 spec §people）。
+
+    --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
+    --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
+    不传 --clusters。
+    """
+    crop_argv: list[str] = build_crop_argv(
+        batch, rawdir, read_numbers=args.read_numbers, max_reads=args.max_reads
+    )
     steps: list[Step] = [Step(f"批次{batch.batch}①裁图", tuple(crop_argv))]
 
     if not args.skip_cluster:
@@ -600,12 +630,41 @@ def _build_expand_all(session_dir: Path, known_keys: set[str]) -> list[tuple[str
 
 
 def _cmd_build(args: argparse.Namespace) -> int:
-    """build：尺寸按 session_facts 主比例换算，逐批调 build_highlight。"""
+    """build：尺寸按 session_facts 主比例换算；按 roster 状态分派两条路径。
+
+    roster 存在且 confirmed=true → 现状路径（_cmd_build_confirmed，行为零改动）；
+    缺失或 confirmed=false → 自动模式（_cmd_build_auto，三产物链，认人可选化
+    2026-08-22，spec: docs/build-auto-scorer/spec.md）；roster schema 损坏
+    validate_roster 抛 SchemaError 显式失败（不降级不静默，rules.md §0.2）。
+    """
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
     rawdir: Path = resolve_rawdir(args.rawdir, state)
     out_size: str = resolve_out_size(session_dir)
     batches: list[Batch] = _select_batches(discover_batches(session_dir), args.batch)
+    roster_path: Path = session_dir / "roster.json"
+    roster_confirmed: bool = False
+    if roster_path.is_file():
+        roster = validate_roster(read_json(roster_path, what="roster.json"), str(roster_path))
+        roster_confirmed = roster.confirmed
+    if roster_confirmed:
+        return _cmd_build_confirmed(args, session_dir, rawdir, out_size, batches, roster_path)
+    return _cmd_build_auto(args, session_dir, rawdir, out_size, batches)
+
+
+def _cmd_build_confirmed(
+    args: argparse.Namespace,
+    session_dir: Path,
+    rawdir: Path,
+    out_size: str,
+    batches: list[Batch],
+    roster_path: Path,
+) -> int:
+    """build 现状路径（roster confirmed=true）：逐 filter 调 build_highlight。
+
+    --all 展开 roster 逐人 + 逐队；多批次合并 goals 后每 filter 只调一次；
+    收尾触发热图双风格（自动模式不触发，见 _cmd_build_auto）。
+    """
     filters: list[tuple[str, str]]
     if args.all:
         known_keys: set[str] = set()
@@ -622,7 +681,6 @@ def _cmd_build(args: argparse.Namespace) -> int:
         filters = [("--team", args.team)]
     else:
         filters = [("", "")]
-    roster_path: Path = session_dir / "roster.json"
     # 多批次合并：输出名由 session+filter 决定、不含批次，逐批调会互相覆盖
     # （且零球批次 exit 1 中止整轮）；合并后每 filter 只调一次，build_highlight
     # 内部按 (file, anchor_time) 排序——文件名即时间戳，跨批排序天然正确
@@ -673,6 +731,278 @@ def _cmd_build(args: argparse.Namespace) -> int:
     else:
         logger.info("build 完成（%d 步，--out %s）", len(completed), out_size)
         _run_heatmap_step(session_dir, roster_path)
+    return 0
+
+
+def _scorer_candidates_ready(path: Path) -> bool:
+    """crop 幂等判定：scorer_candidates.json 存在且 JSON 可读即跳过（仿 run_session
+    断点口径）；存在但不可读 WARNING 后按未产处理（重跑裁图覆盖）。
+
+    Args:
+        path: 批次 scorer_candidates.json 路径。
+
+    Returns:
+        True = 产物可用可跳过；False = 需跑 crop_scorers。
+    """
+    if not path.is_file():
+        return False
+    try:
+        read_json(path, what=path.name)
+    except (BasketballPipelineError, OSError) as exc:
+        logger.warning("scorer_candidates 存在但不可读，重跑裁图: %s (%s)", path, exc)
+        return False
+    return True
+
+
+def _auto_roster_hit_groups(roster_path: Path, known_keys: set[str]) -> tuple[list[str], list[str]]:
+    """读 auto_roster.json，返回在选定批次 confirmed 键集内有归属球的 (tag 列表, 颜色队列表)。
+
+    零命中预算跳过（仿 _build_expand_all 口径：build_highlight 对零记录
+    exit 1，不能让单点空组合中止整轮）；便服队不进队伍集锦循环
+    （build_highlight 真值表⑧拒收），有命中便服簇即 INFO 留痕一行
+    （允许有误口径：全员便服场次只出个人合集，见 spec 风险表）。
+
+    Args:
+        roster_path: work/<场次>/auto_roster.json 路径。
+        known_keys: 选定批次 confirmed 球的 format_key 集合。
+
+    Returns:
+        (有归属球的 tag（players 顺序）, 有归属球的非便服队别（players 出现序去重）)。
+
+    Raises:
+        SchemaError: auto_roster.json schema 损坏（validate_roster 抛出，不静默）。
+    """
+    roster = validate_roster(read_json(roster_path, what="auto_roster.json"), str(roster_path))
+    hit: set[str] = {tag for key, tag in roster.assignments.items() if key in known_keys}
+    tags: list[str] = []
+    teams: list[str] = []
+    casual_noted: bool = False
+    for p in roster.players:
+        if p.tag not in hit:
+            logger.warning("跳过零命中簇: %s（选定批次内无归属球）", p.tag)
+            continue
+        tags.append(p.tag)
+        if p.team == CASUAL_TEAM:
+            casual_noted = True
+        elif p.team not in teams:
+            teams.append(p.team)
+    if casual_noted:
+        logger.info("便服队不进队伍集锦（真值表⑧），其簇只出个人合集")
+    return tags, teams
+
+
+def _cmd_build_auto(
+    args: argparse.Namespace,
+    session_dir: Path,
+    rawdir: Path,
+    out_size: str,
+    batches: list[Batch],
+) -> int:
+    """build 自动模式（无 confirmed roster）：一条命令出三产物（认人可选化）。
+
+    链（spec: docs/build-auto-scorer/spec.md §技术现状；2026-08-22 立哥改定：
+    不出全员集锦，改按球衣颜色分队出队伍集锦）：
+    ① build_highlight --per-goal → 进球片段/；
+    ② 逐批 crop_scorers（不带 --read-numbers；产物可读即幂等跳过）；
+    ③ cluster_scorers 跨批合并（定稿 complete/0.15，--out scorers_auto/，
+       每次重跑靠 clip_cache 免重复 CLIP 推理）；
+    ④ auto_roster.py（带 --candidates 各批票源做簇内颜色分队多数票）
+       → work/<场次>/auto_roster.json；
+    ⑤ 逐颜色队 build_highlight --roster auto_roster.json --team <队>
+       --allow-unconfirmed → 队伍_<队>_进球集锦.mp4（便服队不进循环——真值表⑧
+       口径；零命中队预算跳过，仿零命中 tag 口径）；
+    ⑥ 逐簇 build_highlight --roster auto_roster.json --scorer <tag>
+       --allow-unconfirmed → <队>_<tag>_进球合集.mp4（零命中簇预算跳过；
+       0 簇不出队伍/个人合集）；
+    ⑦ 热图跳过（goal_heatmap 无 confirmed 检查，未确认 roster 上不新触发）。
+
+    ① 失败即中止退出 1；②-⑥ 任一步失败 ERROR 留痕、跳过剩余识别步骤、
+    已产出的 ① 保留、退出 1（不静默降级）。某批缺 candidates.json WARNING
+    跳过该批（同 _cmd_people 口径）；全部缺则跳过整条识别链，① 照常 exit 0。
+    """
+    logger.warning(
+        "roster 缺失或未 confirmed=true：按未认人处理，出队伍集锦（颜色分队）/进球片段/自动个人合集"
+    )
+    if args.all or args.scorer or args.team:
+        logger.warning("未认人模式下过滤旗标（--all/--scorer/--team）被忽略")
+    # goals：多批合并（与 confirmed 路径同口径；跨批排序在 build_highlight 内）
+    goals_path: Path
+    if len(batches) > 1:
+        goals_path = session_dir / MERGED_GOALS_NAME
+        if not args.dry_run:
+            goals_path = _merge_goals_for_build(batches, args.session, session_dir)
+    else:
+        goals_path = batches[0].goals
+    base: list[str] = [
+        sys.executable,
+        str(SCRIPT_DIR / "build_highlight.py"),
+        "--goals",
+        str(goals_path),
+        "--rawdir",
+        str(rawdir),
+        "--out",
+        out_size,
+    ]
+    main_steps: list[Step] = [
+        Step("进球片段（--per-goal）", tuple([*base, "--per-goal"])),
+    ]
+    completed: list[str] = []
+    dry_count: int = 0
+    try:
+        for step in main_steps:
+            if args.dry_run:
+                _log_dry_step(step)
+                dry_count += 1
+                continue
+            run_step(list(step.argv), step.env_extra)
+            completed.append(step.title)
+    except StepFailedError as exc:
+        logger.error("失败命令: %s", shlex.join(exc.cmd))
+        logger.error("已完成步骤: %s", completed or "（无）")
+        return 1
+
+    # ② 裁图：逐批（缺 candidates 批次 WARNING 跳过；产物可读幂等跳过）
+    identify_steps: list[Step] = []
+    crop_batches: list[Batch] = []
+    for batch in batches:
+        if not batch.candidates.is_file():
+            logger.warning("批次 %d 缺 candidates，跳过该批裁图: %s", batch.batch, batch.candidates)
+            continue
+        crop_batches.append(batch)
+        if _scorer_candidates_ready(batch.scorer_candidates):
+            logger.info(
+                "批次 %d 裁图产物已存在且可读，幂等跳过: %s", batch.batch, batch.scorer_candidates
+            )
+            continue
+        identify_steps.append(
+            Step(
+                f"批次{batch.batch}裁图（自动）",
+                tuple(build_crop_argv(batch, rawdir, read_numbers=False, max_reads=None)),
+            )
+        )
+    if not crop_batches:
+        logger.warning("所有批次缺 candidates，无可聚类候选——跳过自动识别（队伍/个人合集不出）")
+    else:
+        auto_dir: Path = session_dir / "scorers_auto"
+        auto_clusters: Path = auto_dir / "scorer_clusters.json"
+        auto_roster_path: Path = session_dir / "auto_roster.json"
+        # ③ 聚类：单次合并全部批次 candidates，天然跨批簇标一致；每次重跑
+        cluster_argv: list[str] = [sys.executable, str(SCRIPT_DIR / "cluster_scorers.py")]
+        for batch in crop_batches:
+            cluster_argv.extend(["--candidates", str(batch.scorer_candidates)])
+        cluster_argv.extend(
+            [
+                "--out",
+                str(auto_clusters),
+                "--linkage",
+                CLUSTER_LINKAGE,
+                "--threshold",
+                CLUSTER_THRESHOLD,
+            ]
+        )
+        identify_steps.append(
+            Step("自动聚类", tuple(cluster_argv), {"HTTPS_PROXY": CLUSTER_HTTPS_PROXY})
+        )
+        # ④ 聚类+颜色分队票源 → auto_roster.json（confirmed=false；team=簇内多数票）
+        auto_roster_argv: list[str] = [
+            sys.executable,
+            str(SCRIPT_DIR / "auto_roster.py"),
+            "--clusters",
+            str(auto_clusters),
+        ]
+        for batch in crop_batches:
+            auto_roster_argv.extend(["--candidates", str(batch.scorer_candidates)])
+        auto_roster_argv.extend(["--session", args.session, "--out", str(auto_roster_path)])
+        identify_steps.append(Step("自动 roster", tuple(auto_roster_argv)))
+        identify_ok: bool = True
+        try:
+            for step in identify_steps:
+                if args.dry_run:
+                    _log_dry_step(step)
+                    dry_count += 1
+                    continue
+                run_step(list(step.argv), step.env_extra)
+                completed.append(step.title)
+        except StepFailedError as exc:
+            logger.error("自动识别链失败（已产出的进球片段保留）: %s", shlex.join(exc.cmd))
+            identify_ok = False
+        # ⑤⑥ 逐颜色队队伍集锦 + 逐簇个人合集（真值表⑤/④ + ⑩ 闸门）
+        if identify_ok:
+            if args.dry_run:
+                _log_dry_step(
+                    Step(
+                        "队伍集锦（每颜色队一次，便服除外，队别由 auto_roster 决定）",
+                        (
+                            str(SCRIPT_DIR / "build_highlight.py"),
+                            "--roster",
+                            str(auto_roster_path),
+                            "--team",
+                            "<队>",
+                            "--allow-unconfirmed",
+                        ),
+                    )
+                )
+                _log_dry_step(
+                    Step(
+                        "个人合集（每簇一次，tag 由 auto_roster 决定）",
+                        (
+                            str(SCRIPT_DIR / "build_highlight.py"),
+                            "--roster",
+                            str(auto_roster_path),
+                            "--scorer",
+                            "<簇标>",
+                            "--allow-unconfirmed",
+                        ),
+                    )
+                )
+                dry_count += 2
+            else:
+                if not auto_roster_path.is_file():
+                    logger.error("auto_roster 步骤成功但产物缺失: %s", auto_roster_path)
+                    return 1
+                known_keys: set[str] = set()
+                for batch in batches:
+                    known_keys |= _confirmed_keys(batch.goals)
+                tags, teams = _auto_roster_hit_groups(auto_roster_path, known_keys)
+                if not tags:
+                    logger.info("auto_roster 无归属球（0 簇或全零命中），跳过队伍/个人合集")
+                jobs: list[tuple[str, str, str]] = [
+                    *[("--team", t, f"队伍_{t}_进球集锦") for t in teams],
+                    *[("--scorer", tag, f"簇{tag}_个人合集") for tag in tags],
+                ]
+                for flag, value, title in jobs:
+                    cmd: list[str] = [
+                        sys.executable,
+                        str(SCRIPT_DIR / "build_highlight.py"),
+                        "--goals",
+                        str(goals_path),
+                        "--roster",
+                        str(auto_roster_path),
+                        flag,
+                        value,
+                        "--allow-unconfirmed",
+                        "--rawdir",
+                        str(rawdir),
+                        "--out",
+                        out_size,
+                    ]
+                    try:
+                        run_step(cmd)
+                        completed.append(title)
+                    except StepFailedError as exc:
+                        logger.error(
+                            "自动识别链失败（已产出的进球片段保留）: %s",
+                            shlex.join(exc.cmd),
+                        )
+                        return 1
+        elif not args.dry_run:
+            return 1
+    if args.dry_run:
+        logger.info("DRY-RUN 共 %d 步（未执行，--out %s）", dry_count, out_size)
+    else:
+        logger.info(
+            "build 自动模式完成（%d 步，--out %s；热图未认人不触发）", len(completed), out_size
+        )
     return 0
 
 

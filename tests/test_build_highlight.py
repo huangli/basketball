@@ -1,21 +1,27 @@
-"""build_highlight 单元测试（goals.json schema 校验 + spec 组合真值表 8 分支）。
+"""build_highlight 单元测试（goals.json schema 校验 + spec 组合真值表 10 分支）。
 
 覆盖：_validate_goals 合法通过、非 confirmed 过滤、未知 status 跳过、各类结构
-损坏抛 SchemaError；parse_argv 的 --out/--roster/--team 注入；scale_pad_filter
-滤镜串；select_goals 真值表（①全员 ②旧 scorer 精确匹配+0 命中 WARNING
-③全归属球+未归属 WARNING ④tag|name 解析输出名用 tag ⑤队伍合集 ⑥互斥
-⑦无 roster 给 --team ⑧--team 便服）；require_confirmed 拒收未确认 roster。
+损坏抛 SchemaError；parse_argv 的 --out/--roster/--team/--per-goal/
+--allow-unconfirmed 注入；scale_pad_filter 滤镜串；select_goals 真值表
+（①全员 ②旧 scorer 精确匹配+0 命中 WARNING ③全归属球+未归属 WARNING
+④tag|name 解析输出名用 tag ⑤队伍合集 ⑥互斥 ⑦无 roster 给 --team
+⑧--team 便服）；require_confirmed 拒收未确认 roster；⑨--per-goal 独立进球
+片段（命名/互斥/幂等/缺失跳号）；⑩--allow-unconfirmed 闸门（豁免/拒收/误用）。
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import pathlib
 import sys
 from typing import Any
 
 import pytest
 
+import build_highlight
 from build_highlight import (
+    _remove_with_retry,
     _validate_goals,
     parse_argv,
     require_confirmed,
@@ -109,11 +115,13 @@ def test_parse_argv_out_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
     monkeypatch.setattr(sys, "argv", ["build_highlight.py", "--goals", "g.json"])
     # Act
-    _, _, _, out_w, out_h, roster, team = parse_argv()
-    # Assert：默认保持 4:3 老素材尺寸；roster/team 默认空
+    _, _, _, out_w, out_h, roster, team, per_goal, allow_unconfirmed = parse_argv()
+    # Assert：默认保持 4:3 老素材尺寸；roster/team 默认空；⑨⑩ 旗标默认 False
     assert (out_w, out_h) == (1440, 1080)
     assert roster == ""
     assert team == ""
+    assert per_goal is False
+    assert allow_unconfirmed is False
 
 
 def test_parse_argv_out_custom(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,7 +130,7 @@ def test_parse_argv_out_custom(monkeypatch: pytest.MonkeyPatch) -> None:
         sys, "argv", ["build_highlight.py", "--goals", "g.json", "--out", "1920x1080"]
     )
     # Act
-    _, _, _, out_w, out_h, _, _ = parse_argv()
+    _, _, _, out_w, out_h, _, _, _, _ = parse_argv()
     # Assert：16:9 场次注入 1920x1080
     assert (out_w, out_h) == (1920, 1080)
 
@@ -135,10 +143,24 @@ def test_parse_argv_roster_team(monkeypatch: pytest.MonkeyPatch) -> None:
         ["build_highlight.py", "--goals", "g.json", "--roster", "r.json", "--team", "地平线"],
     )
     # Act
-    _, _, _, _, _, roster, team = parse_argv()
+    _, _, _, _, _, roster, team, _, _ = parse_argv()
     # Assert
     assert roster == "r.json"
     assert team == "地平线"
+
+
+def test_parse_argv_per_goal_and_allow_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["build_highlight.py", "--goals", "g.json", "--per-goal", "--allow-unconfirmed"],
+    )
+    # Act
+    *_, per_goal, allow_unconfirmed = parse_argv()
+    # Assert：⑨⑩ 旗标各自独立置位（互斥校验在 main，不在 parse_argv）
+    assert per_goal is True
+    assert allow_unconfirmed is True
 
 
 def test_scale_pad_filter_uses_given_dims() -> None:
@@ -172,7 +194,7 @@ class TestSelectGoalsTruthTable:
         goals = [_goal(), _goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0)]
         # Act
         selected, stem = select_goals(goals, None, "", "")
-        # Assert：全员现状不变
+        # Assert：全员；①③ 同名 个人_全员_进球合集
         assert len(selected) == 2
         assert stem == "个人_全员_进球合集"
 
@@ -281,3 +303,305 @@ class TestRequireConfirmed:
         # Arrange / Act / Assert
         with pytest.raises(BasketballPipelineError, match="confirmed"):
             require_confirmed(_roster(confirmed=False), "r.json")
+
+
+class _MainFixture:
+    """main() 级测试公共夹具：隔离 cwd、假原片、mock 剪切/拼接（不跑真 ffmpeg）。"""
+
+    def __init__(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        self.tmp_path: pathlib.Path = tmp_path
+        self.rawdir: pathlib.Path = tmp_path / "raw"
+        self.rawdir.mkdir()
+        self.goals_path: pathlib.Path = tmp_path / "goals.json"
+        self.cut_calls: list[str] = []
+        self.ffmpeg_calls: list[list[str]] = []
+
+        def fake_cut(src: str, goal: dict[str, Any], out_path: str, scale_pad: str) -> None:
+            self.cut_calls.append(out_path)
+            pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(out_path).touch()
+
+        monkeypatch.setattr(build_highlight, "cut_normal", fake_cut)
+        monkeypatch.setattr(build_highlight, "cut_slowmo", fake_cut)
+        monkeypatch.setattr(
+            build_highlight,
+            "run_ffmpeg",
+            lambda args, **kw: self.ffmpeg_calls.append(list(args)),
+        )
+
+    def write_goals(self, goals: list[dict[str, Any]], session: str = "s1") -> None:
+        """落盘 goals.json 夹具。"""
+        self.goals_path.write_text(
+            json.dumps({"session": session, "goals": goals}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def write_roster(self, payload: dict[str, Any]) -> pathlib.Path:
+        """落盘 roster.json 夹具，返回路径。"""
+        path = self.tmp_path / "roster.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def touch_raw(self, *names: str) -> None:
+        """造原片占位文件。"""
+        for name in names:
+            (self.rawdir / name).touch()
+
+    def run_main(self, monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
+        """以给定参数跑 build_highlight.main()。"""
+        monkeypatch.setattr(sys, "argv", ["build_highlight.py", *argv])
+        return build_highlight.main()
+
+
+class TestPerGoal:
+    """真值表⑨：--per-goal 每球独立出片到 进球片段/（命名/互斥/幂等/缺失跳号）。"""
+
+    def test_per_goal_outputs_named_clips(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：两球（b.MP4@3.0 时序在前但按 (file, anchor) 排序 a 在前）
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals(
+            [
+                _goal(),
+                _goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0),
+            ]
+        )
+        fx.touch_raw("a.MP4", "b.MP4")
+        # Act
+        rc = fx.run_main(
+            monkeypatch, "--goals", str(fx.goals_path), "--rawdir", str(fx.rawdir), "--per-goal"
+        )
+        # Assert：NNN_<主名>@<t:.1f>s.mp4；不 concat（无 run_ffmpeg 调用）
+        assert rc == 0
+        names = [pathlib.Path(c).name for c in fx.cut_calls]
+        assert names == ["001_a@10.0s.mp4", "002_b@3.0s.mp4"]
+        out_dir = tmp_path / "output" / "s1" / "进球片段"
+        assert (out_dir / "001_a@10.0s.mp4").is_file()
+        assert (out_dir / "002_b@3.0s.mp4").is_file()
+        assert fx.ffmpeg_calls == []
+
+    def test_per_goal_slowmo_routing(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：slowmo=true 走 cut_slowmo
+        fx = _MainFixture(tmp_path, monkeypatch)
+        slowmo_calls: list[str] = []
+        monkeypatch.setattr(
+            build_highlight,
+            "cut_slowmo",
+            lambda src, goal, out_path, scale_pad: (
+                slowmo_calls.append(out_path),
+                pathlib.Path(out_path).touch(),
+            ),
+        )
+        fx.write_goals([_goal(slowmo=True)])
+        fx.touch_raw("a.MP4")
+        # Act
+        rc = fx.run_main(
+            monkeypatch, "--goals", str(fx.goals_path), "--rawdir", str(fx.rawdir), "--per-goal"
+        )
+        # Assert
+        assert rc == 0
+        assert len(slowmo_calls) == 1
+        assert fx.cut_calls == []  # cut_normal 未被调（fixture 里 cut_normal 记此处）
+
+    def test_per_goal_mutex_with_filters(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        fx.touch_raw("a.MP4")
+        # Act / Assert：⑨ 与 --scorer/--team/--roster 互斥报错
+        for extra in (["--scorer", "大斌"], ["--team", "黑"], ["--roster", "r.json"]):
+            rc = fx.run_main(
+                monkeypatch,
+                "--goals",
+                str(fx.goals_path),
+                "--rawdir",
+                str(fx.rawdir),
+                "--per-goal",
+                *extra,
+            )
+            assert rc == 1
+        assert fx.cut_calls == []
+
+    def test_per_goal_idempotent_skip(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：同名产物已存在 → 幂等跳过不重复转码
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        fx.touch_raw("a.MP4")
+        existing = tmp_path / "output" / "s1" / "进球片段" / "001_a@10.0s.mp4"
+        existing.parent.mkdir(parents=True)
+        existing.touch()
+        # Act
+        rc = fx.run_main(
+            monkeypatch, "--goals", str(fx.goals_path), "--rawdir", str(fx.rawdir), "--per-goal"
+        )
+        # Assert
+        assert rc == 0
+        assert fx.cut_calls == []
+
+    def test_per_goal_missing_source_keeps_numbering_exit1(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：b.MP4 原片缺失 → 002 跳号保留（不 compact），c 照常出 003
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals(
+            [
+                _goal(),
+                _goal(file="b.MP4", anchor_time=3.0, clip_start=0.0, clip_end=5.0),
+                _goal(file="c.MP4", anchor_time=5.0, clip_start=1.0, clip_end=7.0),
+            ]
+        )
+        fx.touch_raw("a.MP4", "c.MP4")
+        # Act
+        rc = fx.run_main(
+            monkeypatch, "--goals", str(fx.goals_path), "--rawdir", str(fx.rawdir), "--per-goal"
+        )
+        # Assert
+        assert rc == 1
+        names = [pathlib.Path(c).name for c in fx.cut_calls]
+        assert names == ["001_a@10.0s.mp4", "003_c@5.0s.mp4"]
+
+
+class TestAllowUnconfirmed:
+    """真值表⑩：--allow-unconfirmed 仅豁免 confirmed 检查；① stem 改名回归。"""
+
+    def _roster_payload(self, confirmed: bool) -> dict[str, Any]:
+        """auto roster 风格载荷：team 取颜色队别 / name 空 / tag 字母。
+
+        （"球员" 为历史合法值——T3R 后 auto_roster 产 黑/白/便服 多数票，
+        此处仅构造最小合法载荷，不断言 team 语义。）
+        """
+        return {
+            "session": "s1",
+            "confirmed": confirmed,
+            "players": [{"tag": "A", "name": "", "team": "球员"}],
+            "assignments": {format_key("a.MP4", 10.0): "A"},
+        }
+
+    def test_unconfirmed_roster_with_flag_builds(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：未 confirmed roster + 闸门旗标 → 放行，④ 命名产 球员_A_进球合集
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        fx.touch_raw("a.MP4")
+        roster_path = fx.write_roster(self._roster_payload(confirmed=False))
+        # Act
+        rc = fx.run_main(
+            monkeypatch,
+            "--goals",
+            str(fx.goals_path),
+            "--rawdir",
+            str(fx.rawdir),
+            "--roster",
+            str(roster_path),
+            "--allow-unconfirmed",
+            "--scorer",
+            "A",
+        )
+        # Assert：concat 末参数 = 输出路径
+        assert rc == 0
+        assert fx.ffmpeg_calls[-1][-1].endswith("球员_A_进球合集.mp4")
+
+    def test_unconfirmed_roster_without_flag_rejected(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange / Act / Assert：旧契约不动——显式 --roster 未确认仍拒收
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        fx.touch_raw("a.MP4")
+        roster_path = fx.write_roster(self._roster_payload(confirmed=False))
+        rc = fx.run_main(
+            monkeypatch,
+            "--goals",
+            str(fx.goals_path),
+            "--rawdir",
+            str(fx.rawdir),
+            "--roster",
+            str(roster_path),
+        )
+        assert rc == 1
+        assert fx.cut_calls == []
+
+    def test_flag_without_roster_rejected(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange / Act / Assert：无 --roster 给旗标 = 无意义组合，显式失败
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        rc = fx.run_main(
+            monkeypatch,
+            "--goals",
+            str(fx.goals_path),
+            "--rawdir",
+            str(fx.rawdir),
+            "--allow-unconfirmed",
+        )
+        assert rc == 1
+        assert fx.cut_calls == []
+
+    def test_branch1_output_name(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange / Act：① 无 roster 无过滤
+        fx = _MainFixture(tmp_path, monkeypatch)
+        fx.write_goals([_goal()])
+        fx.touch_raw("a.MP4")
+        rc = fx.run_main(monkeypatch, "--goals", str(fx.goals_path), "--rawdir", str(fx.rawdir))
+        # Assert：①③ 同名 个人_全员_进球合集（③ 由 test_branch3 锁定）
+        assert rc == 0
+        assert fx.ffmpeg_calls[-1][-1].endswith("个人_全员_进球合集.mp4")
+
+
+class TestRemoveWithRetry:
+    """_remove_with_retry：Windows 瞬时文件锁退避重试（2026-08-22 真机 WinError 32 实录）。"""
+
+    def test_first_try_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(build_highlight.os, "remove", calls.append)
+        _remove_with_retry("x.mp4")
+        assert calls == ["x.mp4"]
+
+    def test_transient_lock_retries_then_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        attempts: list[str] = []
+        sleeps: list[float] = []
+
+        def fake_remove(path: str) -> None:
+            attempts.append(path)
+            if len(attempts) < 3:
+                raise PermissionError("locked")
+
+        monkeypatch.setattr(build_highlight.os, "remove", fake_remove)
+        monkeypatch.setattr(build_highlight.time, "sleep", sleeps.append)
+        _remove_with_retry("x.mp4")
+        assert len(attempts) == 3
+        assert sleeps == [0.5, 1.0]
+
+    def test_persistent_lock_raises_after_exhaustion(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(build_highlight.time, "sleep", lambda _: None)
+
+        def always_locked(path: str) -> None:
+            raise PermissionError("locked")
+
+        monkeypatch.setattr(build_highlight.os, "remove", always_locked)
+        with pytest.raises(PermissionError):
+            _remove_with_retry("x.mp4")
+
+    def test_other_oserror_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr(build_highlight.time, "sleep", sleeps.append)
+
+        def not_found(path: str) -> None:
+            raise FileNotFoundError(path)
+
+        monkeypatch.setattr(build_highlight.os, "remove", not_found)
+        with pytest.raises(FileNotFoundError):
+            _remove_with_retry("x.mp4")
+        assert sleeps == []

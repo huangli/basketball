@@ -33,8 +33,8 @@
 - 100fps 素材：入网前常速（降 50fps），入网后 2 秒做半速慢放（100→50fps），两段拼接；其他帧率不慢放
 - 命名用标签不用真名：`红队-7号`、`黑T恤-A` 风格；花名册生成后需给用户确认
 - 按**场次**组织：场次默认 = 文件名日期（YYYYMMDD），同一天多场按时间间隔拆分；用户可明确声明新场次（ID 用 `YYYYMMDD_对手名`），声明优先；roster 按场次隔离、各自需用户确认，跨场次不合并
-- 成品分两类、按场次分目录：`output\<场次>\队伍_XX_进球集锦.mp4` 和 `output\<场次>\<队伍>_<姓名>_进球合集.mp4`（2026-08-09 起新命名，姓名为空回退标签），片段按拍摄时间排序，同参数 concat 直接重封装不重编码；若同场次混入不同比例素材，须按比例分别合成或统一缩放重编码后拼接
-- **合集口径（2026-08-08 立哥定）**：不出全员总合集；分队合集按队伍出但依赖认人——要分队合集时先跑认人流程
+- 成品按场次分目录 `output\<场次>\`，片段按拍摄时间排序，同参数 concat 直接重封装不重编码；若同场次混入不同比例素材，须按比例分别合成或统一缩放重编码后拼接
+- **合集口径（2026-08-22 立哥改定：认人可选）**：未认人（roster 缺失或未 confirmed）`video build` 默认出三类——`队伍_<黑|白>_进球集锦.mp4`（按球衣颜色分队，crop_scorers `team_guess` 多数票，允许有误）、`进球片段/`（每球独立 mp4）、`<队>_<簇标>_进球合集.mp4`（自动聚类簇、允许有误；便服队不出集锦）；认人后（roster confirmed=true）照旧出 `队伍_XX_进球集锦.mp4` 与 `<队伍>_<姓名>_进球合集.mp4`（2026-08-09 起命名，姓名为空回退标签）。2026-08-08"不出全员总合集"口径维持有效；四件套见 `docs/build-auto-scorer/`
 - 审核视频 2 倍速（立哥实测可稳判，声音保留）
 
 ## 代码规范（强制，勿再询问）
@@ -51,7 +51,7 @@
 - 中间产物放 `work\`（frames / detect / <场次>/），成品放 `output\<场次>\`；旧 v1 中间产物与旧测试原片已随 archive 清理删除（2026-08-11，释放 33G），`archive/` 现仅存 git 跟踪的冻结代码与文档
 - 状态存 JSON：`goals.json`（进球时刻）、`roster.json`（进球→人物→队伍），便于断点续做
 - **检测流水线**（详见主文档）：抽帧 5fps → abdullahtarek+yolov8n 检测（顺带存筐检测入 mot 缓存）→ MOT 静止段+断轨重连候选 → 筐轨迹（**2026-08-16 起缓存优先免重复推理**，旧缓存回退逐帧补检，见 `docs/detect-hoops-cache/`）→ 事件合并+筐距排序 → label.html 标注页（J/P/F；片段自带 2x 烘焙，疑似同回合分组与倍速控制等提效功能见 `docs/dedup-same-goal/`、`docs/label-speedup/`）→ goals.json → build_highlight.py 合成（--out 按场次注入尺寸）；**新场次用 `run_session.py <素材目录> --session <场次ID>` 一键串联至标注页生成（切批/断点续跑/尺寸探测注入；标注与合集合成仍手工），见 `docs/batch-speedup/`**；triage 缩略图墙已下线（2026-08-11 立哥定，与标注页功能重复，见 `docs/batch-speedup/review07.md`）；**事件级 K3 判定已下线**（2026-08-01 立哥定，对照账见主文档 §4 批次 2）
-- **统一入口 CLI**：`python scripts/video.py score|people|build|photo`（PowerShell 别名 `video` 已装；任意目录可跑，自动定位仓库根）——薄封装上述链路（score=run_session 检测串联、people=认人三段链、build=合集合成+收尾自动出进球热图（暗场/分区双图，docs/heatmap/）、photo=精彩照片链 rank_photos 打分抽帧裁切 → gen_photo_page 瀑布流确认页 → `--apply` 落盘 `output/<场次>/照片精选/`，四件套见 `docs/photo-select/`；批次自动发现、尺寸按 facts 换算、srcdir 记 `work/<场次>/video_cli.json`），score/people/build 四件套见 `docs/video-cli/`；**立哥用操作手册 = 根目录 `使用手册.html`（2026-08-14 建，流程/快捷键/文件改名规则/FAQ 以此为准，CLI 行为变更时同步更新）**
+- **统一入口 CLI**：`python scripts/video.py score|people|build|photo`（PowerShell 别名 `video` 已装；任意目录可跑，自动定位仓库根）——薄封装上述链路（score=run_session 检测串联、people=认人三段链、build=合集合成+收尾自动出进球热图（暗场/分区双图，docs/heatmap/；热图仅认人后 confirmed roster 路径触发，未认人自动模式跳过）、photo=精彩照片链 rank_photos 打分抽帧裁切 → gen_photo_page 瀑布流确认页 → `--apply` 落盘 `output/<场次>/照片精选/`，四件套见 `docs/photo-select/`；批次自动发现、尺寸按 facts 换算、srcdir 记 `work/<场次>/video_cli.json`），score/people/build 四件套见 `docs/video-cli/`；**立哥用操作手册 = 根目录 `使用手册.html`（2026-08-14 建，流程/快捷键/文件改名规则/FAQ 以此为准，CLI 行为变更时同步更新）**
 - **文档自审（强制）**：创建或修改 `docs/` 下文档（含各功能子文件夹四件套）、`AGENTS.md`、`rules.md` 后，必须通过 Task 工具调用 `spec-reviewer` 子代理审查；有阻断问题须修订后再交付，禁止跳过
 - 进球归属：个人合集需标进球者；立哥人工标注（当前），照片库自动认人（待立哥供照）
 - **认人流程（已固化）**：crop_scorers.py（轨迹法定位+多裁选帧+串人守卫+颜色分队预填；--read-numbers 多帧众数投票读号）→（可选）cluster_scorers.py（聚类仅分组预填不终裁，定稿 **CLIP `--linkage complete --threshold 0.15`**；OSNet 后端备用不推荐）→ gen_scorer_page.py（确认页，--clusters 簇级选人+逐球覆盖，--players-file 注入名单，裁图仅辅助、视频为终裁）→ 立哥确认导出 roster.json → build_highlight.py --roster/--scorer/--team 出合集；参数与标定细节见 `docs/scorer/`、`docs/scorer-cluster/`、`docs/scorer-reid/`

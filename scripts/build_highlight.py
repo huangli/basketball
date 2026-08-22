@@ -8,9 +8,13 @@
 同参数 concat 直接重封装。产物：output/<场次>/<队伍>_<姓名>_进球合集.mp4。
 
 输入：--goals 指定的 goals.json（status=confirmed 记录；schema 损坏抛 SchemaError）；
-    --roster 指定的 roster.json（可选，校验走 scripts/roster.py，必须 confirmed=true）
+    --roster 指定的 roster.json（可选，校验走 scripts/roster.py，必须 confirmed=true，
+    除非给 --allow-unconfirmed 豁免）
 输出：output/<场次>/<队伍>_<姓名>_进球合集.mp4（roster 路径；姓名为空回退标签）
-    或 个人_<标签>_进球合集.mp4（无 roster 旧路径）或 队伍_<队别>_进球集锦.mp4
+    或 个人_<标签>_进球合集.mp4（无 roster 给 --scorer 旧路径）
+    或 个人_全员_进球合集.mp4（无 roster 无过滤① / 有 roster 无过滤③，同名）
+    或 队伍_<队别>_进球集锦.mp4
+    或 output/<场次>/进球片段/NNN_<主名>@<t:.1f>s.mp4（--per-goal，真值表⑨）
 依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）、
     scripts/roster.py（format_key/validate_roster/resolve_scorer，spec M3 契约）
 用法:
@@ -19,14 +23,21 @@
         --rawdir "20260722地平线/2026 年 7月22 日 地平线" --out 1920x1080
     python scripts/build_highlight.py --goals work/20260722/goals.json \
         --roster work/20260722/roster.json --out 1920x1080 --team 黑
+    python scripts/build_highlight.py --goals work/20260722/goals.json \
+        --rawdir <原片目录> --out 1920x1080 --per-goal
 
-组合真值表（spec: docs/scorer/spec.md §build_highlight 组合真值表，写死）：
-①无 roster 无过滤=全员现状不变；②无 roster 给 --scorer=旧 goals.scorer 精确
+组合真值表（①-⑧ spec: docs/scorer/spec.md §build_highlight 组合真值表；
+⑨⑩ spec: docs/build-auto-scorer/spec.md §技术现状；写死）：
+①无 roster 无过滤=全员（stem 同③）；②无 roster 给 --scorer=旧 goals.scorer 精确
 匹配+0 命中 WARNING 提示改用 --roster；③有 roster 无过滤=全归属球（未归属
-WARNING 跳过）；④--scorer 经 roster.resolve_scorer 解析（tag|name），输出名用
-{team}_{name or tag}；⑤--team 出 队伍_{team}_进球集锦.mp4；⑥--scorer+--team 互斥报错
-退出 1；⑦无 roster 给 --team 报错退出 1；⑧--team 便服 报错退出 1；
---roster 未 confirmed=true 拒收退出 1。
+WARNING 跳过；stem 个人_全员_进球合集）；④--scorer 经 roster.resolve_scorer
+解析（tag|name），输出名用 {team}_{name or tag}；⑤--team 出 队伍_{team}_进球集锦.mp4；
+⑥--scorer+--team 互斥报错退出 1；⑦无 roster 给 --team 报错退出 1；⑧--team 便服
+报错退出 1；⑨--per-goal=每 confirmed 球独立出片到 进球片段/NNN_<主名>@<t:.1f>s.mp4
+（不 concat；与 --scorer/--team/--roster 互斥报错；同名产物幂等跳过；NNN 按
+全部 confirmed 球时序编号，原片缺失跳号保留）；⑩--roster+--allow-unconfirmed=
+仅豁免 confirmed=true 检查的闸门旗标（无 --roster 给此旗标报错退出 1）；
+--roster 未 confirmed=true 且无 --allow-unconfirmed 拒收退出 1。
 """
 
 import contextlib
@@ -51,6 +62,8 @@ CRF: int = 20
 PRESET: str = "medium"
 CLIP_BEFORE_SEC: float = 4.0
 CLIP_AFTER_SEC: float = 2.0
+# ⑨ --per-goal 产物子目录名（out_dir 下；NNN_<主名>@<t:.1f>s.mp4）
+PER_GOAL_DIR_NAME: str = "进球片段"
 
 
 # 画面滤镜：缩放保持宽高比（force_original_aspect_ratio=decrease），不足处黑边补齐，
@@ -79,13 +92,14 @@ KNOWN_STATUSES: frozenset[str] = frozenset(
 SILENT_AUDIO_SRC: str = "anullsrc=channel_layout=stereo:sample_rate=48000"
 
 
-def parse_argv() -> tuple[str, str, str, int, int, str, str]:
+def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool]:
     """解析命令行参数。
 
     Returns:
         (goals.json 路径, scorer 标签, 原片目录, 输出宽, 输出高, roster.json 路径,
-        team 队别；scorer/team 空串表示未给，roster 空串表示无 roster，
-        原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H)。
+        team 队别, per_goal 旗标, allow_unconfirmed 旗标；scorer/team 空串表示未给，
+        roster 空串表示无 roster，原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H，
+        两个旗标默认 False)。
     """
     goals: str = ""
     scorer: str = ""
@@ -94,6 +108,8 @@ def parse_argv() -> tuple[str, str, str, int, int, str, str]:
     out_h: int = OUT_H
     roster: str = ""
     team: str = ""
+    per_goal: bool = False
+    allow_unconfirmed: bool = False
     args: list[str] = sys.argv[1:]
     i: int = 0
     while i < len(args):
@@ -116,9 +132,15 @@ def parse_argv() -> tuple[str, str, str, int, int, str, str]:
         elif args[i] == "--team" and i + 1 < len(args):
             team = args[i + 1]
             i += 2
+        elif args[i] == "--per-goal":
+            per_goal = True
+            i += 1
+        elif args[i] == "--allow-unconfirmed":
+            allow_unconfirmed = True
+            i += 1
         else:
             i += 1
-    return goals, scorer, rawdir, out_w, out_h, roster, team
+    return goals, scorer, rawdir, out_w, out_h, roster, team, per_goal, allow_unconfirmed
 
 
 def load_roster(roster_path: str) -> Roster:
@@ -169,7 +191,7 @@ def select_goals(
         team: --team 值（空串 = 未给）。
 
     Returns:
-        (选中记录, 输出文件名主体)，主体形如 ``个人_全员_进球合集`` /
+        (选中记录, 输出文件名主体)，主体形如 ``个人_全员_进球合集``（①③同名）/
         ``地平线_大斌_进球合集`` / ``队伍_地平线_进球集锦``。
 
     Raises:
@@ -229,7 +251,7 @@ def select_goals(
             )
         return selected, f"个人_{scorer}_进球合集"
 
-    # ①：全员现状不变
+    # ①：全员（stem 同③）
     return list(goals), "个人_全员_进球合集"
 
 
@@ -243,6 +265,33 @@ def _encode_timeout_sec(duration_sec: float) -> int:
         超时秒数。
     """
     return max(120, int(duration_sec * 3) + 60)
+
+
+def _remove_with_retry(path: str) -> None:
+    """删除文件；Windows 瞬时文件锁（杀毒扫描/句柄释放延迟）退避重试（rules.md §4）。
+
+    0.5s → 1s → 2s 退避共 4 次尝试；PermissionError 之外的 OSError 直接抛出
+    （不静默）。重试耗尽抛最后一次 PermissionError（显式失败）。
+
+    Args:
+        path: 待删文件路径。
+
+    Raises:
+        PermissionError: 重试耗尽仍被占用。
+        OSError: 其他删除失败（文件不存在等）。
+    """
+    last: PermissionError | None = None
+    for wait in (0.0, 0.5, 1.0, 2.0):
+        if wait:
+            time.sleep(wait)
+        try:
+            os.remove(path)
+            return
+        except PermissionError as exc:
+            last = exc
+            logger.warning("文件被占用，退避重试删除: %s", path)
+    if last is not None:
+        raise last  # 四次尝试皆 PermissionError 才走到这
 
 
 def _validate_goals(data: dict[str, Any], goals_path: str) -> list[dict[str, Any]]:
@@ -429,7 +478,74 @@ def cut_slowmo(src: str, goal: dict[str, Any], out_path: str, scale_pad: str) ->
         f.write(f"file '{os.path.basename(part1)}'\nfile '{os.path.basename(part2)}'\n")
     run_ffmpeg(["-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", out_path])
     for p in (part1, part2, list_path):
-        os.remove(p)
+        _remove_with_retry(p)
+
+
+def _build_per_goal(
+    goals: list[dict[str, Any]],
+    rawdir: str,
+    session: str,
+    out_w: int,
+    out_h: int,
+) -> int:
+    """真值表⑨：每 confirmed 球独立出片到 output/<场次>/进球片段/，不 concat。
+
+    命名 NNN_<主名>@<t:.1f>s.mp4（NNN 按全部 confirmed 球时序 001 起；原片缺失
+    跳号保留，编号 = 进球序号，稳定不 compact）；同名产物幂等跳过（build 重跑
+    不重复转码）；复用 cut_normal/cut_slowmo 直写最终路径（剪辑参数与合集一致）。
+
+    Args:
+        goals: 已按 (file, anchor_time) 排序的 confirmed 记录。
+        rawdir: 原片目录。
+        session: 场次 ID（决定输出目录）。
+        out_w: 输出宽（像素）。
+        out_h: 输出高（像素）。
+
+    Returns:
+        0=全部成功；1=有进球因原片缺失被跳过（能出的照常出，可观测不静默）。
+    """
+    out_dir: str = os.path.join(OUT_ROOT, session)
+    per_goal_dir: str = os.path.join(out_dir, PER_GOAL_DIR_NAME)
+    os.makedirs(per_goal_dir, exist_ok=True)
+    scale_pad: str = scale_pad_filter(out_w, out_h)
+    missing: list[str] = []
+    produced: int = 0
+    t_start: float = time.time()
+    for i, goal in enumerate(goals, 1):
+        src: str = os.path.join(rawdir, goal["file"])
+        stem: str = os.path.splitext(os.path.basename(goal["file"]))[0]
+        name: str = f"{i:03d}_{stem}@{goal['anchor_time']:.1f}s.mp4"
+        if not os.path.exists(src):
+            logger.error("原片缺失，跳过: %s", goal["file"])
+            missing.append(goal["file"])
+            continue
+        out_path: str = os.path.join(per_goal_dir, name)
+        if os.path.exists(out_path):
+            logger.info("  片段 %d/%d 已存在，幂等跳过: %s", i, len(goals), name)
+            continue
+        if goal.get("slowmo"):
+            cut_slowmo(src, goal, out_path, scale_pad)
+        else:
+            cut_normal(src, goal, out_path, scale_pad)
+        produced += 1
+        logger.info(
+            "  片段 %d/%d: %s%s",
+            i,
+            len(goals),
+            name,
+            "(慢放)" if goal.get("slowmo") else "",
+        )
+    logger.info(
+        "进球片段完成: %s（新出 %d 条, %.0fs）", per_goal_dir, produced, time.time() - t_start
+    )
+    if missing:
+        logger.error(
+            "进球片段已产出，但 %d 条进球因原片缺失被跳过: %s",
+            len(missing),
+            ", ".join(missing),
+        )
+        return 1
+    return 0
 
 
 def main() -> int:
@@ -440,9 +556,25 @@ def main() -> int:
     """
     run_id = new_run_id()
     configure_logging(run_id)
-    goals_path, scorer, rawdir, out_w, out_h, roster_path, team = parse_argv()
+    (
+        goals_path,
+        scorer,
+        rawdir,
+        out_w,
+        out_h,
+        roster_path,
+        team,
+        per_goal,
+        allow_unconfirmed,
+    ) = parse_argv()
     if not goals_path:
         logger.error("缺少 --goals 参数")
+        return 1
+    if per_goal and (scorer or team or roster_path):
+        logger.error("--per-goal 与 --scorer/--team/--roster 互斥（真值表⑨），只能单独使用")
+        return 1
+    if allow_unconfirmed and not roster_path:
+        logger.error("--allow-unconfirmed 需配 --roster（真值表⑩），单独使用无意义")
         return 1
     try:
         data: dict[str, Any] = read_json(goals_path, what="goals.json")
@@ -451,7 +583,18 @@ def main() -> int:
         roster: Roster | None = None
         if roster_path:
             roster = load_roster(roster_path)
-            require_confirmed(roster, roster_path)
+            if allow_unconfirmed:
+                # ⑩ 闸门旗标：仅豁免 confirmed=true 检查，其余真值表语义不变
+                logger.warning("--allow-unconfirmed：豁免 confirmed=true 检查（%s）", roster_path)
+            else:
+                require_confirmed(roster, roster_path)
+        if per_goal:
+            # ⑨：每球独立出片（无过滤旗标，goals = 全部 confirmed）
+            goals.sort(key=lambda g: (g["file"], g["anchor_time"]))
+            if not goals:
+                logger.error("无可合成记录（confirmed 0 条）: %s", goals_path)
+                return 1
+            return _build_per_goal(goals, rawdir, session, out_w, out_h)
         goals, out_stem = select_goals(goals, roster, scorer, team)
         goals.sort(key=lambda g: (g["file"], g["anchor_time"]))
         if not goals:
@@ -518,8 +661,8 @@ def main() -> int:
             ]
         )
         for clip in clips:
-            os.remove(clip)
-        os.remove(list_path)
+            _remove_with_retry(clip)
+        _remove_with_retry(list_path)
         with contextlib.suppress(OSError):
             os.rmdir(work_dir)
         logger.info(
