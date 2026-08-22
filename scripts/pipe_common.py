@@ -88,7 +88,11 @@ def run_ffmpeg(
             proc = subprocess.run(  # noqa: S603 固定 ffmpeg 二进制，参数内部构造
                 cmd,
                 capture_output=True,
-                text=True,
+                # ffmpeg 输出为 UTF-8（含中文路径/文件名）；locale 代码页（本机
+                # cp1252）遇 0x81 等字节会让 reader 线程 UnicodeDecodeError 崩溃，
+                # 进而导致句柄释放竞态（2026-08-22 淳化街道真机实录）——钉死 UTF-8
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout_sec,
                 check=False,
             )

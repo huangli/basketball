@@ -85,7 +85,10 @@ def probe_duration_sec(path: str) -> float:
             proc = subprocess.run(  # noqa: S603 固定 ffprobe 二进制，参数内部构造
                 cmd,
                 capture_output=True,
-                text=True,
+                # ffprobe 报错输出含中文文件名，locale 代码页会解码崩（同
+                # pipe_common.run_ffmpeg 的 cp1252 坑）——钉死 UTF-8
+                encoding="utf-8",
+                errors="replace",
                 timeout=FFPROBE_TIMEOUT_SEC,
                 check=False,
             )
