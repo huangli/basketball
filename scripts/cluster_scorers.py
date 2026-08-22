@@ -749,6 +749,7 @@ def main(argv: list[str] | None = None) -> int:
             len(goals) - n_ok,
         )
 
+        args.out.parent.mkdir(parents=True, exist_ok=True)
         cache_path: Path = args.out.parent / CLIP_CACHE_NAME
         model_tag: str = MODEL_TAGS[args.model]
         cache: dict[str, list[float]] = load_clip_cache(cache_path)
@@ -775,7 +776,6 @@ def main(argv: list[str] | None = None) -> int:
         result: dict[str, Any] = build_result(
             goals, embeddings, clusters_keys, args.threshold, model_tag
         )
-        args.out.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(args.out, result, what="scorer_clusters.json")
         logger.info(
             "聚类完成: %d 簇 / 入簇 %d 球 / unclustered %d 球 → %s",

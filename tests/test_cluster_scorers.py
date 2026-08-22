@@ -547,6 +547,24 @@ class TestMainCli:
         ]
         assert result["unclustered"] == ["c.mp4#3.0"]
 
+    def test_out_parent_missing_auto_created(self, tmp_path: Path) -> None:
+        """--out 父目录不存在时自建（回归：clip_cache 落盘早于原 mkdir 位置曾 FileNotFoundError）。
+
+        全 SKIP 候选 → 零 embedding（不加载模型），save_clip_cache 即触发父目录写入。
+        """
+        # Arrange
+        cand = _write_candidates(
+            tmp_path / "scorer_candidates.json",
+            [_entry("a.mp4#1.0", status="SKIP")],
+        )
+        out = tmp_path / "newdir" / "scorer_clusters.json"
+        # Act
+        rc = main(["--candidates", str(cand), "--out", str(out)])
+        # Assert
+        assert rc == 0
+        assert json.loads(out.read_text(encoding="utf-8"))["unclustered"] == ["a.mp4#1.0"]
+        assert (out.parent / "clip_cache.json").is_file()
+
     def test_end_to_end_osnet_cached(self, tmp_path: Path) -> None:
         # Arrange：--model osnet_x1_0 + 全缓存命中（osnet tag 前缀键）→ 不 import torchreid
         cand_dir = tmp_path / "scorers"
