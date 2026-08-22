@@ -172,5 +172,5 @@ def load_state(session: str) -> dict[str, Any]:
 | O3 | GitHub 仓库归属 | 账号 huangli（ekinasm@gmail.com），目标地址 `github.com/huangli/basketball-clip`，个人公开仓库；协作者/分支保护暂不设，后续需要再加 | **已定案**（2026-08-22 立哥） |
 | O4 | 现工作区与新仓库同步策略 | **立哥定案：现工作区先把在途功能开发完成，随后整体迁移，后期只在新仓库开发**（新仓库是主仓库，非旁支拷贝）；迁移完成前现工作区照常自用 | **已定案**（2026-08-22 立哥） |
 | O5 | CLIP 权重首跑下载 | 普通用户无代理下 HF 必卡；定案 **CLIP 权重（~350MB）打进安装包**，开箱即用 | **已定案**（2026-08-22 立哥） |
-| O6 | 打包 Python 版本 | 立哥改问 3.10 可行性——**方向定案：打包环境用 Python 3.10**（PyInstaller/torch/ultralytics 对 3.10 支持成熟；实证：现 scripts/ 无 3.11+ 专属语法，当前兼容）。防护链：新仓库 ruff `target-version=py310` 开发期拦截 + plan 阶段第一任务 spike 实包验证（3.10 + 全依赖 + PyInstaller） | **决策闭环，spike 验证遗留至 plan 阶段** |
+| O6 | 打包 Python 版本 | 立哥改问 3.10 可行性——**方向定案：打包环境用 Python 3.10**（PyInstaller/torch/ultralytics 对 3.10 支持成熟；实证：现 scripts/ 无 3.11+ 专属语法，当前兼容）。防护链：新仓库 ruff `target-version=py310` 开发期拦截 + spike 实包验证（已完成） | **已定案，spike 通过**（见 `spike-report.md`：3.10.11 + PyInstaller 6.22 全链 PASS，collect-all 清单留存） |
 | O7 | torchreid/OSNet 去留 | torchreid 0.2.5 老旧，普通用户 pip 安装易翻车；OSNet 本就"备用不推荐"。**定案：新仓库下线 OSNet 后端**，仅保留 CLIP | 已定案，落地依赖豁免清单第 5 类 |
