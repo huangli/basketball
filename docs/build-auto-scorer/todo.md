@@ -41,7 +41,7 @@ T2 的 ①改名撤销，T3/T4 相应修订为 R 轮任务。）
     主文档 :86 注记改为"① 旧名维持"；`全员_进球集锦` 无残留引用
   - Verify: `grep -rn 全员_进球集锦 AGENTS.md 使用手册.html docs/` 无命中（本目录四件套说明除外）
   - Files: AGENTS.md、使用手册.html、docs/2026-07-26-current-goal-detection-pipeline.md
-- [ ] T6 spec-reviewer 审查 + 全量关口 + 真机抽验 + 提交
+- [x] T6 spec-reviewer 审查 + 全量关口 + 真机抽验 + 提交
   - Acceptance: review02.md 归档（口径变更轮）且阻断问题清零；
     ruff format/check + pytest -q 全绿；真机抽验 20260813_淳化街道 `video build`
     出齐三类产物 exit 0 且无 `全员_进球集锦.mp4` 新产出；按逻辑改动提交
