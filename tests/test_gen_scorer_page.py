@@ -7,7 +7,9 @@ build_html 内联数据与导出契约、main 端到端（tmp 目录写 scorer.h
 build_cluster_map 归属与越界 key 跳过、cluster_id 注入与 unclustered→None、
 build_page_clusters 过滤、簇区渲染与 node --check JS 语法校验；
 --players-file 名单文件注入（docs/scorer-reid/spec.md Phase D）：合法名单解析、
-坏 JSON/坏结构/非法队名 SchemaError、与 --players 互斥、号码预填链路命中。
+坏 JSON/坏结构/非法队名 SchemaError、与 --players 互斥、号码预填链路命中；
+--photo-matches 照片库预填（docs/photo-roster/spec.md T5）：优先级 读号>照片>印名、
+冲突角标、名单缺号占位注入、同目录校验、坏 schema 退出 1、无参数零变化。
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import pytest
 
 from errors import BasketballPipelineError, SchemaError
 from gen_scorer_page import (
+    PhotoGuess,
     _validate_clusters,
     build_cluster_map,
     build_entries,
@@ -36,8 +39,10 @@ from gen_scorer_page import (
     merge_assignments,
     opponent_of,
     parse_players,
+    resolve_photo_guesses,
     team_of_tag,
 )
+from photo_match_scorers import MATCH_VERSION, MatchEntry
 from roster import Player, format_key
 
 
@@ -1383,6 +1388,18 @@ class TestAcceptAllPrefills:
         assert "marks[it.key] = it.prefill_tag;" in body
         assert "touched[it.key] = true" not in body  # 批量接受不标已核（预填非终裁）
 
+    def test_acceptall_splits_photo_count(self) -> None:
+        # 照片预填与号码预填拆分计数（review MEDIUM-1）：note==="photo" 计照片，
+        # 其余（含无 note 旧数据）计号码；按钮 title 同步口径
+        html = build_html([], [], "s", {}, {}, "地平线")
+        start = html.index("function acceptAllPrefills")
+        body = html[start : html.index("document.getElementById", start)]
+        assert 'it.prefill_note === "photo"' in body
+        assert "nPhoto" in body
+        assert "个预填（号码 " in body
+        assert " / 照片 " in body
+        assert "号码/照片预填" in html  # 按钮 title
+
     def test_acceptall_js_syntax_node_check(self, tmp_path: pathlib.Path) -> None:
         # node 不在 PATH 则跳过（沿用现有同款模式，防模板改动引入 JS 语法错）
         node = shutil.which("node")
@@ -1396,3 +1413,381 @@ class TestAcceptAllPrefills:
             [node, "--check", str(js_path)], capture_output=True, text=True, check=False
         )
         assert proc.returncode == 0, proc.stderr
+
+
+# ---- --photo-matches 照片库预填（docs/photo-roster/spec.md T5） ----
+
+
+def _photo_entry(number: str = "9", score: float = 0.61, margin: float = 0.1) -> MatchEntry:
+    """构造一条照片命中记录（photo_match_scorers schema 校验产物口径）。"""
+    return MatchEntry(number=number, score=score, margin=margin)
+
+
+def _photo_payload(matches: dict) -> dict:
+    """构造 photo_matches.json 载荷（photo_match_scorers 输出契约）。"""
+    return {
+        "version": MATCH_VERSION,
+        "model": "ViT-B-32/laion2b_s34b_b79k",
+        "threshold": 0.30,
+        "margin": 0.02,
+        "matches": matches,
+    }
+
+
+class TestResolvePhotoGuesses:
+    """照片命中号码 → 名单 tag；名单缺号注入占位条目（半截篮<号>，team=半截篮）。"""
+
+    def test_number_in_players_resolves_tag(self) -> None:
+        # Arrange
+        players = [Player(tag="白7-小朱", name="小朱", team="半截篮")]
+        # Act
+        guesses, extra = resolve_photo_guesses({"a.mp4#4.1": _photo_entry("7")}, players)
+        # Assert：号码在名单唯一命中，直接解析到该球员 tag，无占位
+        assert guesses["a.mp4#4.1"] == PhotoGuess(number="7", score=0.61, tag="白7-小朱")
+        assert extra == []
+
+    def test_missing_number_placeholder_injected(self) -> None:
+        # Arrange：名单里没有 9 号
+        players = [Player(tag="白7-小朱", name="小朱", team="半截篮")]
+        # Act
+        guesses, extra = resolve_photo_guesses({"a.mp4#4.1": _photo_entry("9")}, players)
+        # Assert：占位 tag=半截篮9、name 空、team=半截篮（不靠前缀推队）
+        assert guesses["a.mp4#4.1"].tag == "半截篮9"
+        assert extra == [Player(tag="半截篮9", name="", team="半截篮")]
+
+    def test_same_missing_number_single_placeholder(self) -> None:
+        # Arrange / Act：两球命中同一缺号号码
+        guesses, extra = resolve_photo_guesses(
+            {"a.mp4#4.1": _photo_entry("9"), "b.mp4#2.0": _photo_entry("9")}, []
+        )
+        # Assert：占位条目只注入一份，两球都指向它
+        assert len(extra) == 1
+        assert {g.tag for g in guesses.values()} == {"半截篮9"}
+
+    def test_ambiguous_number_in_players_no_guess(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Arrange：名单里同号两人（白7/红7）→ 交人裁判不预填
+        players = [
+            Player(tag="白7-小朱", name="小朱", team="半截篮"),
+            Player(tag="红7-老张", name="", team="半截篮"),
+        ]
+        # Act
+        with caplog.at_level(logging.WARNING):
+            guesses, extra = resolve_photo_guesses({"a.mp4#4.1": _photo_entry("7")}, players)
+        # Assert
+        assert guesses == {}
+        assert extra == []
+        assert any("同号多人" in r.message for r in caplog.records)
+
+
+class TestPhotoPrefillPriority:
+    """build_entries 预填优先级（写死）：读号命中 > 照片命中 > 印名匹配 > 空白。"""
+
+    @staticmethod
+    def _players() -> list[Player]:
+        return [
+            Player(tag="白22-小朱", name="小朱", team="半截篮"),
+            Player(tag="白7-老黄", name="老黄", team="半截篮"),
+        ]
+
+    @staticmethod
+    def _photo_guess(number: str = "7", tag: str = "白7-老黄") -> dict:
+        return {"a.mp4#4.1": PhotoGuess(number=number, score=0.5, tag=tag)}
+
+    def test_photo_hit_prefills_without_number(self) -> None:
+        # Arrange：无读号（number_guess 为 None），照片命中 7 号
+        cand = _candidate()
+        cand["number_guess"] = None
+        # Act
+        entries = build_entries(
+            [_goal()],
+            [cand],
+            None,
+            "",
+            "",
+            self._players(),
+            photo_guesses=self._photo_guess(),
+        )
+        # Assert
+        assert entries[0]["prefill_tag"] == "白7-老黄"
+        assert entries[0]["prefill_note"] == "photo"
+        assert entries[0]["photo_guess"] == {"number": "7", "score": 0.5, "tag": "白7-老黄"}
+
+    def test_number_beats_photo_on_conflict(self) -> None:
+        # Arrange：读号 22 与照片 7 冲突
+        cand = _candidate()
+        cand["number_guess"] = {
+            "number": "22",
+            "color": "白",
+            "name_text": None,
+            "confidence": "high",
+        }
+        # Act
+        entries = build_entries(
+            [_goal()],
+            [cand],
+            None,
+            "",
+            "",
+            self._players(),
+            photo_guesses=self._photo_guess(),
+        )
+        # Assert：预填读号结果；照片候选保留在 photo_guess 供角标切换（不静默覆盖）
+        assert entries[0]["prefill_tag"] == "白22-小朱"
+        assert entries[0]["prefill_note"] == ""
+        assert entries[0]["photo_guess"]["tag"] == "白7-老黄"
+
+    def test_photo_beats_name(self) -> None:
+        # Arrange：读号空、印名命中"小朱"，照片命中 7 号 → 照片优先
+        cand = _candidate()
+        cand["number_guess"] = {
+            "number": None,
+            "color": None,
+            "name_text": "小朱",
+            "confidence": "low",
+        }
+        # Act
+        entries = build_entries(
+            [_goal()],
+            [cand],
+            None,
+            "",
+            "",
+            self._players(),
+            photo_guesses=self._photo_guess(),
+        )
+        # Assert
+        assert entries[0]["prefill_tag"] == "白7-老黄"
+        assert entries[0]["prefill_note"] == "photo"
+
+    def test_name_fallback_without_photo_unchanged(self) -> None:
+        # Arrange：无照片数据时印名兜底维持现状（回归锁定）
+        cand = _candidate()
+        cand["number_guess"] = {
+            "number": None,
+            "color": None,
+            "name_text": "小朱",
+            "confidence": "low",
+        }
+        # Act
+        entries = build_entries([_goal()], [cand], None, "", "", self._players())
+        # Assert
+        assert entries[0]["prefill_tag"] == "白22-小朱"
+        assert entries[0]["prefill_note"] == ""
+        assert entries[0]["photo_guess"] is None
+
+    def test_number_ambiguous_not_overridden_by_photo(self) -> None:
+        # Arrange：读号同号歧义 + 照片命中 → 维持歧义不预填，照片候选仍随条目上页
+        players = [
+            Player(tag="白22-小朱", name="小朱", team="半截篮"),
+            Player(tag="白22-大斌", name="大斌", team="半截篮"),
+        ]
+        cand = _candidate()
+        cand["number_guess"] = {
+            "number": "22",
+            "color": "白",
+            "name_text": None,
+            "confidence": "high",
+        }
+        # Act
+        entries = build_entries(
+            [_goal()],
+            [cand],
+            None,
+            "",
+            "",
+            players,
+            photo_guesses=self._photo_guess(tag="半截篮7"),
+        )
+        # Assert
+        assert entries[0]["prefill_tag"] == ""
+        assert entries[0]["prefill_note"] == "ambiguous"
+        assert entries[0]["photo_guess"]["tag"] == "半截篮7"
+
+    def test_no_photo_param_entries_photo_guess_none(self) -> None:
+        # Arrange / Act：不传 photo_guesses（无 --photo-matches 口径）
+        entries = build_entries([_goal()], [_candidate()], None, "", "")
+        # Assert：条目带空 photo_guess，其余字段行为不变
+        assert entries[0]["photo_guess"] is None
+        assert entries[0]["prefill_tag"] == ""
+        assert entries[0]["team_guess"] == "黑"
+
+    def test_photo_guess_key_not_in_entries_ignored(self) -> None:
+        # Arrange：photo_guesses 引用其他批次 key → 本页不受影响
+        entries = build_entries(
+            [_goal()],
+            [_candidate()],
+            None,
+            "",
+            "",
+            photo_guesses={"other.mp4#1.0": PhotoGuess(number="7", score=0.5, tag="白7")},
+        )
+        # Assert
+        assert entries[0]["photo_guess"] is None
+
+    def test_photo_prefill_satisfies_acceptall_condition(self) -> None:
+        # Arrange：照片预填条目——锁定其满足「接受全部预填」守卫组合（review MEDIUM-1）
+        cand = _candidate()
+        cand["number_guess"] = None
+        # Act
+        entries = build_entries(
+            [_goal()],
+            [cand],
+            None,
+            "",
+            "",
+            self._players(),
+            photo_guesses=self._photo_guess(),
+        )
+        # Assert：prefill_tag 非空（守卫 if (!it.prefill_tag) continue 通过）
+        # 且 note="photo" 供批量接受时拆分计数
+        assert entries[0]["prefill_tag"] == "白7-老黄"
+        assert entries[0]["prefill_note"] == "photo"
+
+
+class TestPhotoBadgeHtml:
+    """照片预填/冲突角标模板断言：按钮元素、展示口径、点击切换。"""
+
+    def test_photo_badge_present(self) -> None:
+        # Arrange / Act
+        html = build_html([], [], "s", {}, {}, "地平线")
+        # Assert：角标按钮 + 展示文案 + 点击切换挂钩
+        assert 'id="photoaccept"' in html
+        assert "照片预填" in html
+        assert "照片候选" in html
+        assert "photo_guess" in html
+        assert "改用照片:" in html
+        assert "pgb.onclick" in html
+
+    def test_photo_js_syntax_node_check(self, tmp_path: pathlib.Path) -> None:
+        # node 不在 PATH 则跳过（沿用现有同款模式，防模板改动引入 JS 语法错）
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node 不在 PATH")
+        entries = build_entries(
+            [_goal()],
+            [_candidate()],
+            None,
+            "",
+            "",
+            [Player(tag="白7-老黄", name="老黄", team="半截篮")],
+            photo_guesses={"a.mp4#4.1": PhotoGuess(number="7", score=0.5, tag="白7-老黄")},
+        )
+        html = build_html(
+            entries,
+            [Player(tag="白7-老黄", name="老黄", team="半截篮")],
+            "s",
+            {},
+            {},
+            "地平线",
+        )
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        js_path = tmp_path / "page.js"
+        js_path.write_text(script, encoding="utf-8")
+        proc = subprocess.run(  # noqa: S603 node 路径来自 shutil.which，可信
+            [node, "--check", str(js_path)], capture_output=True, text=True, check=False
+        )
+        assert proc.returncode == 0, proc.stderr
+
+
+class TestPhotoMatchesCli:
+    """main 端到端 --photo-matches：同目录校验、坏 schema 退出 1、无参零变化。"""
+
+    def _write_inputs(
+        self, tmp_path: pathlib.Path, matches: dict
+    ) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+        """造 scorers/goals/photo_matches 三个输入文件（同目录），返回路径。"""
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(
+            json.dumps({"session": "s", "candidates": [_candidate()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps({"session": "s", "goals": [_goal()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        pm = scorers_dir / "photo_matches.json"
+        pm.write_text(json.dumps(_photo_payload(matches)), encoding="utf-8")
+        return scorers, goals, pm
+
+    def test_end_to_end_photo_matches(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：照片命中 9 号，名单无 9 号 → 占位条目注入
+        key = format_key("a.mp4", 4.1)
+        scorers, goals, pm = self._write_inputs(
+            tmp_path, {key: {"number": "9", "score": 0.61, "margin": 0.1}}
+        )
+        # Act
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--photo-matches",
+                str(pm),
+            ]
+        )
+        # Assert：占位条目随 players 注入页面（不靠前缀推队），条目带 photo_guess
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"tag": "半截篮9"' in html
+        assert '"photo_guess": {' in html
+        assert '"number": "9"' in html
+        assert "Infinity" not in html
+
+    def test_infinite_margin_not_injected(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：单号码库命中 margin=+inf，Python json 落盘为 Infinity
+        key = format_key("a.mp4", 4.1)
+        scorers, goals, pm = self._write_inputs(
+            tmp_path, {key: {"number": "9", "score": 0.61, "margin": float("inf")}}
+        )
+        # Act：读端可解析 Infinity，但 margin 不进 JS（页面 JSON.parse 无法解析）
+        rc = main(
+            [
+                "--scorers",
+                str(scorers),
+                "--goals",
+                str(goals),
+                "--photo-matches",
+                str(pm),
+            ]
+        )
+        # Assert
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert "Infinity" not in html
+
+    def test_photo_matches_different_dir_rejected(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：photo_matches 与 scorers 不同目录（与 --clusters 校验同口径）
+        scorers, goals, _ = self._write_inputs(tmp_path, {})
+        other = tmp_path / "other" / "photo_matches.json"
+        other.parent.mkdir()
+        other.write_text(json.dumps(_photo_payload({})), encoding="utf-8")
+        # Act / Assert：parser.error 显式拒绝（SystemExit 2）
+        with pytest.raises(SystemExit):
+            main(["--scorers", str(scorers), "--goals", str(goals), "--photo-matches", str(other)])
+
+    def test_bad_photo_matches_schema_exit_1(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：version 不符 → SchemaError 显式失败
+        scorers, goals, pm = self._write_inputs(tmp_path, {})
+        pm.write_text(json.dumps({"version": "bogus", "matches": {}}), encoding="utf-8")
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--photo-matches", str(pm)])
+        # Assert
+        assert rc == 1
+
+    def test_no_photo_matches_zero_change(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：同目录有 photo_matches.json 但不传参（只认显式 --photo-matches）
+        key = format_key("a.mp4", 4.1)
+        scorers, goals, _ = self._write_inputs(
+            tmp_path, {key: {"number": "9", "score": 0.61, "margin": 0.1}}
+        )
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals)])
+        # Assert：零预填零占位（兼容性承诺锁定）
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"photo_guess": null' in html
+        assert "半截篮9" not in html

@@ -38,17 +38,18 @@ Phase B 卡 Checkpoint A 达标。
     **不达标 → 停工报立哥，不进 Phase B**
   - Verify: spec §Commands Phase A 实跑命令；review03.md 立哥确认
   - Files: docs/photo-roster/review03.md、scripts/photo_match_scorers.py（阈值常量）
-- [ ] T5 gen_scorer_page 照片预填
+- [x] T5 gen_scorer_page 照片预填
   - Acceptance: 只认显式 `--photo-matches`（须与 --scorers 同目录），无参数
     行为零变化；优先级 读号>照片>印名>空白；读号/照片冲突 → 预填读号 +
     角标显示照片候选（号码+得分）可点击切换；名单缺号 → 占位条目
     `半截篮<号>` 随 players 注入；坏 schema SchemaError
   - Verify: `pytest tests/test_gen_scorer_page.py -k photo`
   - Files: scripts/gen_scorer_page.py、tests/test_gen_scorer_page.py
-- [ ] T6 video.py people 串联
+- [x] T6 video.py people 串联
   - Acceptance: build_people_steps 在 ②聚类 后插 ②.5 照片匹配（条件：
     `photos/` 存在且非 --skip-cluster；缺库 INFO 跳过不阻塞）；拼确认页
-    参数时探测 photo_matches.json 存在才传 --photo-matches；仅 ②.5 步允许
+    参数时按计划预传 --photo-matches，**执行 ③ 前探测产物存在性，缺失则
+    剥旗标、确认页照出**（拼装时探测会死锁：首跑产物未落盘）；仅 ②.5 步允许
     失败降级（ERROR 留痕、确认页照出、降级为无预填），①②③ 失败语义不变；
     单测断言串法
   - Verify: `pytest tests/test_video.py -k people`

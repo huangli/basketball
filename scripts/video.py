@@ -1,8 +1,9 @@
 """统一入口 CLI：score / people / build / photo 四条高频链路的 subprocess 薄封装。
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
-输出：透传调用 run_session / crop_scorers / cluster_scorers / gen_scorer_page /
-    auto_roster / build_highlight / rank_photos / gen_photo_page 八个底层脚本；
+输出：透传调用 run_session / crop_scorers / cluster_scorers / photo_match_scorers /
+    gen_scorer_page / auto_roster / build_highlight / rank_photos / gen_photo_page
+    九个底层脚本；
     build 按 roster 状态分两路（认人可选化 2026-08-22，docs/build-auto-scorer/）：
     confirmed=true 走现状合成、收尾追加 in-process 调 goal_heatmap.heat_session
     出热图双风格（v4.2 集成；懒 import，附属产物失败不阻塞主链），
@@ -44,6 +45,10 @@ REPO_ROOT: Path = SCRIPT_DIR.parent  # 仓库根（work/ 等相对路径基准�
 WORK_ROOT: Path = Path("work")
 STATE_NAME: str = "video_cli.json"
 STATE_VERSION: int = 1
+# 照片库目录（people ②.5 照片匹配串接条件；docs/photo-roster/spec.md T6）
+PHOTOS_DIR: Path = Path("photos")
+# 聚类段落盘的裁图 embedding 缓存文件名（cluster_scorers 契约：与 scorer_clusters.json 同目录）
+CLIP_CACHE_NAME: str = "clip_cache.json"
 # 聚类段 CLIP 权重首跑下载需走本机代理（AGENTS.md 环境节）
 CLUSTER_HTTPS_PROXY: str = "http://127.0.0.1:7897"
 # 聚类定稿口径（docs/scorer-cluster/；底层默认 average/0.25 是未标定起点，勿依赖）
@@ -102,14 +107,24 @@ class Batch:
         """cluster_scorers 产出的 scorer_clusters.json（与 candidates 同目录硬约束）。"""
         return self.scorers_dir / "scorer_clusters.json"
 
+    @property
+    def photo_matches(self) -> Path:
+        """photo_match_scorers 产出的 photo_matches.json（与 candidates 同目录硬约束）。"""
+        return self.scorers_dir / "photo_matches.json"
+
 
 @dataclass(frozen=True, slots=True)
 class Step:
-    """一个待执行步骤：标题（日志用）、子进程命令、额外环境变量。"""
+    """一个待执行步骤：标题（日志用）、子进程命令、额外环境变量。
+
+    allow_fail=True 的步骤失败时 ERROR 留痕后继续后续步骤（降级不中断整链；
+    当前仅 people ②.5 照片匹配用，docs/photo-roster/spec.md T6）。
+    """
 
     title: str
     argv: tuple[str, ...]
     env_extra: dict[str, str] | None = None
+    allow_fail: bool = False
 
 
 def run_step(cmd: list[str], env_extra: dict[str, str] | None = None) -> None:
@@ -388,17 +403,21 @@ def build_people_steps(
     rawdir: Path,
     session_dir: Path,
 ) -> list[Step]:
-    """拼装单批次 people 三段链：裁图 → 聚类 → 确认页（参数契约见 spec §people）。
+    """拼装单批次 people 链：裁图 → 聚类 →（②.5 照片匹配）→ 确认页（spec §people）。
 
     --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
     --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
-    不传 --clusters。
+    不传 --clusters。②.5 照片匹配（docs/photo-roster/spec.md T6）：photos/ 库存在
+    且非 --skip-cluster 才安排（candidates 与该批 clip_cache 配对，产物落本批
+    photo_matches.json），缺库 INFO 跳过不阻塞；安排后确认页预传 --photo-matches，
+    执行时探测产物缺失会剥掉该旗标（②.5 失败降级为无预填，见 _cmd_people）。
     """
     crop_argv: list[str] = build_crop_argv(
         batch, rawdir, read_numbers=args.read_numbers, max_reads=args.max_reads
     )
     steps: list[Step] = [Step(f"批次{batch.batch}①裁图", tuple(crop_argv))]
 
+    photo_enabled: bool = not args.skip_cluster and PHOTOS_DIR.is_dir()
     if not args.skip_cluster:
         steps.append(
             Step(
@@ -418,6 +437,30 @@ def build_people_steps(
                 {"HTTPS_PROXY": CLUSTER_HTTPS_PROXY},
             )
         )
+        if not photo_enabled:
+            logger.info("照片库 %s 不存在，跳过照片匹配步骤（不阻塞认人链）", PHOTOS_DIR)
+    if photo_enabled:
+        # ②.5 允许失败降级（allow_fail）：ERROR 留痕、确认页照出、降级为无预填；
+        # CLIP 权重与聚类段同源，首跑下载同样走本机代理
+        steps.append(
+            Step(
+                f"批次{batch.batch}②.5照片匹配",
+                (
+                    sys.executable,
+                    str(SCRIPT_DIR / "photo_match_scorers.py"),
+                    "--photos",
+                    str(PHOTOS_DIR),
+                    "--candidates",
+                    str(batch.scorer_candidates),
+                    "--cache",
+                    str(batch.scorer_clusters.parent / CLIP_CACHE_NAME),
+                    "--out",
+                    str(batch.photo_matches),
+                ),
+                {"HTTPS_PROXY": CLUSTER_HTTPS_PROXY},
+                allow_fail=True,
+            )
+        )
 
     page_argv: list[str] = [
         sys.executable,
@@ -433,6 +476,9 @@ def build_people_steps(
         page_argv.extend(["--index", str(batch.events_index)])
     if not args.skip_cluster:
         page_argv.extend(["--clusters", str(batch.scorer_clusters)])
+    if photo_enabled:
+        # 预传 --photo-matches；产物缺失（②.5 失败/降级）在执行时剥掉，确认页照出
+        page_argv.extend(["--photo-matches", str(batch.photo_matches)])
     roster_path: Path = session_dir / "roster.json"
     if roster_path.is_file():
         page_argv.extend(["--roster-existing", str(roster_path)])
@@ -440,6 +486,14 @@ def build_people_steps(
         page_argv.extend(["--players-file", str(args.players_file)])
     steps.append(Step(f"批次{batch.batch}③确认页", tuple(page_argv)))
     return steps
+
+
+def _strip_flag(argv: list[str], flag: str) -> list[str]:
+    """从命令中移除 flag 及其值各一项（②.5 降级时确认页剥 --photo-matches）。"""
+    if flag not in argv:
+        return argv
+    i: int = argv.index(flag)
+    return argv[:i] + argv[i + 2 :]
 
 
 def _cmd_score(args: argparse.Namespace) -> int:
@@ -483,7 +537,12 @@ def _cmd_score(args: argparse.Namespace) -> int:
 
 
 def _cmd_people(args: argparse.Namespace) -> int:
-    """people：逐批次三段链（裁图 → 聚类 → 确认页），批次间独立。"""
+    """people：逐批次链（裁图 → 聚类 → ②.5 照片匹配 → 确认页），批次间独立。
+
+    失败语义：①②③ 任一步失败中断整链（StepFailedError 上抛转退出 1）；仅 ②.5
+    照片匹配允许失败降级——ERROR 留痕后继续，确认页照出（产物缺失剥
+    --photo-matches，降级为无预填；docs/photo-roster/spec.md T6）。
+    """
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
     rawdir: Path = resolve_rawdir(args.rawdir, state)
@@ -506,7 +565,17 @@ def _cmd_people(args: argparse.Namespace) -> int:
                     _log_dry_step(step)
                     dry_count += 1
                     continue
-                run_step(list(step.argv), step.env_extra)
+                argv: list[str] = list(step.argv)
+                if "--photo-matches" in argv and not batch.photo_matches.is_file():
+                    # 存在性探测在执行时（②.5 之后）：产物缺失 → 剥旗标，无预填照出
+                    argv = _strip_flag(argv, "--photo-matches")
+                try:
+                    run_step(argv, step.env_extra)
+                except StepFailedError as exc:
+                    if not step.allow_fail:
+                        raise
+                    logger.error("步骤失败（允许降级，继续后续步骤）: %s", exc)
+                    continue
                 completed.append(step.title)
     except StepFailedError as exc:
         logger.error("失败命令: %s", shlex.join(exc.cmd))

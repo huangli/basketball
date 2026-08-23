@@ -23,7 +23,12 @@ validate_roster 可校验），confirmed=true 仅当全部非 SKIP 球已归属�
     合并已有 roster：assignments 并集预填、players 以新名单为准缺 tag WARNING）、
     --clusters（可选 scorer_clusters.json，必须与 --scorers 同目录：rep_crops 与
     裁图同目录相对引用；有则页面顶部出簇区，簇级选人批量预填簇内全部球，
-    逐球区单独改覆盖簇归属，导出 roster 契约不变；spec: docs/scorer-cluster/spec.md）
+    逐球区单独改覆盖簇归属，导出 roster 契约不变；spec: docs/scorer-cluster/spec.md）、
+    --photo-matches（可选 photo_matches.json，必须与 --scorers 同目录，与 --clusters
+    校验同构；照片库识别预填——优先级 读号命中 > 照片命中 > 印名匹配 > 空白，
+    读号/照片冲突时预填读号、照片候选在条目上出角标（号码+得分）供人工点击切换，
+    名单缺号注入占位条目 半截篮<号码>（team=半截篮 随 players 注入，不靠前缀推队）；
+    无此参数页面行为与旧版完全一致；spec: docs/photo-roster/spec.md T5）
 输出：<scorer_candidates.json 同目录>/scorer.html
 依赖：scripts/roster.py（format_key/validate_roster/Player/player_from_dict，
     契约唯一入口）、scripts/pipe_common.py（read_json/run_id 日志）、scripts/errors.py
@@ -42,12 +47,18 @@ import logging
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from errors import BasketballPipelineError, SchemaError
 from pipe_common import configure_logging, new_run_id, read_json
 from roster import Player, format_key, player_from_dict, validate_roster
+
+if TYPE_CHECKING:
+    # 仅类型注解用；运行时延迟 import（photo_match_scorers 链带 numpy/sklearn，
+    # 只在启用 --photo-matches 时加载，无参数零开销零行为变化）
+    from photo_match_scorers import MatchEntry
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +102,8 @@ button.sel { outline: 3px solid #fc3; }
 #skip { background: #7a5c00; color: #fff; }
 #nogoal { background: #7a2c2c; color: #fff; }
 #accept { background: #2c9e4b; color: #fff; }
+/* 照片候选角标：读号/照片冲突时显示，点击改用照片归属（docs/photo-roster T5） */
+#photoaccept { background: #0f6e6e; color: #fff; }
 #export { background: #8a6d00; color: #fff; }
 #go { background: #2c9e4b; color: #fff; }
 #free { font-size: 18px; padding: 8px; width: 10em; background: #222;
@@ -141,8 +154,9 @@ small { color: #999; }
   <span id="players"></span>
   <input id="free" placeholder="自由输入标签"><button id="go">归属 (回车)</button>
   <button id="accept" style="display:none"></button>
+  <button id="photoaccept" style="display:none"></button>
   <button id="acceptall"
-    title="对所有号码预填无歧义且未手改的球批量预填归属（不标已核，第三步可翻检）"
+    title="对所有号码/照片预填无歧义且未手改的球批量预填归属（不标已核，第三步可翻检）"
   >接受全部号码预填</button>
   <button id="skip">跳过 (S)</button>
   <button id="nogoal">不算进球 (N)</button>
@@ -773,10 +787,12 @@ function show(i) {
   }
   info += ` | 已归属 ${nDone()}/${ITEMS.length} | ${it.file} t=${it.anchor_time}s`;
   if (it.cluster_id) info += ` | 簇#${groupIdOf(it.cluster_id)}`;
-  // 预填优先级：号码匹配（K3 读号）> 颜色 team_guess；歧义不预填
+  // 预填优先级：号码匹配（K3 读号）> 照片库识别 > 印名匹配 > 颜色 team_guess；歧义不预填
   const ab = document.getElementById("accept");
   if (it.status === "SKIP") info += " | 无法定位";
-  else if (it.prefill_tag) info += ` | 号码预填:${it.prefill_tag}`;
+  else if (it.prefill_tag) {
+    info += ` | ${it.prefill_note === "photo" ? "照片预填" : "号码预填"}:${it.prefill_tag}`;
+  }
   else if (it.prefill_note === "ambiguous") info += " | 号码歧义(同号多人)";
   else if (it.team_guess) info += ` | 颜色预填:${it.team_guess}`;
   const ng = it.number_guess;
@@ -788,6 +804,19 @@ function show(i) {
   } else {
     ab.style.display = "none";
     ab.onclick = null;
+  }
+  // 照片候选角标：与预填不一致（读号/照片冲突、读号歧义或无预填）时显示
+  // 号码+得分，点击改用照片归属——不静默覆盖（spec: docs/photo-roster T5）
+  const pgb = document.getElementById("photoaccept");
+  const pg = it.photo_guess;
+  if (pg && pg.tag !== it.prefill_tag) {
+    info += ` | 照片候选:${pg.number}号(得分${pg.score.toFixed(3)})`;
+    pgb.textContent = `改用照片:${pg.tag}`;
+    pgb.style.display = "inline-block";
+    pgb.onclick = () => assign(pg.tag);
+  } else {
+    pgb.style.display = "none";
+    pgb.onclick = null;
   }
   document.getElementById("prog").textContent = info;
   document.getElementById("cur").textContent =
@@ -865,11 +894,13 @@ function exportRoster() {
         (nUn ? "，还有 " + nUn + " 个非 SKIP 球未归属" : "") + "），移到 work 场次目录即可");
 }
 function acceptAllPrefills() {
-  // 一键全收号码预填（read-numbers-batch）：仅 prefill_tag 非空（号码唯一命中）
-  // 且未手改（非 touched）的球写入 marks；不标 touched——预填非终裁，
-  // 簇级选人仍可覆盖、第三步逐球核对可翻检。歧义球（prefill_tag 为空 +
-  // prefill_note="ambiguous"）与 SKIP 球（无预填）天然不满足条件。
-  let n = 0, nAmb = 0, nTouched = 0;
+  // 一键全收预填（号码 read-numbers-batch / 照片 photo-roster）：仅 prefill_tag
+  // 非空（号码唯一命中或照片命中）且未手改（非 touched）的球写入 marks；
+  // 不标 touched——预填非终裁，簇级选人仍可覆盖、第三步逐球核对可翻检。
+  // 歧义球（prefill_tag 为空 + prefill_note="ambiguous"）与 SKIP 球（无预填）
+  // 天然不满足条件。计数按 prefill_note 拆分：note==="photo" 计照片，
+  // 其余（含无 note 旧数据）计号码（review MEDIUM-1）。
+  let n = 0, nPhoto = 0, nAmb = 0, nTouched = 0;
   for (const it of ITEMS) {
     if (it.prefill_note === "ambiguous") nAmb++;
     if (!it.prefill_tag) continue;
@@ -877,10 +908,12 @@ function acceptAllPrefills() {
     if (marks[it.key] === it.prefill_tag) continue; // 幂等：已是该预填不重复计数
     marks[it.key] = it.prefill_tag;
     n++;
+    if (it.prefill_note === "photo") nPhoto++;
   }
   save();
   show(cur);
-  alert("已接受 " + n + " 个号码预填（歧义 " + nAmb + " / 已手改 " + nTouched + " 跳过）");
+  alert("已接受 " + n + " 个预填（号码 " + (n - nPhoto) + " / 照片 " + nPhoto +
+        "；歧义 " + nAmb + " / 已手改 " + nTouched + " 跳过）");
 }
 document.getElementById("go").onclick = freeAssign;
 document.getElementById("acceptall").onclick = acceptAllPrefills;
@@ -1172,6 +1205,59 @@ def match_players_by_name(players: list[Player], name_text: str | None) -> list[
     return [p for p in players if p.name and _edit_distance_le1(t, p.name)]
 
 
+@dataclass(frozen=True, slots=True)
+class PhotoGuess:
+    """单球照片库识别预填（注入页面条目的字段；spec: docs/photo-roster/spec.md T5）。
+
+    margin 刻意不进本结构/不进 JS：单号码库命中 margin=+inf，json.dumps 落
+    ``Infinity``，页面 JSON.parse 无法解析（读端 Python json 可解析，校验复用
+    photo_match_scorers.validate_matches_payload）。
+    """
+
+    number: str  # 去零号码（照片库匹配主键口径）
+    score: float  # top-1 余弦得分（冲突角标展示用）
+    tag: str  # 名单球员 tag 或占位 tag（半截篮<号码>）
+
+
+def resolve_photo_guesses(
+    matches: dict[str, MatchEntry], players: list[Player]
+) -> tuple[dict[str, PhotoGuess], list[Player]]:
+    """照片命中号码 → 名单 tag；名单缺号 → 占位 Player（半截篮<号>，team=半截篮）。
+
+    号码查名单复用 match_players_by_number 的数字边界口径（颜色传 None：照片
+    识别不给颜色提示）。同号多人 → WARNING 跳过该球不预填（交人裁判，与读号
+    歧义同口径）。占位条目随 players 名单注入页面，不得依赖 teamOfTag 前缀推队
+    （``半截篮7`` 不以黑/蓝/白开头，前缀推队会误归便服——spec 写死）。
+
+    Args:
+        matches: photo_match_scorers.validate_matches_payload 校验产物（key → 命中）。
+        players: 本页球员名单（--players/--players-file/已有 roster 合并后）。
+
+    Returns:
+        (key → PhotoGuess, 需追加注入名单的占位 Player 列表)；同号码多球只占位一份。
+    """
+    guesses: dict[str, PhotoGuess] = {}
+    placeholders: list[Player] = []
+    placeholder_tags: set[str] = set()
+    for key in sorted(matches):
+        entry: MatchEntry = matches[key]
+        found: list[Player] = match_players_by_number(players, entry.number, None)
+        if len(found) == 1:
+            tag: str = found[0].tag
+        elif not found:
+            tag = f"{TEAM_WHITE}{entry.number}"
+            if tag not in placeholder_tags and all(p.tag != tag for p in players):
+                placeholders.append(Player(tag=tag, name="", team=TEAM_WHITE))
+                placeholder_tags.add(tag)
+        else:
+            logger.warning(
+                "照片命中号码 %s 在名单中同号多人，不预填（交人裁判）: %s", entry.number, key
+            )
+            continue
+        guesses[key] = PhotoGuess(number=entry.number, score=entry.score, tag=tag)
+    return guesses, placeholders
+
+
 def _confirmed_goals(data: Any, goals_path: str) -> list[dict[str, Any]]:  # noqa: ANN401
     """从 goals.json 数据中取 confirmed 记录（缺 file/anchor_time 显式失败）。
 
@@ -1389,16 +1475,20 @@ def build_entries(
     out_dir: str,
     players: list[Player] | None = None,
     cluster_map: dict[str, int] | None = None,
+    photo_guesses: dict[str, PhotoGuess] | None = None,
 ) -> list[dict[str, Any]]:
     """组装页面条目：每条 = 一个 confirmed 球（按 file+anchor 排序）。
 
     以 goals.json 的 confirmed 球为全集，按 key 关联 candidates 取裁图/
     team_guess/number_guess/SKIP 状态；无候选记录（防御）按 SKIP 列出。视频优先级：
     candidates 的 "clip"（按进球锚点现切的预览片段，与裁图同球同时刻）＞
-    events_index 的 clip_wide 匹配（仅作无预览片段时的兜底）。预填优先级：
-    号码匹配（number_guess 的 number+color 与名单 tag 匹配）＞ 颜色 team_guess；
-    号码匹配到多个球员 → 不预填，prefill_note="ambiguous"（页面标"号码歧义"）。
-    给了 cluster_map 则每条追加 cluster_id（不在任何簇/unclustered → None）。
+    events_index 的 clip_wide 匹配（仅作无预览片段时的兜底）。预填优先级
+    （spec: docs/photo-roster/spec.md T5 写死）：读号命中（号码唯一匹配，同号
+    歧义用印名消解）＞ 照片命中 ＞ 印名匹配 ＞ 空白；读号同号歧义维持不预填
+    （prefill_note="ambiguous"），照片候选仍随条目 photo_guess 上页供角标切换；
+    颜色 team_guess 仅作页面展示不参与 prefill_tag。给了 cluster_map 则每条追加
+    cluster_id（不在任何簇/unclustered → None）；给了 photo_guesses 则每条追加
+    photo_guess（无命中 → None，页面不出角标）。
 
     Args:
         confirmed: goals.json 的 confirmed 记录。
@@ -1406,16 +1496,19 @@ def build_entries(
         events: 事件列表；None 表示无 --index（无兜底视频）。
         index_dir: events_index.json 所在目录。
         out_dir: scorer.html 输出目录。
-        players: 球员名单（号码匹配用）；None/空列表则只做颜色预填。
+        players: 球员名单（号码/印名匹配用）；None/空列表则只做颜色展示与照片预填。
         cluster_map: key → cluster_id（build_cluster_map 产物）；None 表示无
             --clusters，条目 cluster_id 全为 None（页面不渲染簇区）。
+        photo_guesses: key → PhotoGuess（resolve_photo_guesses 产物）；None 表示
+            无 --photo-matches，条目 photo_guess 全为 None（页面行为与旧版一致）。
 
     Returns:
         页面条目列表（key/file/anchor_time/status/reason/crop/team_guess/clip/
-        number_guess/prefill_tag/prefill_note/cluster_id）。
+        number_guess/prefill_tag/prefill_note/cluster_id/photo_guess）。
     """
     players = players or []
     cluster_map = cluster_map or {}
+    photo_guesses = photo_guesses or {}
     by_key: dict[str, dict[str, Any]] = {c["key"]: c for c in candidates}
     entries: list[dict[str, Any]] = []
     ordered = sorted(confirmed, key=lambda g: (g["file"], float(g["anchor_time"])))
@@ -1434,27 +1527,33 @@ def build_entries(
         clip: str = str(cand.get("clip", "")) if cand is not None else ""
         if not clip and events is not None:
             clip = match_clip(events, file, anchor, index_dir, out_dir)
-        # 预填：号码唯一匹配；同号歧义时用印名消解；无号码则印名直配
+        # 预填：读号（号码唯一；同号歧义用印名消解）＞ 照片 ＞ 印名兜底；读号歧义不预填
         number_guess: dict[str, Any] | None = cand.get("number_guess") if cand is not None else None
+        pg: PhotoGuess | None = photo_guesses.get(key)
         prefill_tag: str = ""
         prefill_note: str = ""
+        num_matches: list[Player] = []
+        name_matches: list[Player] = []
         if isinstance(number_guess, dict):
-            matches: list[Player] = match_players_by_number(
+            num_matches = match_players_by_number(
                 players, number_guess.get("number"), number_guess.get("color")
             )
-            name_matches: list[Player] = match_players_by_name(
-                players, number_guess.get("name_text")
-            )
-            if not matches:
-                matches = name_matches
-            elif len(matches) > 1 and name_matches:
-                narrowed: list[Player] = [p for p in matches if p in name_matches]
+            name_matches = match_players_by_name(players, number_guess.get("name_text"))
+            if len(num_matches) > 1 and name_matches:
+                narrowed: list[Player] = [p for p in num_matches if p in name_matches]
                 if narrowed:
-                    matches = narrowed
-            if len(matches) == 1:
-                prefill_tag = matches[0].tag
-            elif len(matches) > 1:
-                prefill_note = "ambiguous"
+                    num_matches = narrowed
+        if len(num_matches) == 1:
+            prefill_tag = num_matches[0].tag
+        elif len(num_matches) > 1:
+            prefill_note = "ambiguous"
+        elif pg is not None:
+            prefill_tag = pg.tag
+            prefill_note = "photo"
+        elif len(name_matches) == 1:
+            prefill_tag = name_matches[0].tag
+        elif len(name_matches) > 1:
+            prefill_note = "ambiguous"
         entries.append(
             {
                 "key": key,
@@ -1469,6 +1568,11 @@ def build_entries(
                 "prefill_tag": prefill_tag,
                 "prefill_note": prefill_note,
                 "cluster_id": cluster_map.get(key),
+                "photo_guess": (
+                    {"number": pg.number, "score": pg.score, "tag": pg.tag}
+                    if pg is not None
+                    else None
+                ),
             }
         )
     return entries
@@ -1542,11 +1646,21 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="scorer_clusters.json 路径（可选，簇级确认；必须与 --scorers 同目录）",
     )
+    parser.add_argument(
+        "--photo-matches",
+        type=Path,
+        default=None,
+        help="photo_matches.json 路径（可选，照片库识别预填；必须与 --scorers 同目录）",
+    )
     ns = parser.parse_args(argv)
     if ns.players and ns.players_file is not None:
         parser.error("--players 与 --players-file 互斥：名单只给一个来源（防双源不一致）")
     if ns.clusters is not None and ns.clusters.resolve().parent != ns.scorers.resolve().parent:
         parser.error("--clusters 必须与 --scorers 同目录（rep_crops 与裁图同目录相对引用口径）")
+    if ns.photo_matches is not None and (
+        ns.photo_matches.resolve().parent != ns.scorers.resolve().parent
+    ):
+        parser.error("--photo-matches 必须与 --scorers 同目录（与 --clusters 校验同口径）")
     return ns
 
 
@@ -1611,8 +1725,35 @@ def main(argv: list[str] | None = None) -> int:
                         "已有 roster 归属的 tag 不在新名单中（导出时将自动补录）: %s", tag
                     )
 
+        photo_guesses: dict[str, PhotoGuess] | None = None
+        if args.photo_matches is not None:
+            # 延迟 import：photo_match_scorers 依赖链带 numpy/sklearn，只在启用
+            # 照片预填时加载，无 --photo-matches 行为与开销零变化（兼容性承诺）
+            from photo_match_scorers import validate_matches_payload
+
+            pm_data: Any = read_json(args.photo_matches, what="photo_matches.json")
+            pm_matches: dict[str, MatchEntry] = validate_matches_payload(
+                pm_data, str(args.photo_matches)
+            )
+            photo_guesses, placeholders = resolve_photo_guesses(pm_matches, players)
+            if placeholders:
+                # 名单缺号占位条目随 players 注入页面（spec 写死，不靠 teamOfTag 推队）
+                players = [*players, *placeholders]
+                logger.info(
+                    "照片命中号码不在名单，注入占位条目: %s",
+                    ", ".join(p.tag for p in placeholders),
+                )
+            logger.info("照片预填: %d 球命中 ← %s", len(photo_guesses), args.photo_matches)
+
         entries: list[dict[str, Any]] = build_entries(
-            confirmed, candidates, events, index_dir, out_dir, players, cluster_map=cluster_map
+            confirmed,
+            candidates,
+            events,
+            index_dir,
+            out_dir,
+            players,
+            cluster_map=cluster_map,
+            photo_guesses=photo_guesses,
         )
 
         page_clusters: list[dict[str, Any]] | None = None

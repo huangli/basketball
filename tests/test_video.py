@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -547,6 +548,148 @@ class TestPeople:
         crop_cmd = run_recorder[0][0]
         assert str(REL / "scorers") in crop_cmd
         assert str(REL / "candidates.json") in crop_cmd
+
+
+class TestPeoplePhotoMatch:
+    """people ②.5 照片匹配串联（docs/photo-roster/spec.md T6）。
+
+    串法：②聚类 后插 ②.5 照片匹配（条件：photos/ 存在且非 --skip-cluster）；
+    确认页带 --photo-matches；仅 ②.5 允许失败降级（ERROR 留痕、③ 照出、
+    产物缺失剥旗标降级为无预填）；①②③ 失败语义不变（任一步失败中断整链）。
+    """
+
+    def _setup_batch(self, session_dir: pathlib.Path, *, photos: bool = True) -> pathlib.Path:
+        """备好现行布局批次 2 前置产物（可选建 photos/ 库目录），返回 rawdir。"""
+        _write_json(session_dir / "goals_batch2.json", _goals_payload(2))
+        _write_json(session_dir / "candidates_batch2.json", [])
+        _write_json(session_dir / "review_batch2" / "events_index.json", {"events": []})
+        if photos:
+            (session_dir.parent.parent / "photos").mkdir()
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    @staticmethod
+    def _args(**over: object) -> argparse.Namespace:
+        """build_people_steps 直接调用用的最小参数命名空间。"""
+        base: dict[str, object] = {
+            "skip_cluster": False,
+            "read_numbers": False,
+            "max_reads": None,
+            "players_file": None,
+        }
+        base.update(over)
+        return argparse.Namespace(**base)
+
+    def test_photo_step_and_page_flag(self, session_dir: pathlib.Path) -> None:
+        # Arrange
+        rawdir = self._setup_batch(session_dir)
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert：② 后插 ②.5，逐字断言匹配命令（candidates 与 cache 按批配对）
+        assert [s.title for s in steps] == [
+            "批次2①裁图",
+            "批次2②聚类",
+            "批次2②.5照片匹配",
+            "批次2③确认页",
+        ]
+        assert list(steps[2].argv) == [
+            sys.executable,
+            str(SCRIPT_DIR / "photo_match_scorers.py"),
+            "--photos",
+            "photos",
+            "--candidates",
+            str(REL / "scorers_b2" / "scorer_candidates.json"),
+            "--cache",
+            str(REL / "scorers_b2" / "clip_cache.json"),
+            "--out",
+            str(REL / "scorers_b2" / "photo_matches.json"),
+        ]
+        assert steps[2].env_extra == {"HTTPS_PROXY": "http://127.0.0.1:7897"}
+        assert steps[2].allow_fail is True  # 仅 ②.5 允许失败降级
+        assert steps[0].allow_fail is False
+        assert steps[1].allow_fail is False
+        assert steps[3].allow_fail is False
+        page = list(steps[3].argv)
+        assert page[page.index("--photo-matches") + 1] == str(
+            REL / "scorers_b2" / "photo_matches.json"
+        )
+
+    def test_no_photos_dir_no_photo_step(self, session_dir: pathlib.Path) -> None:
+        # Arrange：缺照片库 → 整步跳过不阻塞（三段链原样）
+        rawdir = self._setup_batch(session_dir, photos=False)
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert
+        assert len(steps) == 3
+        assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
+        assert "--photo-matches" not in steps[2].argv
+
+    def test_skip_cluster_no_photo_step(self, session_dir: pathlib.Path) -> None:
+        # Arrange：photos/ 存在但 --skip-cluster（无 clip_cache 产出，同口径跳过）
+        rawdir = self._setup_batch(session_dir)
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(skip_cluster=True), batch, rawdir, session_dir)
+        # Assert
+        assert len(steps) == 2
+        assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
+        assert "--photo-matches" not in steps[1].argv
+
+    def test_photo_step_failure_degrades(
+        self,
+        session_dir: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：②.5 失败（0 起第 2 次调用）
+        rawdir = self._setup_batch(session_dir)
+        calls = _fail_recorder(monkeypatch, fail_at=2)
+        # Act
+        with caplog.at_level(logging.ERROR):
+            rc = video.main(
+                ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+            )
+        # Assert：ERROR 留痕、不中断整链、③ 确认页照出且剥掉 --photo-matches（无预填）
+        assert rc == 0
+        assert len(calls) == 4
+        assert "photo_match_scorers.py" in calls[2][1]
+        assert "--photo-matches" not in calls[3]
+        assert any("降级" in r.message for r in caplog.records)
+
+    def test_page_flag_kept_when_output_exists(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：photo_matches.json 已存在（断点续跑/上轮产物）→ 探测通过保留旗标
+        rawdir = self._setup_batch(session_dir)
+        _write_json(session_dir / "scorers_b2" / "photo_matches.json", {"matches": {}})
+        # Act
+        rc = video.main(
+            ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+        )
+        # Assert
+        assert rc == 0
+        assert len(run_recorder) == 4
+        page_cmd = run_recorder[3][0]
+        assert page_cmd[page_cmd.index("--photo-matches") + 1] == str(
+            REL / "scorers_b2" / "photo_matches.json"
+        )
+
+    def test_other_steps_failure_semantics_unchanged(
+        self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：② 聚类失败（photos 存在，链含 ②.5）
+        rawdir = self._setup_batch(session_dir)
+        calls = _fail_recorder(monkeypatch, fail_at=1)
+        # Act
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        # Assert：①②③ 失败语义不变——非零即停，②.5/③ 未执行
+        assert rc == 1
+        assert len(calls) == 2
 
 
 class TestResolveOutSize:

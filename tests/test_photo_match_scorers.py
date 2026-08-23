@@ -406,6 +406,21 @@ class TestBuildPayload:
         with pytest.raises(SchemaError, match="number"):
             validate_matches_payload(bad_entry, "<mem>")
 
+    def test_validate_number_must_be_digits(self) -> None:
+        # Arrange：spec 写死"去零数字主键"；消费端拼占位 tag 内联进 <script>，
+        # 非数字 number 必须显式拒绝（防坏文件注入）
+        for bad in ("7a", "半截篮7", "7<script>"):
+            payload = {
+                "version": "photo-match-v1",
+                "model": MODEL_TAG,
+                "threshold": 0.3,
+                "margin": 0.02,
+                "matches": {"k1": {"number": bad, "score": 0.9, "margin": 0.1}},
+            }
+            # Act / Assert
+            with pytest.raises(SchemaError, match="number"):
+                validate_matches_payload(payload, "<mem>")
+
 
 class TestTruthMapping:
     """真值映射：tag→号码（无号半截篮 tag 单列不可判）、未知 tag SchemaError。"""

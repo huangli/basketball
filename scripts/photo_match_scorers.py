@@ -495,6 +495,12 @@ def validate_matches_payload(data: Any, path: str) -> dict[str, MatchEntry]:  # 
         number: Any = entry.get("number")
         if not isinstance(number, str) or not number:
             raise SchemaError(f"{path}: matches[{key!r}] number 缺失或不是非空 str")
+        if not number.isdigit():
+            # spec 写死"去零数字主键"；消费端（gen_scorer_page）拼占位 tag 内联
+            # 进 <script>，非数字 number 可能是坏文件注入，显式拒绝
+            raise SchemaError(
+                f"{path}: matches[{key!r}] number 必须是去零数字主键，实际 {number!r}"
+            )
         for field in ("score", "margin"):
             v = entry.get(field)
             if isinstance(v, bool) or not isinstance(v, (int, float)):

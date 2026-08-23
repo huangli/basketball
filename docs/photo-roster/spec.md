@@ -135,10 +135,11 @@ work/<场次>/scorers_bK/photo_matches.json → 匹配产物（逐批，
 ### gen_scorer_page.py --photo-matches 预填
 
 - 传参约定（写死）：gen_scorer_page 只认显式 `--photo-matches`，无参数行为
-  不变；**存在性探测在编排侧**——video.py 拼确认页参数时
-  `if photo_matches.is_file()` 才拼入（与 --index/--roster-existing 同构，
-  video.py:432-438）；--photo-matches 必须与 --scorers 同目录（与 --clusters
-  校验同构，gen_scorer_page.py:1548）
+  不变；**存在性探测在编排侧、时点为执行时**——video.py 拼确认页参数时按计划
+  预传，②.5 产物落盘后、③ 执行前 `is_file()` 探测，缺失则剥掉旗标、确认页
+  照出（拼装时探测会死锁：首跑产物未落盘永不传参；与 --index/--roster-existing
+  的编排侧探测职责同构，video.py:432-438）；--photo-matches 必须与 --scorers
+  同目录（与 --clusters 校验同构，gen_scorer_page.py:1548）
 - 预填优先级（写死）：**读号命中 > 照片命中 > 印名匹配 > 簇级空白**
   （印名兜底为现状机制 gen_scorer_page.py:1445，本次不动）；读号与照片冲突时
   预填读号结果，照片候选在条目上显示角标（号码+得分）供人工切换——不静默覆盖
