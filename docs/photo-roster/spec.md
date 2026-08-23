@@ -17,11 +17,12 @@ Ask first）。这是明示决策而非引用原文。
 
 成功标准（可执行验证）：
 
-- **Phase A 对照实验先行**：评测真值 = 淳化街道 confirmed roster（立哥先跑
-  people 链确认，照片库成员的球重点确认；现存唯一 roster，20260722 产物已随
-  archive 清理），按 §数据契约的评估口径出命中率+混淆矩阵报告归档 review；
-  **达标线：我方有号球 top-1 命中率 ≥80% 且负样本误命中率 ≤10%**（立哥可改）
-  才进入 Phase B 集成；不达标记 review 停工报立哥
+- **Phase A 对照实验先行**：评测真值 = 新测试场次 confirmed roster（2026-08-23
+  立哥定：另下载测试视频做评测，场次 ID 待定记 `<测试场次>`；淳化街道素材
+  将删除，不作评测依据；测试场次跑完 build 自动模式 + people 链确认 roster，
+  照片库成员的球重点确认），按 §数据契约的评估口径出命中率+混淆矩阵报告归档
+  review；**达标线：我方有号球 top-1 命中率 ≥80% 且负样本误命中率 ≤10%**
+  （立哥可改）才进入 Phase B 集成；不达标记 review 停工报立哥
 - Phase B 集成后：确认页对照片命中球预填归属+置信度展示，未命中球行为不变；
   导出 roster、build 合集全链无回归
 - ruff+pytest 全绿；四件套齐全
@@ -41,15 +42,15 @@ Ask first）。这是明示决策而非引用原文。
 python -m ruff format scripts tests && python -m ruff check --fix scripts tests && \
   python -m pytest -q
 
-# Phase A：照片库 × 淳化街道对照实验（裁图 embedding 复用该场既有合并
+# Phase A：照片库 × 测试场次对照实验（裁图 embedding 复用该场既有合并
 # clip_cache，零重复推理；该 cache 由 build 自动模式聚类产出，含该场全部批次裁图；
-# 前提：该场已跑过 build 自动模式）
+# 前提：该场已跑过 build 自动模式；批次数以该场实际为准）
 python scripts/photo_match_scorers.py --photos photos --evaluate \
-  --candidates work/20260813_淳化街道/scorers_b1/scorer_candidates.json \
-  --candidates work/20260813_淳化街道/scorers_b2/scorer_candidates.json \
-  --candidates work/20260813_淳化街道/scorers_b3/scorer_candidates.json \
-  --roster work/20260813_淳化街道/roster.json \
-  --cache work/20260813_淳化街道/scorers_auto/clip_cache.json
+  --candidates work/<测试场次>/scorers_b1/scorer_candidates.json \
+  --candidates work/<测试场次>/scorers_b2/scorer_candidates.json \
+  --roster work/<测试场次>/roster.json \
+  --goals work/<测试场次>/merged_goals_cli.json \
+  --cache work/<测试场次>/scorers_auto/clip_cache.json
 
 # Phase B：people 链路实跑（逐批调用，candidates 与 cache 按批配对；
 # 此命令由 video.py people 串联，手工调试验时用）
@@ -98,7 +99,9 @@ work/<场次>/scorers_bK/photo_matches.json → 匹配产物（逐批，
 
 - 输入：--photos 库目录 + --candidates（可重复，并集后者覆盖，对齐
   cluster_scorers 口径）+ **--cache（可重复，跨文件并集查询；键 = crop md5
-  天然不冲）**；--evaluate 模式另加 --roster 出对照报告
+  天然不冲）**；--evaluate 模式另加 --roster 与 **--goals**（入统键集的真值
+  来源——candidates 可能是 goals 收缩前的陈旧产物，不能拿 candidates 键集
+  代替 confirmed 判定）出对照报告
 - 串联口径（写死）：video.py people **逐批调用**——每批 candidates 与该批
   clip_cache.json 配对，产出逐批 `scorers_bK/photo_matches.json`，供逐批
   确认页消费（与 people 逐批出页布局对齐）；--evaluate 模式可传合并 cache
@@ -177,7 +180,7 @@ dataclass 契约 + 显式校验 + SchemaError 分层；阈值/边距常量化带
 
 ## Success Criteria
 
-- [ ] Phase A：淳化街道 confirmed roster 对照，正样本命中率 ≥80% 且负样本
+- [ ] Phase A：测试场次 confirmed roster 对照，正样本命中率 ≥80% 且负样本
   误命中率 ≤10%（或立哥改定值），报告+混淆矩阵归档 review
 - [ ] photo_match_scorers.py + 缓存 + 闸逻辑 + 评估口径，单测覆盖上述契约
 - [ ] gen_scorer_page --photo-matches 预填集成（含冲突角标与名单缺号回退）
@@ -186,9 +189,10 @@ dataclass 契约 + 显式校验 + SchemaError 分层；阈值/边距常量化带
 
 ## Open Questions
 
-- Phase A 双重前置（plan 排依赖注意）：①淳化街道 roster confirmed=true
+- Phase A 双重前置（plan 排依赖注意）：①测试场次 roster confirmed=true
   （立哥跑 people 链确认，照片库成员的 tag 建议补号码）；②该场已跑过 build
-  自动模式聚类（scorers_auto/clip_cache.json 已存在，2026-08-22 已产出 ✓）
+  自动模式聚类（产 scorers_auto/clip_cache.json 合并缓存）——两者都依赖立哥
+  先下载测试视频并跑完 score→标注→build→people 链
 - 我方多人同号（不同年份球衣）暂按不存在处理；出现再议
 - 供照说明（随 plan 交付给立哥）：每张照片只含本人、正反各 1 张起步
   （优先清晰正面全身+背面号码）、多多益善可随时后补、光线均匀、不戴帽遮脸

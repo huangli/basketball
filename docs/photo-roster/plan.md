@@ -26,8 +26,10 @@
 
 ## 前置依赖（立哥侧，非代码任务）
 
-- P1 供照到位：`photos/<号码>/` 每号码正反各 1 张起步
-- P2 淳化街道 roster confirmed=true（people 链确认，照片库成员 tag 建议带号码）
+- P1 供照到位：`photos/<号码>/` 每号码正反各 1 张起步（✓ 2026-08-23 已到 7 人 14 张）
+- P2 测试场次 roster confirmed=true（2026-08-23 立哥定：另下载测试视频做评测，
+  淳化街道素材将删除不作评测依据；新场次跑 build 自动模式 + people 链确认，
+  照片库成员 tag 建议带号码）
 
 T1-T3 不依赖 P1/P2（合成数据 TDD），可先动手；T4 实跑卡 P1+P2。
 
@@ -53,17 +55,18 @@ T1-T3 不依赖 P1/P2（合成数据 TDD），可先动手；T4 实跑卡 P1+P2�
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
 - [ ] T3 --evaluate 评估模式
   - Acceptance: 真值映射（半截篮 tag 取号、无号半截篮 tag 单列"不可判"、
-    对方/便服记无号）；入统 = goals confirmed 且 key 在 roster.assignments；
-    报告含全部入统球 top-1 号码+score+margin 分布（不过闸）+ 正样本命中率 +
-    负样本误命中率 + 按号码混淆矩阵；markdown 报告写到 --out；坏 roster
-    SchemaError
+    对方/便服记无号）；入统 = --goals 的 confirmed 球且 key ∈
+    roster.assignments（--evaluate 必须同时给 --roster 与 --goals，缺一
+    parser 报错）；报告含全部入统球 top-1 号码+score+margin 分布（不过闸）+
+    正样本命中率 + 负样本误命中率 + 按号码混淆矩阵；markdown 报告写到
+    --out；坏 roster SchemaError
   - Verify: `pytest tests/test_photo_match_scorers.py -k evaluate`
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
 
 ### Checkpoint A（立哥过目）
 
 - [ ] T4 Phase A 实跑 + 阈值标定（卡 P1+P2）
-  - Acceptance: 淳化街道实跑出报告；按分布定 THRESHOLD/MARGIN 写死常量
+  - Acceptance: 测试场次实跑出报告；按分布定 THRESHOLD/MARGIN 写死常量
     （注释注明标定来源）；达标线双指标判定；报告+结论归档 review03.md
     （**预置达标/不达标两个结论模板，实跑后只填数**，降低立哥过目摩擦）；
     **不达标 → 停工报立哥，不进 Phase B**
@@ -90,7 +93,7 @@ T1-T3 不依赖 P1/P2（合成数据 TDD），可先动手；T4 实跑卡 P1+P2�
   - Files: scripts/video.py、tests/test_video.py
 - [ ] T7 文档同步 + 真机验证 + 收尾
   - Acceptance: 使用手册.html 加供照说明与流程变化；AGENTS.md 认人链路口径
-    更新（照片预填进 people 链）；淳化街道 people 链真机重跑，确认页预填
+    更新（照片预填进 people 链）；测试场次 people 链真机重跑，确认页预填
     肉眼抽验；review04.md 归档；四件套 todo 全勾
   - Verify: 关口全绿 + 真机抽验 + `grep` 无旧口径残留
   - Files: 使用手册.html、AGENTS.md、docs/photo-roster/review04.md
@@ -101,7 +104,7 @@ T1-T3 不依赖 P1/P2（合成数据 TDD），可先动手；T4 实跑卡 P1+P2�
 |---|---|---|
 | Phase A 不达标（CLIP 域差距在 1:N 场景仍吃命中率） | 高 | 硬闸停工；备选人脸模型（Ask first）；读号链路不受影响仍是主信号 |
 | 照片质量差（模糊/多人/遮脸） | 中 | 供照说明前置给立哥；确认页角标人工兜底；照片可随时后补增量重算 |
-| 淳化街道 roster 无号 tag 多 → "不可判"占比高、评估失真 | 中 | P2 操作建议 tag 带号码；不可判单列不计分母 |
+| 测试场次 roster 无号 tag 多 → "不可判"占比高、评估失真 | 中 | P2 操作建议 tag 带号码；不可判单列不计分母 |
 | 某批 ② 聚类未跑 → 该批 cache 缺失 | 低 | 契约已写死显式报错；people 链顺序保证聚类先于匹配 |
 | 阈值标定过拟合单场次 | 中 | 常量注释注明标定来源；后续场次确认页终裁天然纠偏，观察值记 review |
 

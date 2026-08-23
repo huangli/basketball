@@ -1,8 +1,9 @@
 # Todo: 照片库认人（photo-roster）
 
 依据 `docs/photo-roster/spec.md` + `plan.md`（第 4 轮审查修订稿）。按依赖序执行，
-逐项验收。前置（立哥侧）：P1 供照 `photos/<号码>/`；P2 淳化街道 roster
-confirmed=true。T1-T3 不卡前置（合成数据 TDD）；T4 实跑卡 P1+P2；
+逐项验收。前置（立哥侧）：P1 供照 `photos/<号码>/`（✓ 已到 7 人 14 张）；
+P2 测试场次 roster confirmed=true（立哥另下载测试视频，淳化街道将删除不作
+评测依据）。T1-T3 不卡前置（合成数据 TDD）；T4 实跑卡 P1+P2；
 Phase B 卡 Checkpoint A 达标。
 
 - [ ] T1 照片库加载 + 照片 embedding 缓存
@@ -23,14 +24,15 @@ Phase B 卡 Checkpoint A 达标。
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
 - [ ] T3 --evaluate 评估模式
   - Acceptance: 真值映射（半截篮 tag 取号；无号半截篮 tag 单列"不可判"；
-    对方/便服记无号）；入统 = goals confirmed 且 key ∈ roster.assignments；
+    对方/便服记无号）；入统 = --goals 的 confirmed 球且 key ∈ roster.assignments
+    （--evaluate 必须同时给 --roster 与 --goals，缺一 parser 报错）；
     报告含全部入统球 top-1+score+margin 分布（不过闸）+ 正样本命中率 +
     负样本误命中率 + 按号码混淆矩阵；markdown 报告写 --out；坏 roster
     SchemaError
   - Verify: `pytest tests/test_photo_match_scorers.py -k evaluate`
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
 - [ ] T4 【Checkpoint A，卡 P1+P2】Phase A 实跑 + 阈值标定
-  - Acceptance: 淳化街道实跑出报告；按分布定 THRESHOLD/MARGIN 写死常量
+  - Acceptance: 测试场次实跑出报告；按分布定 THRESHOLD/MARGIN 写死常量
     （注释注明标定来源）；双指标达标判定（≥80% 且 ≤10%）；报告+结论归档
     review03.md（预置达标/不达标结论模板，实跑后只填数）；
     **不达标 → 停工报立哥，不进 Phase B**
@@ -53,7 +55,7 @@ Phase B 卡 Checkpoint A 达标。
   - Files: scripts/video.py、tests/test_video.py
 - [ ] T7 文档同步 + 真机验证 + 收尾
   - Acceptance: 使用手册.html 供照说明+流程变化；AGENTS.md 认人链路口径更新；
-    淳化街道 people 链真机重跑、确认页预填肉眼抽验；review04.md 归档；
+    测试场次 people 链真机重跑、确认页预填肉眼抽验；review04.md 归档；
     本 todo 全勾
   - Verify: `ruff format scripts tests && ruff check --fix scripts tests &&
     pytest -q` 全绿 + 真机抽验 + 无旧口径残留
