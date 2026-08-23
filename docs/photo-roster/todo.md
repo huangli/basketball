@@ -6,7 +6,7 @@ P2 测试场次 roster confirmed=true（立哥另下载测试视频，淳化街�
 评测依据）。T1-T3 不卡前置（合成数据 TDD）；T4 实跑卡 P1+P2；
 Phase B 卡 Checkpoint A 达标。
 
-- [ ] T1 照片库加载 + 照片 embedding 缓存
+- [x] T1 照片库加载 + 照片 embedding 缓存
   - Acceptance: 扫 `photos/<号码>/` 产 gallery（去零号码 → [照片路径]）；
     非数字名/空文件夹/无合法图 WARNING 跳过、全无效显式报错；`07`→`7`
     归一化（原名仅展示）；.photo_cache.json 幂等增量、模型前缀隔离；
@@ -14,7 +14,7 @@ Phase B 卡 Checkpoint A 达标。
     通过）
   - Verify: `pytest tests/test_photo_match_scorers.py -k gallery or photo_cache`
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py、.gitignore
-- [ ] T2 匹配主链（得分 + 闸 + 产物）
+- [x] T2 匹配主链（得分 + 闸 + 产物）
   - Acceptance: --candidates 可重复合并、--cache 可重复并集查询；得分 =
     max(crops × photos) 余弦；并列最高不采纳、单号码库 margin=+∞；
     `score≥THRESHOLD 且 margin≥MARGIN` 才入 photo_matches.json（阈值占位
@@ -22,7 +22,7 @@ Phase B 卡 Checkpoint A 达标。
     前缀命中率 0% 显式报错；产物 schema 显式校验
   - Verify: `pytest tests/test_photo_match_scorers.py`
   - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
-- [ ] T3 --evaluate 评估模式
+- [x] T3 --evaluate 评估模式
   - Acceptance: 真值映射（半截篮 tag 取号；无号半截篮 tag 单列"不可判"；
     对方/便服记无号）；入统 = --goals 的 confirmed 球且 key ∈ roster.assignments
     （--evaluate 必须同时给 --roster 与 --goals，缺一 parser 报错）；
