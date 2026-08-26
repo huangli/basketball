@@ -4,7 +4,9 @@
 缺字段、数值字段为 bool）；find_source 的 --srcdir 直找与缺失；
 cluster_candidates 时空放宽聚类（批次 2 新增）；event_anchor 末成员锚点；
 event_hoop_dist / sort_events_by_hoop_dist（events_index 筐距排序）；
-跨文件续接（split_window / find_next_source / plan_clip_segments 回退）。
+跨文件续接（split_window / find_next_source / plan_clip_segments 回退）；
+goal-anchor：clip_window 窗口口径、cut_cluster_clip/cut_wide_clip 透出
+continued 标志（events_index 人工锚点退化用）。
 """
 
 from __future__ import annotations
@@ -14,11 +16,15 @@ from typing import Any
 
 import pytest
 
+import gen_review_clips as grc
 from errors import SchemaError
 from gen_review_clips import (
     _validate_candidates,
     adaptive_crop,
+    clip_window,
     cluster_candidates,
+    cut_cluster_clip,
+    cut_wide_clip,
     event_anchor,
     event_hoop_dist,
     event_verdict,
@@ -304,3 +310,32 @@ def test_plan_clip_segments_fallback_on_unprobeable(tmp_path: pathlib.Path) -> N
     # Assert：探测失败回退单段截断（WARNING 记日志），不炸
     assert cont is False
     assert segs == [(str(fake), 1.0, 9.0)]
+
+
+# ---- goal-anchor：clip_window 口径与 continued 透出 ----
+
+
+def test_clip_window_formula_and_clamp() -> None:
+    # Arrange：两成员事件与首候选 <2s 的早事件
+    members = [_cand(t0=10.0), _cand(t0=14.0, label="#2")]
+    early = [_cand(t0=1.0)]
+    # Act / Assert：首候选 -CLIP_BEFORE_SEC(2) ~ 末候选 +CLIP_AFTER_SEC(4)；起点钳 0
+    assert clip_window(members) == (8.0, 18.0)
+    assert clip_window(early) == (0.0, 5.0)
+
+
+def test_cut_functions_return_continued(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange：不真跑 ffmpeg/探测，plan_clip_segments 返回受控续接标志
+    monkeypatch.setattr(grc, "_render_segments", lambda segs, vf, out_path: None)
+    members = [_cand(t0=10.0)]
+    out_c = str(tmp_path / "c.mp4")
+    out_w = str(tmp_path / "w.mp4")
+    monkeypatch.setattr(grc, "plan_clip_segments", lambda *a, **k: ([("x.mp4", 8.0, 14.0)], True))
+    # Act / Assert：续接两态如实透出（events_index continued 字段来源）
+    assert cut_cluster_clip("x.mp4", "f", 1, members, out_c) is True
+    assert cut_wide_clip("x.mp4", 8.0, 14.0, "wm", out_w) is True
+    monkeypatch.setattr(grc, "plan_clip_segments", lambda *a, **k: ([("x.mp4", 8.0, 14.0)], False))
+    assert cut_cluster_clip("x.mp4", "f", 1, members, out_c) is False
+    assert cut_wide_clip("x.mp4", 8.0, 14.0, "wm", out_w) is False

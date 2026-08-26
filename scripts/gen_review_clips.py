@@ -14,7 +14,9 @@ hoop_dist（事件成员到筐轨迹的最小距离）升序排列，真球靠�
     --vlmcache 指定的 VLM 缓存 JSON（可选；损坏仅记 WARNING 并忽略判定水印）；
     --srcdir/--orig 按场次注入原片目录与原片尺寸（缺省为旧 4:3 测试素材参数）；
     --hoops 指定的 hoops.json（可选；无则回退锚点裁剪）
-输出：<outdir>/<fid>_events.mp4；--keep-clips 时另出 events_index.json（按 hoop_dist 升序）
+输出：<outdir>/<fid>_events.mp4；--keep-clips 时另出 events_index.json（按 hoop_dist 升序；
+    事件含 clip_src_start（片段原片起点）与 continued（跨文件续接标志），
+    供标注页 J 键人工锚点换算/退化用，见 docs/goal-anchor/）
 依赖：scripts/errors.py、scripts/pipe_common.py（run_ffmpeg/read_json/日志）
 用法:
     python scripts/gen_review_clips.py --candidates work/label/candidates.json
@@ -309,6 +311,23 @@ def event_anchor(members: list[dict[str, Any]]) -> float:
     return members[-1]["t0"]
 
 
+def clip_window(members: list[dict[str, Any]]) -> tuple[float, float]:
+    """事件的审核片段窗口（原片秒）：首候选前 CLIP_BEFORE_SEC ~ 末候选后 CLIP_AFTER_SEC。
+
+    cut_cluster_clip 与 events_index 的 clip_src_start 共用同一口径（防两处漂移）。
+
+    Args:
+        members: 事件内候选（按 t0 升序，非空）。
+
+    Returns:
+        (start, end)：start 钳到 ≥0。
+    """
+    return (
+        max(0.0, members[0]["t0"] - CLIP_BEFORE_SEC),
+        members[-1]["t0"] + CLIP_AFTER_SEC,
+    )
+
+
 def _encode_timeout_sec(duration_sec: float) -> int:
     """ffmpeg 转码超时：片段时长 ×3 + 60s 兜底，下限 120s（rules.md §4）。
 
@@ -559,7 +578,7 @@ def cut_wide_clip(
     text: str,
     out_path: str,
     srcdir: str = "",
-) -> None:
+) -> bool:
     """裁出同一事件的全景片段（全帧缩放，供辨认投球人）。
 
     窗口越出本文件末尾时自动续接到场次下一个切片文件（srcdir 非空时）。
@@ -571,6 +590,10 @@ def cut_wide_clip(
         text: 水印文本（未转义）。
         out_path: 输出片段路径。
         srcdir: 场次原片目录（跨文件续接用；空串不续接）。
+
+    Returns:
+        是否跨文件续接（供 events_index 记录：续接片段时间轴不归零，
+        标注页 J 键人工锚点换算不适用，须退化为机器锚）。
     """
     segs, continued = plan_clip_segments(src, start, end, srcdir)
     if continued:
@@ -584,6 +607,7 @@ def cut_wide_clip(
         f"box=1:boxcolor=black@0.8"
     )
     _render_segments(segs, vf, out_path)
+    return continued
 
 
 def cut_cluster_clip(
@@ -597,7 +621,7 @@ def cut_cluster_clip(
     hoop_track: list[list[Any]] | None = None,
     mark_no_hoop: bool = False,
     srcdir: str = "",
-) -> None:
+) -> bool:
     """裁出单个事件的审核片段（裁剪 + 事件编号水印）。
 
     窗口越出本文件末尾时自动续接到场次下一个切片文件（srcdir 非空时）；
@@ -614,9 +638,11 @@ def cut_cluster_clip(
         hoop_track: 筐轨迹（hoops.json）；提供时自适应裁剪，全程见筐。
         mark_no_hoop: 已提供 hoops 但本事件无筐检出，水印追加"无筐检出"。
         srcdir: 场次原片目录（跨文件续接用；空串不续接）。
+
+    Returns:
+        是否跨文件续接（供 events_index 记录，标注页人工锚点退化用）。
     """
-    start: float = max(0.0, members[0]["t0"] - CLIP_BEFORE_SEC)
-    end: float = members[-1]["t0"] + CLIP_AFTER_SEC
+    start, end = clip_window(members)
     segs, continued = plan_clip_segments(src, start, end, srcdir)
     if hoop_track:
         crop_x, crop_y, side = adaptive_crop(hoop_track, orig[0], orig[1])
@@ -635,6 +661,7 @@ def cut_cluster_clip(
         f"box=1:boxcolor=black@0.8"
     )
     _render_segments(segs, vf, out_path)
+    return continued
 
 
 def concat_clips(clips: list[str], list_path: str, out_path: str) -> None:
@@ -788,7 +815,7 @@ def main() -> int:
                 )
                 verdict: str = event_verdict(members, vlm)
                 no_hoop: bool = bool(hoops_path) and track is None
-                cut_cluster_clip(
+                cont_clip: bool = cut_cluster_clip(
                     src,
                     fid,
                     idx,
@@ -803,9 +830,8 @@ def main() -> int:
                 clips.append(clip)
                 if keep_clips:
                     wide_path: str = clip.replace(".mp4", "_wide.mp4")
-                    start: float = max(0.0, members[0]["t0"] - CLIP_BEFORE_SEC)
-                    end: float = members[-1]["t0"] + CLIP_AFTER_SEC
-                    cut_wide_clip(
+                    start, end = clip_window(members)
+                    cont_wide: bool = cut_wide_clip(
                         src,
                         start,
                         end,
@@ -823,6 +849,8 @@ def main() -> int:
                             "clip_wide": os.path.relpath(wide_path, out_dir),
                             "src_file": os.path.basename(src),
                             "anchor_t0": round(anchor_t0, 1),
+                            "clip_src_start": round(start, 1),
+                            "continued": cont_clip or cont_wide,
                             "hoop_dist": round(hoop_dist) if hoop_dist is not None else None,
                             "verdict": verdict,
                         }

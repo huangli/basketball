@@ -23,6 +23,12 @@ clip_end, status, scorer}]}；窗口 = 锚点前 4s + 后 2s（剪辑规格）�
 status：进球=confirmed（进集锦）；进球但不收（训练球）=rejected（如实记录、
 不进集锦，build_highlight 按 SPEC status 白名单跳过）。scorer 兼容历史
 标注（旧版"进球·大斌"按钮产出），当前页面不产生 scorer。
+
+锚点口径（goal-anchor）：J 键/「进球 (J)」按钮 = 进球 + 人工锚点（按下时刻
+× SPEED 换算原片时间，存 marks[key].anchor，导出优先采用）；T 键 = 进球 +
+机器锚（兜底，入网瞬间被挡/出画时用）。事件缺 clip_src_start 或 continued
+（跨文件续接，时间轴不归零）时 J 静默退化为机器锚。events_index 无
+clip_src_start/continued 字段的旧索引行为与旧版逐字一致。
 """
 
 import argparse
@@ -115,6 +121,7 @@ body { font-family: sans-serif; background: #111; color: #eee; margin: 16px; }
 button { font-size: 18px; padding: 10px 18px; margin: 4px; border-radius: 8px;
          border: 0; cursor: pointer; }
 #goal { background: #2c9e4b; color: #fff; }
+#goalm { background: #1f6e38; color: #fff; }
 #prac { background: #7a5c00; color: #fff; }
 #no { background: #b03a3a; color: #fff; }
 .nav { background: #444; color: #fff; }
@@ -128,7 +135,8 @@ small { color: #999; }
 <div id="bar">
   <span id="prog"></span> <span class="badge" id="verdict"></span>
   <span class="badge" id="grp"></span><br>
-  <button id="goal">进球 (J)</button>
+  <button id="goal">进球·定锚 (J)</button>
+  <button id="goalm">进球·机器锚 (T)</button>
   <button id="prac">进球但不收 (P)</button>
   <button id="no">不是 (F)</button>
   <button class="nav" id="prev">← 上一个</button>
@@ -138,8 +146,8 @@ small { color: #999; }
   <button class="nav" id="speed">倍速：1x</button>
   <button class="nav" id="wide">筐区视角 (W)</button>
   <button id="export">导出 __OUTNAME__</button>
-  <br><small>按键：J=进球 P=进球不收 F=不是 W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）</small>
-  <small>进度与位置自动存，刷新回到上次位置</small>
+  <br><small>按键：J=进球·定锚（入网瞬间按）T=进球·机器锚（看不清时用）P=不收 F=不是</small>
+  <small>W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）；进度与位置自动存，刷新回到上次位置</small>
 </div>
 <video id="v" autoplay loop muted playsinline></video>
 <script>
@@ -147,6 +155,7 @@ const EVENTS = __EVENTS__;
 const SESSION = "__SESSION__";
 const OUTNAME = "__OUTNAME__";
 const BEFORE = __BEFORE__, AFTER = __AFTER__;
+const SPEED = __SPEED__;  // 审核片段烘焙倍率（gen_review_clips.SPEED），J 捕锚换算用
 const LSKEY = "label_" + SESSION + "__LSUFFIX__";
 const POSKEY = LSKEY + "_pos";
 let marks = {};
@@ -179,9 +188,13 @@ function show(i) {
   v.play().catch(() => {});
   localStorage.setItem(POSKEY, String(cur));
   const [done, goals, pracs] = stats();
+  const mk = marks[e.key];
+  // 人工锚显示（goal-anchor）：J 捕锚存在即亮出，continued 事件提示机器锚退化
+  const anch = mk && typeof mk.anchor === "number" ? ` | 锚 t=${mk.anchor}s（人工）` : "";
+  const cont = e.continued ? " | 跨文件续接·锚点用机器值" : "";
   document.getElementById("prog").textContent =
     `第 ${cur + 1}/${EVENTS.length} 个 | 已标 ${done}` +
-    `（进球 ${goals} 不收 ${pracs}） | ${e.key} t=${e.anchor_t0}s`;
+    `（进球 ${goals} 不收 ${pracs}） | ${e.key} t=${e.anchor_t0}s${anch}${cont}`;
   document.getElementById("verdict").textContent = e.verdict || "";
   const grpEl = document.getElementById("grp");
   if (e.grp) {
@@ -205,10 +218,13 @@ function toggleWide() {
   document.getElementById("speed").textContent = "倍速：" + rate + "x";
   document.getElementById("wide").textContent = wide ? "筐区视角 (W)" : "全景视角 (W)";
 }
-function mark(r, scorer) {
+function mark(r, scorer, anchor) {
   const e = EVENTS[cur];
   const isNew = !marks[e.key];
-  marks[e.key] = scorer ? { r, scorer } : { r };
+  const m = scorer ? { r, scorer } : { r };
+  // 人工锚（goal-anchor）：存入即 round 0.1s，进度行显示与导出值一致
+  if (typeof anchor === "number" && isFinite(anchor)) m.anchor = Math.round(anchor * 10) / 10;
+  marks[e.key] = m;
   // 同组看一判全（label-speedup F1）：新判进球且成组时，提示把同组未标注
   // 成员标 F 跳过；已标注成员一律不覆盖，重复按 J 不再弹框
   if (r === "goal" && e.grp && isNew) {
@@ -228,6 +244,16 @@ function mark(r, scorer) {
   if (nxt < 0) nxt = EVENTS.findIndex(x => !marks[x.key]);
   show(nxt >= 0 ? nxt : cur + 1);
 }
+// J=定锚进球（按下时刻×SPEED 换算原片时间）；T=机器锚兜底。
+// 缺 clip_src_start（旧索引）或 continued（跨文件续接，时间轴不归零）时 J 静默退化为机器锚。
+function markGoal(withAnchor) {
+  const e = EVENTS[cur];
+  let anchor = null;
+  if (withAnchor && typeof e.clip_src_start === "number" && !e.continued) {
+    anchor = e.clip_src_start + v.currentTime * SPEED;
+  }
+  mark("goal", undefined, anchor);
+}
 function jumpUnmarked() {
   const n = EVENTS.findIndex(e => !marks[e.key]);
   show(n >= 0 ? n : cur);
@@ -245,7 +271,10 @@ function exportGoals() {
   if (issues.length) {
     const lines = issues.map(([g, es]) =>
       "组" + g + " " + es[0].src_file + "：" +
-      es.map(e => "t=" + e.anchor_t0 + "s").join(" 与 "));
+      es.map(e => {
+        const mm = marks[e.key];
+        return "t=" + (mm && typeof mm.anchor === "number" ? mm.anchor : e.anchor_t0) + "s";
+      }).join(" 与 "));
     const msg = "以下疑似同回合的组标了多个进球：\n" + lines.join("\n") +
       "\n\n确定 = 确实是两个球（照导出）\n取消 = 是同一球（返回，把多余的进球改判）";
     if (!confirm(msg)) return;
@@ -254,11 +283,13 @@ function exportGoals() {
   for (const e of EVENTS) {
     const m = marks[e.key];
     if (!m || (m.r !== "goal" && m.r !== "practice")) continue;
+    // 人工锚（J 捕锚）优先；无则机器锚（T 键/旧进度/continued 退化）
+    const a = (typeof m.anchor === "number" && isFinite(m.anchor)) ? m.anchor : e.anchor_t0;
     goals.push({
       file: e.src_file,
-      anchor_time: e.anchor_t0,
-      clip_start: Math.max(0, Math.round((e.anchor_t0 - BEFORE) * 10) / 10),
-      clip_end: Math.round((e.anchor_t0 + AFTER) * 10) / 10,
+      anchor_time: a,
+      clip_start: Math.max(0, Math.round((a - BEFORE) * 10) / 10),
+      clip_end: Math.round((a + AFTER) * 10) / 10,
       status: m.r === "goal" ? "confirmed" : "rejected",
       scorer: m.scorer || ""
     });
@@ -273,7 +304,8 @@ function exportGoals() {
   alert("已下载 " + OUTNAME + "（进球 " + nGoal +
         " 个，不收 " + (goals.length - nGoal) + " 个），移到 work 场次目录即可");
 }
-document.getElementById("goal").onclick = () => mark("goal");
+document.getElementById("goal").onclick = () => markGoal(true);
+document.getElementById("goalm").onclick = () => markGoal(false);
 document.getElementById("prac").onclick = () => mark("practice");
 document.getElementById("no").onclick = () => mark("no");
 document.getElementById("prev").onclick = () => show(cur - 1);
@@ -289,7 +321,8 @@ document.getElementById("wide").onclick = toggleWide;
 document.getElementById("export").onclick = exportGoals;
 document.addEventListener("keydown", (ev) => {
   const k = ev.key.toLowerCase();
-  if (k === "j") mark("goal");
+  if (k === "j") markGoal(true);
+  else if (k === "t") markGoal(false);
   else if (k === "p") mark("practice");
   else if (k === "f") mark("no");
   else if (k === "w") toggleWide();
@@ -352,6 +385,8 @@ def build_html(events: list[dict[str, Any]], session: str, batch: int | None = N
         .replace("__OUTNAME__", out_name)
         .replace("__BEFORE__", str(CLIP_BEFORE_SEC))
         .replace("__AFTER__", str(CLIP_AFTER_SEC))
+        # 审核片段烘焙倍率（J 捕锚换算用），全模块路径引用 gen_review_clips 不硬编码
+        .replace("__SPEED__", str(gen_review_clips.SPEED))
     )
 
 

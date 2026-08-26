@@ -275,3 +275,39 @@ def test_localstorage_keys_unchanged_without_batch() -> None:
     html = build_html([_event()], "s")
     assert 'const LSKEY = "label_" + SESSION + "";' in html
     assert "_batch" not in html.split("const LSKEY", 1)[1].splitlines()[0]
+
+
+# ---- goal-anchor：J 键人工锚点 ----
+
+
+def test_build_html_injects_speed_constant() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：SPEED 取 gen_review_clips.SPEED（J 捕锚换算 currentTime×SPEED），不硬编码
+    import gen_review_clips
+
+    assert f"const SPEED = {gen_review_clips.SPEED};" in html
+
+
+def test_build_html_passthrough_anchor_fields() -> None:
+    # Arrange：带新字段的事件
+    e = _event()
+    e["clip_src_start"] = 12.3
+    e["continued"] = True
+    # Act
+    html = build_html([e], "s")
+    # Assert：两字段原样透传进页面 JSON（JS 捕锚/退化依据）
+    assert '"clip_src_start": 12.3' in html
+    assert '"continued": true' in html
+
+
+def test_build_html_goal_anchor_js_paths() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：J/按钮捕锚、T 机器锚兜底、缺字段或 continued 退化、导出人工锚优先
+    assert "markGoal(true)" in html
+    assert "markGoal(false)" in html
+    assert "e.clip_src_start + v.currentTime * SPEED" in html
+    assert "!e.continued" in html
+    assert 'typeof m.anchor === "number"' in html
+    assert "m.anchor = Math.round(anchor * 10) / 10" in html

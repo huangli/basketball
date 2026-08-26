@@ -112,10 +112,12 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 </ol>
 <table>
   <tr><th>按键</th><th>含义</th><th>按键</th><th>含义</th></tr>
-  <tr><td><kbd>J</kbd></td><td>进球 ✓（属疑似同回合组时弹窗询问，确定才把同组其余标 F 跳过）</td><td><kbd>W</kbd></td><td>全景 / 筐区 视角切换</td></tr>
-  <tr><td><kbd>P</kbd></td><td>进球但不收（练球等）</td><td><kbd>S</kbd></td><td>倍速切换（默认已是有效 2x）</td></tr>
-  <tr><td><kbd>F</kbd></td><td>不是进球 ✗</td><td><kbd>←</kbd> <kbd>→</kbd></td><td>上一条 / 下一条</td></tr>
+  <tr><td><kbd>J</kbd></td><td>进球·<b>定锚</b> ✓：在<b>球入网瞬间</b>按下，按下时刻即成品片段锚点（前 4 后 2 围绕它切）。属疑似同回合组时弹窗询问，确定才把同组其余标 F 跳过</td><td><kbd>W</kbd></td><td>全景 / 筐区 视角切换</td></tr>
+  <tr><td><kbd>T</kbd></td><td>进球·<b>机器锚</b>：入网瞬间被挡/出画指不准时用，锚点取机器值（时机可能偏，能看清入网一律用 J）</td><td><kbd>S</kbd></td><td>倍速切换（默认已是有效 2x）</td></tr>
+  <tr><td><kbd>P</kbd></td><td>进球但不收（练球等）</td><td><kbd>←</kbd> <kbd>→</kbd></td><td>上一条 / 下一条</td></tr>
+  <tr><td><kbd>F</kbd></td><td>不是进球 ✗</td><td></td><td></td></tr>
 </table>
+<div class="tip"><b>提示</b>2026-08-26 起 J 键升级为"定锚"：片段会循环重播，等入网那帧转过来再按 J 即可，按早了/晚了再按一次就改锚（进度行显示 <code>锚 t=xx.xs（人工）</code>）。跨文件续接的片段（水印带"跨文件续接"）J 自动退化为机器锚，页面会提示。</div>
 <ol start="3">
   <li>进度自动存在浏览器里，关了就下次接着标。</li>
   <li>标完点 <b>导出</b>，下载得到 <code>goals_batch1.json</code>——<b>文件名自动带批次号</b>（batch2 页面就导出 goals_batch2.json，以此类推）。</li>
