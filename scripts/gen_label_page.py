@@ -142,12 +142,13 @@ small { color: #999; }
   <button class="nav" id="prev">← 上一个</button>
   <button class="nav" id="next">下一个 →</button>
   <button class="nav" id="toun">跳到未标</button>
+  <button class="nav" id="tog">跳到进球 (G)</button>
   <button class="nav" id="sound">声音开/关</button>
   <button class="nav" id="speed">倍速：1x</button>
   <button class="nav" id="wide">筐区视角 (W)</button>
   <button id="export">导出 __OUTNAME__</button>
   <br><small>按键：J=进球·定锚（入网瞬间按）T=进球·机器锚（看不清时用）P=不收 F=不是</small>
-  <small>W=全景/筐区切换 S=倍速 ←/→=翻页（默认全景）；进度与位置自动存，刷新回到上次位置</small>
+  <small>W=全景/筐区 S=倍速 G=跳到进球 ←/→=翻页（默认全景）；进度自动存，刷新回到上次位置</small>
 </div>
 <video id="v" autoplay loop muted playsinline></video>
 <script>
@@ -258,6 +259,14 @@ function jumpUnmarked() {
   const n = EVENTS.findIndex(e => !marks[e.key]);
   show(n >= 0 ? n : cur);
 }
+// 跳到进球（label-jump-goal）：补锚导航——循环找下一个已标 goal 的事件，
+// mark() 标注后前进同款循环语义（与 jumpUnmarked 的全列首个不同，刻意差异勿改回）；
+// 全批无 goal 标记时原地不动（show(cur)）。
+function jumpGoal() {
+  let n = EVENTS.findIndex((x, idx) => idx > cur && marks[x.key] && marks[x.key].r === "goal");
+  if (n < 0) n = EVENTS.findIndex(x => marks[x.key] && marks[x.key].r === "goal");
+  show(n >= 0 ? n : cur);
+}
 function exportGoals() {
   // 疑似同回合组多 J 前置检查（dedup-same-goal：机器只提示，判定权在人；
   // 每次导出都问，选择不持久化）
@@ -311,6 +320,7 @@ document.getElementById("no").onclick = () => mark("no");
 document.getElementById("prev").onclick = () => show(cur - 1);
 document.getElementById("next").onclick = () => show(cur + 1);
 document.getElementById("toun").onclick = jumpUnmarked;
+document.getElementById("tog").onclick = jumpGoal;
 // 声音开关只切 muted：欢呼是判球信号，不能在判读瞬间重载片段
 // （show() 会进度归零、倍速掉回 1x、视角翻回全景——label-page-fixes Bug①）
 document.getElementById("sound").onclick = () => {
@@ -323,6 +333,7 @@ document.addEventListener("keydown", (ev) => {
   const k = ev.key.toLowerCase();
   if (k === "j") markGoal(true);
   else if (k === "t") markGoal(false);
+  else if (k === "g") jumpGoal();
   else if (k === "p") mark("practice");
   else if (k === "f") mark("no");
   else if (k === "w") toggleWide();

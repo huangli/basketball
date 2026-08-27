@@ -311,3 +311,18 @@ def test_build_html_goal_anchor_js_paths() -> None:
     assert "!e.continued" in html
     assert 'typeof m.anchor === "number"' in html
     assert "m.anchor = Math.round(anchor * 10) / 10" in html
+
+
+# ---- label-jump-goal：跳到进球导航 ----
+
+
+def test_build_html_has_jump_goal_button_and_binding() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：按钮 + jumpGoal 循环查找 + G 键绑定 + 只挑 r==="goal"
+    assert 'id="tog"' in html
+    assert "function jumpGoal()" in html
+    assert 'marks[x.key].r === "goal"' in html
+    assert '"g") jumpGoal()' in html
+    # 落空原地不动（show(cur)），与 jumpUnmarked 同模式
+    assert "show(n >= 0 ? n : cur)" in html
