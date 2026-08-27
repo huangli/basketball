@@ -241,6 +241,13 @@ function mark(r, scorer, anchor) {
     }
   }
   save();
+  // 导航：仅首次标注自动前进到下一个未标事件（首轮标注提速）；
+  // 改标/补锚（事件已有标记）原地不动，刷新显示即可——导航交给 G/翻页
+  // （label-jump-goal review02：补锚流程被"下一个未标"拽走，立哥实录）
+  if (!isNew) {
+    show(cur);
+    return;
+  }
   let nxt = EVENTS.findIndex((x, idx) => idx > cur && !marks[x.key]);
   if (nxt < 0) nxt = EVENTS.findIndex(x => !marks[x.key]);
   show(nxt >= 0 ? nxt : cur + 1);

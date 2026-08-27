@@ -326,3 +326,14 @@ def test_build_html_has_jump_goal_button_and_binding() -> None:
     assert '"g") jumpGoal()' in html
     # 落空原地不动（show(cur)），与 jumpUnmarked 同模式
     assert "show(n >= 0 ? n : cur)" in html
+
+
+# ---- label-jump-goal review02：改标/补锚不再自动跳走 ----
+
+
+def test_mark_does_not_advance_on_remark() -> None:
+    # Arrange / Act
+    html = build_html([_event()], "s")
+    # Assert：改标（已有标记）原地 show(cur)；仅首标才查找下一个未标前进
+    assert "if (!isNew)" in html
+    assert "show(cur);" in html
