@@ -6,20 +6,20 @@
 
 - [x] T0-T6 v1 已交付（匹配核心/页面预填/串联；CLIP 路线已证伪归档 review03）
 - [x] T7 spec v2.1 修订（去 K3 层，零 token 路线，2026-08-27 立哥定）
-- [ ] T8 S1 号码 OCR spike（PARSeq 系，work/ 一次性）
+- [x] T8 S1 号码 OCR spike（PARSeq 系，work/ 一次性）
   - Acceptance: 管线跑通（装不上记录原因换备选不硬磕）；truth_16 命中/
     误指认/漏对账表；58 球覆盖率+库外读数率；可读帧率观察；**许可按实际
     选用组件分别核实（PARSeq-B 本体 Apache-2.0 vs 整管线 CC-BY-NC，报告
     注明）**；报告归档
   - Verify: work/spike_ocr/ 报告
   - Files: work/spike_ocr/
-- [ ] T9 S2 人脸 spike（insightface buffalo_l，work/ 一次性）
+- [x] T9 S2 人脸 spike（insightface buffalo_l，work/ 一次性）
   - Acceptance: 管线跑通（装不上/权重下载失败记录原因记"未验证"）；
     truth_16 命中/误指认/漏（多帧投票+单帧双口径）；小脸检出失败率单列；
     报告归档
   - Verify: work/spike_face/ 报告
   - Files: work/spike_face/
-- [ ] T10 【checkpoint】立哥选型：OCR / 人脸 / 双路 / 皆弃
+- [x] T10 【checkpoint】立哥选型：OCR / 人脸 / 双路 / 皆弃
   - Acceptance: 两报告呈阅，结论记 review04.md；皆弃 → 余项划掉注明
   - Files: docs/photo-roster/review04.md
 - [ ] T11 L1 matcher 产品化（卡 T10 选型）

@@ -2,7 +2,7 @@
 
 依据 `docs/crop-quality/spec.md` + `plan.md`。先标定后写码，逐项验收。
 
-- [ ] C1 标定：58 球裁图分布
+- [x] C1 标定：58 球裁图分布
   - Acceptance: 全部候选帧宽高比分布 + yolov8n 框内复检置信度分布；
     t550.0/t480.1/t34.1/t186.6/t264.4 落点标注；MIN_RATIO/MAX_RATIO/
     PERSON_CONF 建议值（宁漏拦不错杀）；归档 review01.md 标定章
