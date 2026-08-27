@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import crop_scorers
 from crop_scorers import (
     MotCache,
     NumberGuess,
@@ -34,6 +35,7 @@ from crop_scorers import (
     cut_preview_clip,
     drop_opposite_team,
     expand_box,
+    expanded_ratio,
     file_md5,
     find_held_box,
     frame_quality,
@@ -42,12 +44,14 @@ from crop_scorers import (
     load_number_cache,
     locate_scorer,
     main,
+    make_quality_gate,
     match_anchor_xy,
     migrate_number_cache,
     number_guess_from_dict,
     parse_number_answer,
     pick_best_frames,
     preview_window,
+    ratio_gate_reason,
     read_number,
     save_number_cache,
     score_chain_frames,
@@ -89,6 +93,20 @@ def _empty_cache(frames: int) -> MotCache:
 def _track(points: list[tuple[int, int, int]]) -> Track:
     """由 (cx, cy, frame_idx) 列表构造轨迹。"""
     return Track(dets=[_ball(0.9, cx, cy, fi) for cx, cy, fi in points])
+
+
+@pytest.fixture(autouse=True)
+def _stub_person_rechecker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """默认桩掉框内人物复检（高置信放行），全文件不碰真 yolov8n 模型。
+
+    质量闸专项测试（TestPersonRecheckGate / TestQualityGateSkip）自行再注入
+    受控假检测器覆盖各分支。
+    """
+
+    def always_person(img: Image.Image) -> float:
+        return 0.99
+
+    monkeypatch.setattr(crop_scorers, "_get_person_rechecker", lambda: always_person)
 
 
 class TestLoadMotCache:
@@ -1685,3 +1703,296 @@ class TestCliMultiCrop:
                     "0",
                 ]
             )
+
+
+class TestExpandedRatio:
+    """外扩夹取后框宽高比（质量闸第一道作用口径，同标定 report §口径说明）。"""
+
+    def test_normal_box(self) -> None:
+        # Arrange：100×300 框外扩 20% → 120×360
+        box = Box(100, 100, 200, 400)
+        # Act / Assert
+        assert expanded_ratio(box, 1000, 800) == pytest.approx(120 / 360)
+
+    def test_degenerate_box_returns_zero(self) -> None:
+        # Arrange：框完全出图像下界，外扩夹取后为空（geom.Box 本身拒绝零/负尺寸框）
+        # Act / Assert：返回 0.0 必被拦（< GATE_MIN_RATIO），不抛除零
+        assert expanded_ratio(Box(10, 500, 20, 510), 100, 100) == 0.0
+
+
+class TestRatioGate:
+    """宽高比 sanity 闸边界值：恰好等于上下限放行、略超拦截、正常框不误杀。
+
+    边界构造利用外扩 pad 取整无舍入误差的整十尺寸（标定 report §阈值建议：
+    端点含入，宁漏拦不错杀）。
+    """
+
+    def test_exactly_min_ratio_passes(self) -> None:
+        # Arrange：w=150 h=1000 → 外扩后 180/1200 = 0.15 = GATE_MIN_RATIO
+        box = Box(100, 100, 250, 1100)
+        # Act / Assert：恰好等于下限 → 放行
+        assert ratio_gate_reason(box, 2000, 1300) is None
+
+    def test_exactly_max_ratio_passes(self) -> None:
+        # Arrange：w=1200 h=1000 → 外扩后 1440/1200 = 1.2 = GATE_MAX_RATIO（框右移避开左界夹取）
+        box = Box(200, 100, 1400, 1100)
+        # Act / Assert：恰好等于上限 → 放行
+        assert ratio_gate_reason(box, 2000, 1300) is None
+
+    def test_slightly_below_min_rejected(self) -> None:
+        # Arrange：w=140 h=1000 → 外扩后 168/1200 = 0.14 < 0.15
+        box = Box(100, 100, 240, 1100)
+        # Act / Assert
+        reason = ratio_gate_reason(box, 2000, 1300)
+        assert reason is not None
+        assert "宽高比" in reason
+
+    def test_slightly_above_max_rejected(self) -> None:
+        # Arrange：w=1210 h=1000 → 外扩后 1452/1200 = 1.21 > 1.2（框右移避开左界夹取）
+        box = Box(200, 100, 1410, 1100)
+        # Act / Assert
+        assert ratio_gate_reason(box, 2000, 1300) is not None
+
+    def test_normal_standing_ratio_not_killed(self) -> None:
+        # Arrange：w=400 h=1000 → 外扩后 480/1200 = 0.4（站立人标定区间 0.28~0.58 中段）
+        box = Box(100, 100, 500, 1100)
+        # Act / Assert：正常框不误杀
+        assert ratio_gate_reason(box, 2000, 1300) is None
+
+    def test_degenerate_box_rejected_not_crash(self) -> None:
+        # Arrange / Act / Assert：框完全出界（夹取后空）拦截且不抛异常
+        assert ratio_gate_reason(Box(10, 500, 20, 510), 100, 100) is not None
+
+
+class TestPersonRecheckGate:
+    """框内人物复检闸（注入假检测器，不碰真模型）+ 缺框帧不拦截 + 惰性加载。"""
+
+    def _framesdir(self, tmp_path: Path) -> Path:
+        """落一张 1000×800 帧图（帧 0）。"""
+        framesdir = tmp_path / "frames"
+        (framesdir / "v").mkdir(parents=True)
+        Image.new("RGB", (1000, 800), (20, 20, 20)).save(framesdir / "v" / "f_00001.jpg")
+        return framesdir
+
+    def test_confident_person_passes(self, tmp_path: Path) -> None:
+        # Arrange：假检测器高置信
+        def recheck(img: Image.Image) -> float:
+            return 0.9
+
+        gate = make_quality_gate(self._framesdir(tmp_path), "v", "k", rechecker=recheck)
+        # Act / Assert：有可信 person 框 → 放行
+        assert gate(0, Box(100, 100, 300, 600)) is None
+
+    def test_no_person_rejected(self, tmp_path: Path) -> None:
+        # Arrange：假检测器无框（0.0，瓶子/广告牌情形）
+        def recheck(img: Image.Image) -> float:
+            return 0.0
+
+        gate = make_quality_gate(self._framesdir(tmp_path), "v", "k", rechecker=recheck)
+        # Act / Assert
+        reason = gate(0, Box(100, 100, 300, 600))
+        assert reason is not None
+        assert "person" in reason
+
+    def test_low_conf_rejected_edge_conf_passes(self, tmp_path: Path) -> None:
+        # Arrange：0.24 < GATE_PERSON_CONF=0.25 → 拦截；恰 0.25 → 放行
+        framesdir = self._framesdir(tmp_path)
+
+        def recheck_low(img: Image.Image) -> float:
+            return 0.24
+
+        def recheck_edge(img: Image.Image) -> float:
+            return 0.25
+
+        gate_low = make_quality_gate(framesdir, "v", "k", rechecker=recheck_low)
+        gate_edge = make_quality_gate(framesdir, "v", "k", rechecker=recheck_edge)
+        # Act / Assert
+        assert gate_low(0, Box(100, 100, 300, 600)) is not None
+        assert gate_edge(0, Box(100, 100, 300, 600)) is None
+
+    def test_ratio_reject_skips_recheck(self, tmp_path: Path) -> None:
+        # Arrange：宽高比先行——畸形框零成本拦截，不触发复检（省 CPU）
+        calls: list[int] = []
+
+        def recheck(img: Image.Image) -> float:
+            calls.append(1)
+            return 0.9
+
+        gate = make_quality_gate(self._framesdir(tmp_path), "v", "k", rechecker=recheck)
+        # Act：w=50 h=500 → 外扩后 60/600 = 0.1 < 0.15
+        reason = gate(0, Box(100, 100, 150, 600))
+        # Assert
+        assert reason is not None
+        assert "宽高比" in reason
+        assert calls == []
+
+    def test_missing_box_not_blocked(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Arrange：缺框帧（检测缓存无框）——跳过复检不拦截，记 INFO 不静默丢弃
+        def recheck(img: Image.Image) -> float:
+            return 0.0
+
+        gate = make_quality_gate(self._framesdir(tmp_path), "v", "k", rechecker=recheck)
+        # Act / Assert
+        with caplog.at_level(logging.INFO, logger="crop_scorers"):
+            assert gate(0, None) is None
+        assert "缺框" in caplog.text
+
+    def test_lazy_load_only_on_first_recheck(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：未注入 rechecker 时惰性加载——只对过了几何闸的帧首次触发，且只加载一次
+        loaded: list[int] = []
+
+        def fake_loader() -> object:
+            loaded.append(1)
+
+            def recheck(img: Image.Image) -> float:
+                return 0.9
+
+            return recheck
+
+        monkeypatch.setattr(crop_scorers, "_get_person_rechecker", fake_loader)
+        gate = make_quality_gate(self._framesdir(tmp_path), "v", "k")
+        # Act / Assert：畸形框走几何闸即拦，不触发加载
+        assert gate(0, Box(100, 100, 150, 600)) is not None
+        assert loaded == []
+        # 正常框首次触发加载
+        assert gate(0, Box(100, 100, 300, 600)) is None
+        assert loaded == [1]
+        # 第二帧复用同一实例，不重复加载
+        assert gate(0, Box(100, 100, 310, 600)) is None
+        assert loaded == [1]
+
+
+class TestPickBestFramesGate:
+    """闸插选帧循环内：废帧丢弃不占位、不耗间距，次优帧补位。"""
+
+    def _scored(self, items: list[tuple[int, float]]) -> list[tuple[int, Box, float, str]]:
+        """由 (frame_idx, score) 列表构造打分序列（框与 team 随意，不参与排序）。"""
+        return [(fi, Box(0, 0, 100, 200), s, "便服") for fi, s in items]
+
+    def test_rejected_frame_filled_by_next_best(self) -> None:
+        # Arrange：最高分帧 0 被闸拦，次优帧补位
+        scored = self._scored([(0, 9.0), (10, 8.0), (20, 7.0)])
+
+        def gate(fi: int, box: Box | None) -> str | None:
+            return "宽高比越界" if fi == 0 else None
+
+        # Act
+        picked = pick_best_frames(scored, 2, gate=gate)
+        # Assert
+        assert [fi for fi, _, _, _ in picked] == [10, 20]
+
+    def test_rejected_frame_does_not_reserve_spacing(self) -> None:
+        # Arrange：帧 0（9 分）废，帧 1（8 分）距帧 0 仅 1 帧——废帧不占间距，帧 1 仍入选
+        scored = self._scored([(0, 9.0), (1, 8.0)])
+
+        def gate(fi: int, box: Box | None) -> str | None:
+            return "无可信 person" if fi == 0 else None
+
+        # Act
+        picked = pick_best_frames(scored, 2, gate=gate)
+        # Assert
+        assert [fi for fi, _, _, _ in picked] == [1]
+
+    def test_all_rejected_returns_empty(self) -> None:
+        # Arrange / Act：帧池全废 → 空（交由上层判 SKIP）
+        picked = pick_best_frames(
+            self._scored([(0, 9.0), (10, 8.0)]),
+            3,
+            gate=lambda fi, box: "废",
+        )
+        # Assert
+        assert picked == []
+
+
+class TestQualityGateSkip:
+    """CLI 级：全废球 SKIP+reason=quality_gate、废帧不写 JPEG、不落 crops/crop_scores、
+    部分帧废次优帧补位且留痕。"""
+
+    def test_all_frames_rejected_skip(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：假检测器全拦（无可信 person）
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+
+        def recheck(img: Image.Image) -> float:
+            return 0.0
+
+        monkeypatch.setattr(crop_scorers, "_get_person_rechecker", lambda: recheck)
+        # Act
+        with caplog.at_level(logging.INFO, logger="crop_scorers"):
+            rc = main(
+                [
+                    "--goals",
+                    str(goals),
+                    "--detectdir",
+                    str(detectdir),
+                    "--framesdir",
+                    str(framesdir),
+                    "--out",
+                    str(out),
+                ]
+            )
+        # Assert：质量闸 SKIP 不算素材缺失，退出码仍 0
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        entry = payload["candidates"][0]
+        assert entry["status"] == "SKIP"
+        assert entry["reason"] == "quality_gate"
+        # SKIP 条目不落 crops/crop_scores（:1335 口径不动）
+        assert "crops" not in entry
+        assert "crop_scores" not in entry
+        # 废帧不写 JPEG
+        assert not list(out.glob("a_video_t2.0*.jpg"))
+        # 拦截留痕（INFO）
+        assert "质量闸拦截" in caplog.text
+
+    def test_partial_reject_backfills(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange：帧 0 换成暗色噪点图（质量分最高且 team=黑不被串人守卫剔），
+        # 假检测器只拦噪点图（std 高）→ 帧 0 废、其余帧补位
+        goals, detectdir, framesdir, out = TestCliEndToEnd()._setup(tmp_path)
+        noise = np.random.default_rng(42).integers(0, 40, (800, 1000, 3), dtype=np.uint8)
+        Image.fromarray(noise).save(framesdir / "a_video" / "f_00001.jpg")
+
+        def recheck(img: Image.Image) -> float:
+            arr = np.asarray(img.convert("L"), dtype=np.float32)
+            return 0.0 if float(arr.std()) > 5.0 else 0.9
+
+        monkeypatch.setattr(crop_scorers, "_get_person_rechecker", lambda: recheck)
+        # Act
+        with caplog.at_level(logging.INFO, logger="crop_scorers"):
+            rc = main(
+                [
+                    "--goals",
+                    str(goals),
+                    "--detectdir",
+                    str(detectdir),
+                    "--framesdir",
+                    str(framesdir),
+                    "--out",
+                    str(out),
+                ]
+            )
+        # Assert
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        entry = payload["candidates"][0]
+        assert entry["status"] == "OK"
+        # 次优帧补位凑够 best_crops=3
+        assert len(entry["crops"]) == len(entry["crop_scores"]) == 3
+        for name in entry["crops"]:
+            assert (out / name).is_file()
+        # 帧 0 拦截留痕：帧时刻 + 原因
+        assert "t=0.0s" in caplog.text
+        assert "person" in caplog.text

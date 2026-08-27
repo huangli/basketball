@@ -8,13 +8,13 @@
     PERSON_CONF 建议值（宁漏拦不错杀）；归档 review01.md 标定章
   - Verify: work/crop_quality_calibration/ 分布报告
   - Files: work/（一次性分析脚本）
-- [ ] C2 宽高比闸实施
+- [x] C2 宽高比闸实施
   - Acceptance: 选帧循环内几何闸（C1 定稿常量）；废帧 INFO 留痕；补位
     语义；全废球 SKIP+reason、预览片段保留、SKIP 条目不落 crops/crop_scores；
     单测边界值
   - Verify: `pytest tests/test_crop_scorers.py -k ratio`
   - Files: scripts/crop_scorers.py、tests/test_crop_scorers.py
-- [ ] C3 框内人物复检闸实施
+- [x] C3 框内人物复检闸实施
   - Acceptance: yolov8n 复检（conf<PERSON_CONF 判无人）；惰性加载+可注入；
     留痕/补位/SKIP 同 C2；单测注入假检测器三分支
   - Verify: `pytest tests/test_crop_scorers.py -k recheck`

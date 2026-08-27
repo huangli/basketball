@@ -34,6 +34,12 @@ SKIP 球无投篮者定位但仍切预览片段（立哥凭视频手选）。
 各 2s，5fps 即各 ≤10 帧，越界/链断即停）；链上帧逐帧读图算质量分（归一化框面积
 × Laplacian 方差），取 top N 且入选帧间隔 ≥0.5s 去重；entry 落 crops（质量降序）
 与 crop_scores，crop = crops[0] 保持向后兼容，rank≥2 文件名追加 _q2/_q3 后缀。
+裁图质量闸（crop-quality spec §数据契约，2026-08-27）：选帧循环内逐帧过闸——
+宽高比 sanity（外扩后框 w/h 越界 [GATE_MIN_RATIO, GATE_MAX_RATIO] 判畸形废帧，
+零成本先行）→ 框内人物复检（yolov8n gate-view 复检无可信 person 判无人废帧，
+惰性加载可注入）；废帧丢弃取次优帧补位、不写 JPEG、记 INFO 留痕（帧时刻+原因）；
+候选帧全被拦 → status=SKIP + reason=quality_gate（预览片段保留，不落
+crops/crop_scores）。缺框帧（检测缓存无框）跳过复检不拦截，记 INFO。
 """
 
 from __future__ import annotations
@@ -106,6 +112,18 @@ TRACE_WINDOW_SEC: float = 2.0  # 选帧窗口 = 定位帧前后各 2s（5fps 即
 TRACE_MIN_IOU: float = 0.3  # 帧间人框 IoU 下限，低于即视为链断停链
 CROP_MIN_SPACING_SEC: float = 0.5  # 入选帧最小间隔（同人连续帧裁剪近乎重复，无信息增量）
 DEFAULT_BEST_CROPS: int = 3  # --best-crops 默认值（每球最多裁图张数）
+
+# ---- 裁图质量闸参数（crop-quality spec §数据契约，2026-08-27 定稿） ----
+# 阈值由 citymonkey 58 球 643 候选帧全量分布标定，依据见
+# work/crop_quality_calibration/report.md §阈值建议（宁漏拦不错杀，端点含入）。
+GATE_MIN_RATIO: float = 0.15  # 外扩后框 w/h 下限：643 帧仅 t550.0 细条帧 0.0898 低于此，断层明显
+GATE_MAX_RATIO: float = 1.2  # 外扩后框 w/h 上限：超限 10 帧全属 t44.2 前景手臂废帧（1.22~2.04）
+GATE_PERSON_CONF: float = 0.25  # 框内复检 person 置信度下限：分布双峰（0.0 与 ≥0.5 之间空白）
+GATE_PERSON_MODEL_PATH: str = "models/yolov8n.pt"  # 复检人物模型（持球排除同款，惰性加载）
+GATE_PERSON_IMGSZ: int = 640  # 复检推理尺寸（同标定 gate-view 口径：外扩+短边放大后 imgsz=640）
+YOLO_PERSON_CLS: int = 0  # COCO person 类 id（与 mot_candidates.PERSON_CLS 同值）
+REASON_QUALITY_GATE: str = "quality_gate"  # 候选帧全被质量闸拦截的 SKIP reason
+
 
 # ---- 认人预览片段参数（--rawdir 给定时逐球现切，与进球锚点严格对齐） ----
 PREVIEW_BEFORE_SEC: float = 4.0  # 窗口 = 锚点前 4s（与剪辑规格一致）
@@ -972,6 +990,30 @@ def expand_box(box: Box, ratio: float, width: int, height: int) -> tuple[int, in
     return x1, y1, x2, y2
 
 
+def _gate_view(img: Image.Image, box: Box) -> Image.Image:
+    """裁图视图 = 外扩 20% 裁出 + 短边不足 400px 等比放大（crop_and_save 与质量闸
+    框内复检共用，复检输入与标定 gate-view 口径一致）。
+
+    Args:
+        img: 帧图（与 box 同坐标系）。
+        box: 人框（未外扩）。
+
+    Returns:
+        裁出并（必要时）放大后的 RGB 图；退化框（短边 0）不放大，原样返回空裁图。
+    """
+    x1, y1, x2, y2 = expand_box(box, CROP_EXPAND, img.width, img.height)
+    crop = img.crop((x1, y1, x2, y2))
+    short: int = min(crop.size)
+    if 0 < short < CROP_MIN_SHORT_SIDE:
+        scale: float = CROP_MIN_SHORT_SIDE / short
+        new_size: tuple[int, int] = (
+            round(crop.width * scale),
+            round(crop.height * scale),
+        )
+        crop = crop.resize(new_size, Image.Resampling.LANCZOS)
+    return crop
+
+
 def crop_and_save(img_path: Path, box: Box, out_path: Path) -> None:
     """裁出投篮者：外扩 20%，短边不足 400px 等比放大到 400px，存 JPEG。
 
@@ -983,17 +1025,151 @@ def crop_and_save(img_path: Path, box: Box, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(img_path) as im:
         rgb = im.convert("RGB")
-        x1, y1, x2, y2 = expand_box(box, CROP_EXPAND, rgb.width, rgb.height)
-        crop = rgb.crop((x1, y1, x2, y2))
-        short: int = min(crop.size)
-        if short < CROP_MIN_SHORT_SIDE:
-            scale: float = CROP_MIN_SHORT_SIDE / short
-            new_size: tuple[int, int] = (
-                round(crop.width * scale),
-                round(crop.height * scale),
-            )
-            crop = crop.resize(new_size, Image.Resampling.LANCZOS)
+        crop = _gate_view(rgb, box)
         crop.save(out_path, "JPEG", quality=JPEG_QUALITY)
+
+
+def expanded_ratio(box: Box, width: int, height: int) -> float:
+    """外扩 20% 并夹取图像边界后的框宽高比 w/h（质量闸第一道作用口径，同标定
+    report §口径说明）。
+
+    Args:
+        box: 人框（未外扩）。
+        width: 图像宽（像素）。
+        height: 图像高（像素）。
+
+    Returns:
+        外扩夹取后 w/h；退化框（夹取后高 ≤0）返回 0.0（必被拦，不抛除零）。
+    """
+    x1, y1, x2, y2 = expand_box(box, CROP_EXPAND, width, height)
+    if y2 - y1 <= 0:
+        return 0.0
+    return (x2 - x1) / (y2 - y1)
+
+
+def ratio_gate_reason(box: Box, width: int, height: int) -> str | None:
+    """宽高比 sanity 闸（质量闸第一道，纯几何零成本先行）：外扩后框 w/h 越界
+    [GATE_MIN_RATIO, GATE_MAX_RATIO] → 拦截原因，否则 None。
+
+    端点含入（恰好等于上下限放行——宁漏拦不错杀，标定 report §阈值建议）。
+
+    Args:
+        box: 人框（未外扩）。
+        width: 图像宽（像素）。
+        height: 图像高（像素）。
+
+    Returns:
+        拦截原因字符串（含实测比值）；放行返回 None。
+    """
+    ratio: float = expanded_ratio(box, width, height)
+    if ratio < GATE_MIN_RATIO or ratio > GATE_MAX_RATIO:
+        return f"宽高比 {ratio:.3f} 越界 [{GATE_MIN_RATIO}, {GATE_MAX_RATIO}]"
+    return None
+
+
+PersonRechecker = Callable[[Image.Image], float]  # gate-view 裁图 → 最高 person 置信度（无框 0.0）
+
+_person_rechecker: PersonRechecker | None = None  # 惰性缓存（模块级不加载模型，rules.md §1）
+
+
+def _yolov8n_person_rechecker() -> PersonRechecker:
+    """加载 yolov8n 并返回框内人物复检器（质量闸第二道）。
+
+    只检 person 类、imgsz=640、取最高置信度（无 person 框记 0.0），与标定口径一致
+    （work/crop_quality_calibration/report.md §口径说明）。模型缺失显式失败。
+
+    Returns:
+        复检函数（gate-view 裁图 → 最高 person 置信度）。
+
+    Raises:
+        BasketballPipelineError: 模型文件缺失。
+    """
+    from ultralytics import YOLO
+
+    model_path = Path(GATE_PERSON_MODEL_PATH)
+    if not model_path.is_file():
+        raise BasketballPipelineError(f"质量闸人物模型缺失: {model_path}")
+    model = YOLO(str(model_path))
+
+    def recheck(crop: Image.Image) -> float:
+        results = model.predict(
+            np.asarray(crop),
+            imgsz=GATE_PERSON_IMGSZ,
+            classes=[YOLO_PERSON_CLS],
+            verbose=False,
+        )
+        best: float = 0.0
+        for res in results:
+            if res.boxes is None:
+                continue
+            for conf in res.boxes.conf.tolist():
+                best = max(best, float(conf))
+        return best
+
+    return recheck
+
+
+def _get_person_rechecker() -> PersonRechecker:
+    """惰性加载并缓存 yolov8n 复检器（仅裁图质量闸首次用到时才加载；测试注入假检测器）。"""
+    global _person_rechecker
+    if _person_rechecker is None:
+        _person_rechecker = _yolov8n_person_rechecker()
+    return _person_rechecker
+
+
+def make_quality_gate(
+    framesdir: Path,
+    fid: str,
+    key: str,
+    rechecker: PersonRechecker | None = None,
+) -> Callable[[int, Box | None], str | None]:
+    """构造裁图质量闸（crop-quality spec §数据契约：宽高比 sanity 先行 + 框内人物复检殿后）。
+
+    闸插选帧循环内（pick_best_frames gate 参数）：候选帧逐帧过闸，废帧丢弃继续
+    取次优帧补位。缺框帧（检测缓存无框，box=None）跳过复检不拦截，记 INFO 不静默
+    丢弃。宽高比为纯几何零成本先行；yolov8n 复检只对过了几何闸的帧跑（省 CPU），
+    rechecker 未注入时惰性加载（首次真正需要复检时才加载，测试可注入假检测器）。
+
+    Args:
+        framesdir: 帧图根目录。
+        fid: 视频主名（帧路径映射用）。
+        key: 进球键（留痕日志用）。
+        rechecker: 框内人物复检器；None 时惰性加载 models/yolov8n.pt。
+
+    Returns:
+        闸函数 (frame_idx, box) -> 拦截原因 | None（放行）；拦截/缺框跳过时记
+        INFO 留痕（帧时刻 + 原因）。
+    """
+    resolved_rechecker: PersonRechecker | None = rechecker
+
+    def _resolve() -> PersonRechecker:
+        nonlocal resolved_rechecker
+        if resolved_rechecker is None:
+            resolved_rechecker = _get_person_rechecker()
+        return resolved_rechecker
+
+    def gate(frame_idx: int, box: Box | None) -> str | None:
+        sec: float = frame_idx / SAMPLE_FPS
+        if box is None:  # 检测缓存缺框：跳过复检不拦截，记 INFO 不静默丢弃
+            logger.info("质量闸跳过（缓存缺框，不拦截）: %s 帧=%d t=%.1fs", key, frame_idx, sec)
+            return None
+        path: Path = _frame_path(framesdir, fid, frame_idx)
+        try:
+            with Image.open(path) as im:
+                rgb = im.convert("RGB")
+        except (OSError, ValueError) as exc:  # score_chain_frames 已剔除不可读帧，防御不拦截
+            logger.warning("质量闸帧图不可读，跳过复检不拦截: %s: %s", path, exc)
+            return None
+        reason: str | None = ratio_gate_reason(box, rgb.width, rgb.height)
+        if reason is None:
+            conf: float = _resolve()(_gate_view(rgb, box))
+            if conf < GATE_PERSON_CONF:
+                reason = f"框内无可信 person（最高 conf={conf:.3f} < {GATE_PERSON_CONF}）"
+        if reason is not None:
+            logger.info("质量闸拦截: %s 帧=%d t=%.1fs %s", key, frame_idx, sec, reason)
+        return reason
+
+    return gate
 
 
 def frame_quality(img: Image.Image, box: Box) -> float:
@@ -1050,16 +1226,22 @@ def score_chain_frames(
 
 
 def pick_best_frames(
-    scored: list[tuple[int, Box, float, str]], n: int
+    scored: list[tuple[int, Box, float, str]],
+    n: int,
+    gate: Callable[[int, Box | None], str | None] | None = None,
 ) -> list[tuple[int, Box, float, str]]:
     """按质量分降序贪心取 top n，入选帧间隔 ≥CROP_MIN_SPACING_SEC 去重。
 
     质量分并列时按帧索引升序优先（稳定可测）；间隔按 5fps 帧差折算（0.5s=2.5 帧，
-    即帧差 ≥3 才入选）。
+    即帧差 ≥3 才入选）。给了 gate（裁图质量闸，crop-quality spec §行为口径）则
+    逐帧过闸：废帧丢弃不占位、不耗入选间距，继续取次优帧补位，直到凑够 n 张或
+    帧池耗尽（全废返回空列表，由上层判 SKIP）。
 
     Args:
         scored: score_chain_frames 产物（team 字段不参与排序，原样透传）。
         n: 最多入选帧数（--best-crops）。
+        gate: 质量闸 (frame_idx, box) -> 拦截原因 | None；None 表示不过闸
+            （默认行为与闸引入前一致）。
 
     Returns:
         入选 (frame_idx, box, score, team)，按质量分降序；scored 为空返回空列表。
@@ -1073,8 +1255,13 @@ def pick_best_frames(
     for item in sorted(scored, key=lambda it: (-it[2], it[0])):
         if len(picked) >= n:
             break
-        if all(abs(item[0] - sel[0]) / SAMPLE_FPS >= CROP_MIN_SPACING_SEC - _EPS for sel in picked):
-            picked.append(item)
+        if not all(
+            abs(item[0] - sel[0]) / SAMPLE_FPS >= CROP_MIN_SPACING_SEC - _EPS for sel in picked
+        ):
+            continue
+        if gate is not None and gate(item[0], item[1]) is not None:
+            continue  # 废帧丢弃：不占位、不影响间距，次优帧补位
+        picked.append(item)
     return picked
 
 
@@ -1326,11 +1513,15 @@ def _process_goal(
     rawdir: Path | None = None,
     anchor_xy: tuple[int, int] | None = None,
     best_crops: int = DEFAULT_BEST_CROPS,
+    rechecker: PersonRechecker | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """处理单个 confirmed 球：切预览片段（--rawdir 时，SKIP 球也切）→ 定位 → 多裁 → 颜色分队。
 
     多裁（scorer-cluster spec §数据契约）：定位 OK 后 trace_person 链同一人框 →
     链上帧算质量分 → pick_best_frames 取 top best_crops（≥0.5s 去重）→ 逐张裁图。
+    选帧循环内过裁图质量闸（crop-quality spec §行为口径）：候选帧逐帧先宽高比
+    sanity 再框内人物复检，废帧丢弃取次优帧补位；候选帧全被拦 → status=SKIP、
+    reason=quality_gate（预览片段保留、不落 crops/crop_scores）。
     entry 落 crops（质量降序文件名）与 crop_scores，crop = crops[0] 保持向后兼容；
     crops/crop_scores 只在 status=OK 时存在，SKIP 条目不含这两个字段。
 
@@ -1343,6 +1534,7 @@ def _process_goal(
         anchor_xy: 候选锚点 (cx, cy)（--candidates 匹配产物）；None 时轨迹选择
             退化为端点时间最近。
         best_crops: 每球最多裁图张数（--best-crops）。
+        rechecker: 框内人物复检器（质量闸第二道）；None 时惰性加载 yolov8n。
 
     Returns:
         (候选记录, 是否发生素材缺失错误)。素材缺失（cache/帧图/原片不存在、
@@ -1398,11 +1590,17 @@ def _process_goal(
         entry["reason"] = "missing_frame"
         return entry, True
 
-    # 轨迹选帧多裁：定位帧人框为种子链同一人框，按质量分取 top best_crops（≥0.5s 去重）
+    # 轨迹选帧多裁：定位帧人框为种子链同一人框，按质量分取 top best_crops（≥0.5s 去重）；
+    # 选帧循环内过质量闸（宽高比先行、框内人物复检殿后），废帧丢弃取次优帧补位
     chain: list[tuple[int, Box]] = trace_person(cache.persons, result.frame_idx, result.box)
     scored: list[tuple[int, Box, float, str]] = score_chain_frames(chain, framesdir, fid)
     scored = drop_opposite_team(scored, result.frame_idx)  # 串人守卫：剔黑↔白明确相反帧
-    picked: list[tuple[int, Box, float, str]] = pick_best_frames(scored, best_crops)
+    gate = make_quality_gate(framesdir, fid, entry["key"], rechecker)
+    picked: list[tuple[int, Box, float, str]] = pick_best_frames(scored, best_crops, gate=gate)
+    if not picked and scored:  # 候选帧池非空但全被质量闸拦截 → SKIP（预览片段保留，不落 crops）
+        entry["reason"] = REASON_QUALITY_GATE
+        logger.info("候选帧全被质量闸拦截，SKIP: %s 候选帧=%d", entry["key"], len(scored))
+        return entry, clip_failed
     if not picked:  # 防御：定位帧 is_file 已过但解码失败 → 回退定位帧单裁（裁图报错由下层抛出）
         picked = [(result.frame_idx, result.box, 0.0, TEAM_CASUAL)]
     crops: list[str] = []
