@@ -60,7 +60,7 @@
 - [ ] T11 L1 matcher 产品化
   - Acceptance: scripts/ 下 matcher（按选型建）——缓存幂等（键=裁图 md5+
     模型版本）、产出对齐 photo_matches.json schema（高置信映射 score、
-    margin=0.0 占位）、低置信/无命中不入 matches、名单先验（OCR 库外读数
+    margin=top1-top2 分差实测）、低置信/无命中不入 matches、名单先验（OCR 库外读数
     不采纳）、**双路启用时接力编排 = OCR 高置信 > 人脸高置信 > 人裁，
     OCR 命中不调人脸（mock 计数断言，仅选型=双路时生效）**、单球失败
     ERROR 不炸批；单测注入假识别器

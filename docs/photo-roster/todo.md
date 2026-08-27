@@ -22,9 +22,9 @@
 - [x] T10 【checkpoint】立哥选型：OCR / 人脸 / 双路 / 皆弃
   - Acceptance: 两报告呈阅，结论记 review04.md；皆弃 → 余项划掉注明
   - Files: docs/photo-roster/review04.md
-- [ ] T11 L1 matcher 产品化（卡 T10 选型）
+- [x] T11 L1 matcher 产品化（卡 T10 选型）
   - Acceptance: 缓存幂等（裁图 md5+模型版本）；产出对齐 photo_matches.json
-    schema（高置信映射 score、margin=0.0 占位）；低置信/无命中不入 matches；
+    schema（高置信入、score=best sim/margin=top1-top2 实测）；低置信/无命中不入 matches；
     OCR 库外读数不采纳（名单先验）；**双路启用时接力编排 = OCR 高置信 >
     人脸高置信 > 人裁，OCR 命中不调人脸（mock 计数断言，仅选型=双路时
     生效）**；单球失败 ERROR 不炸批；单测注入假识别器

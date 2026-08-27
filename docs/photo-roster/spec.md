@@ -112,8 +112,9 @@ docs/crop-quality/      → 裁图质量闸专项（并行，互为上下游）
 - 产出保持 photo_matches.json 现 schema 不变（version=photo-match-v1、
   model/threshold/margin 顶层数值占位、matches:{key:{number,score,margin}}）
   ——T5 页面机制与 validate_matches_payload 零改动消费
-- 映射：高置信命中 → 入 matches（score=置信度映射值、margin=0.0 占位，
-  注释注明语义）；低置信/无命中 → 不入 matches（确认页全量列球天然进页面）
+- 映射：高置信命中 → 入 matches（**score=best sim 实测、margin=top1-top2
+  分差实测**——2026-08-28 T11 落地口径，比 v2 的占位方案信息更富、消费端
+  无感）；低置信/无命中 → 不入 matches（确认页全量列球天然进页面）
 - 原始结果（置信度/票数/各帧明细）写 matcher 自有缓存（幂等，重跑零重算）
 
 ### 照片库 / 评估口径 / 确认页预填
