@@ -19,7 +19,7 @@
     留痕/补位/SKIP 同 C2；单测注入假检测器三分支
   - Verify: `pytest tests/test_crop_scorers.py -k recheck`
   - Files: scripts/crop_scorers.py、tests/test_crop_scorers.py
-- [ ] C4 citymonkey 重跑真机验证
+- [x] C4 citymonkey 重跑真机验证
   - Acceptance: 操作步骤：① `mv work/20260822_citymonkey/scorers_b1
     work/20260822_citymonkey/scorers_b1.bak`（备份不删）；②
     `python scripts/video.py people --session 20260822_citymonkey --no-read-numbers`

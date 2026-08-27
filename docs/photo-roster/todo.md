@@ -30,7 +30,7 @@
     生效）**；单球失败 ERROR 不炸批；单测注入假识别器
   - Verify: `pytest tests/test_<matcher>.py` + validate 联调
   - Files: scripts/<ocr|face>_match_scorers.py、tests/test_<matcher>.py
-- [ ] T12 video.py people 串联换 L1（卡 T11）
+- [x] T12 video.py people 串联换 L1（卡 T11）
   - Acceptance: ②.5 换 L1 matcher（条件/降级语义同 T6 既有口径）；
     **people 链 read_numbers 默认翻转 False（v2.1 零 token 定案；
     --read-numbers 显式开保留兼容）**；单测断言
