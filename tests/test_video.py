@@ -266,7 +266,7 @@ class TestPeople:
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
         rawdir = self._setup_batch(session_dir)
-        # --no-read-numbers：读号自 2026-08-16 起默认开（read-numbers-batch），
+        # --no-read-numbers：读号默认关（photo-roster T12 起，v2.1 零 token 定案），
         # 本用例锁定三段链的裸骨架，显式关掉读号保持断言面最小
         rc = video.main(
             ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
@@ -373,18 +373,18 @@ class TestPeople:
         assert rc == 0
         assert run_recorder[0][0][-2:] == ["--max-reads", "9"]
 
-    def test_read_numbers_default_on(
+    def test_read_numbers_default_off(
         self,
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
-        # 读号默认开（read-numbers-batch）：不传任何读号参数也应带上
+        # 读号默认关（photo-roster T12，v2.1 零 token 定案）：不传旗标一个读号参数都不带
         rawdir = self._setup_batch(session_dir)
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
         crop_cmd = run_recorder[0][0]
-        # 缺省 = confirmed 2 条 ×3 = 6
-        assert crop_cmd[-3:] == ["--read-numbers", "--max-reads", "6"]
+        assert "--read-numbers" not in crop_cmd
+        assert "--max-reads" not in crop_cmd
 
     def test_no_read_numbers_disables(
         self,
@@ -504,7 +504,7 @@ class TestPeople:
         rc = video.main(["people", "--session", SESSION])
         assert rc == 0
         crop_cmd = run_recorder[0][0]
-        # 读号默认开后尾部多了 --read-numbers/--max-reads，按旗标定位取 rawdir 值
+        # 读号旗标按显式开关出现（T12 起默认关），按旗标定位取 rawdir 值
         assert crop_cmd[crop_cmd.index("--rawdir") + 1] == str(src)
 
     def test_rawdir_missing_everywhere(self, session_dir: pathlib.Path) -> None:
@@ -551,11 +551,13 @@ class TestPeople:
 
 
 class TestPeoplePhotoMatch:
-    """people ②.5 照片匹配串联（docs/photo-roster/spec.md T6）。
+    """people ②.5 照片匹配串联（docs/photo-roster/spec.md T6 串法，T12 换人脸 matcher）。
 
     串法：②聚类 后插 ②.5 照片匹配（条件：photos/ 存在且非 --skip-cluster）；
     确认页带 --photo-matches；仅 ②.5 允许失败降级（ERROR 留痕、③ 照出、
     产物缺失剥旗标降级为无预填）；①②③ 失败语义不变（任一步失败中断整链）。
+    T12 起 ②.5 执行体 = face_match_scorers.py（L1 人脸单路，无 --cache 参数，
+    face_cache 落 candidates 同目录）；CLIP 版 photo_match_scorers.py 已退出。
     """
 
     def _setup_batch(self, session_dir: pathlib.Path, *, photos: bool = True) -> pathlib.Path:
@@ -587,7 +589,7 @@ class TestPeoplePhotoMatch:
         batch = video.discover_batches(REL)[0]
         # Act
         steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
-        # Assert：② 后插 ②.5，逐字断言匹配命令（candidates 与 cache 按批配对）
+        # Assert：② 后插 ②.5，逐字断言匹配命令（人脸 matcher：无 --cache，产物同目录）
         assert [s.title for s in steps] == [
             "批次2①裁图",
             "批次2②聚类",
@@ -596,13 +598,11 @@ class TestPeoplePhotoMatch:
         ]
         assert list(steps[2].argv) == [
             sys.executable,
-            str(SCRIPT_DIR / "photo_match_scorers.py"),
+            str(SCRIPT_DIR / "face_match_scorers.py"),
             "--photos",
             "photos",
             "--candidates",
             str(REL / "scorers_b2" / "scorer_candidates.json"),
-            "--cache",
-            str(REL / "scorers_b2" / "clip_cache.json"),
             "--out",
             str(REL / "scorers_b2" / "photo_matches.json"),
         ]
@@ -624,17 +624,19 @@ class TestPeoplePhotoMatch:
         steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
         # Assert
         assert len(steps) == 3
+        assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
         assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
         assert "--photo-matches" not in steps[2].argv
 
     def test_skip_cluster_no_photo_step(self, session_dir: pathlib.Path) -> None:
-        # Arrange：photos/ 存在但 --skip-cluster（无 clip_cache 产出，同口径跳过）
+        # Arrange：photos/ 存在但 --skip-cluster（无聚类段，②.5 同口径跳过）
         rawdir = self._setup_batch(session_dir)
         batch = video.discover_batches(REL)[0]
         # Act
         steps = video.build_people_steps(self._args(skip_cluster=True), batch, rawdir, session_dir)
         # Assert
         assert len(steps) == 2
+        assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
         assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
         assert "--photo-matches" not in steps[1].argv
 
@@ -655,7 +657,7 @@ class TestPeoplePhotoMatch:
         # Assert：ERROR 留痕、不中断整链、③ 确认页照出且剥掉 --photo-matches（无预填）
         assert rc == 0
         assert len(calls) == 4
-        assert "photo_match_scorers.py" in calls[2][1]
+        assert "face_match_scorers.py" in calls[2][1]
         assert "--photo-matches" not in calls[3]
         assert any("降级" in r.message for r in caplog.records)
 

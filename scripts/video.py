@@ -1,9 +1,9 @@
 """统一入口 CLI：score / people / build / photo 四条高频链路的 subprocess 薄封装。
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
-输出：透传调用 run_session / crop_scorers / cluster_scorers / photo_match_scorers /
+输出：透传调用 run_session / crop_scorers / cluster_scorers / face_match_scorers /
     gen_scorer_page / auto_roster / build_highlight / rank_photos / gen_photo_page
-    九个底层脚本；
+    九个底层脚本（photo_match_scorers 已随 T12 退出 people 链，证伪留档）；
     build 按 roster 状态分两路（认人可选化 2026-08-22，docs/build-auto-scorer/）：
     confirmed=true 走现状合成、收尾追加 in-process 调 goal_heatmap.heat_session
     出热图双风格（v4.2 集成；懒 import，附属产物失败不阻塞主链），
@@ -47,8 +47,6 @@ STATE_NAME: str = "video_cli.json"
 STATE_VERSION: int = 1
 # 照片库目录（people ②.5 照片匹配串接条件；docs/photo-roster/spec.md T6）
 PHOTOS_DIR: Path = Path("photos")
-# 聚类段落盘的裁图 embedding 缓存文件名（cluster_scorers 契约：与 scorer_clusters.json 同目录）
-CLIP_CACHE_NAME: str = "clip_cache.json"
 # 聚类段 CLIP 权重首跑下载需走本机代理（AGENTS.md 环境节）
 CLUSTER_HTTPS_PROXY: str = "http://127.0.0.1:7897"
 # 聚类定稿口径（docs/scorer-cluster/；底层默认 average/0.25 是未标定起点，勿依赖）
@@ -109,7 +107,7 @@ class Batch:
 
     @property
     def photo_matches(self) -> Path:
-        """photo_match_scorers 产出的 photo_matches.json（与 candidates 同目录硬约束）。"""
+        """②.5 照片匹配产出的 photo_matches.json（与 candidates 同目录硬约束）。"""
         return self.scorers_dir / "photo_matches.json"
 
 
@@ -358,8 +356,10 @@ def build_crop_argv(
     """拼装 crop_scorers 命令（people 三段链与 build 自动模式共用，逐项显式拼装）。
 
     read_numbers=True 时 --max-reads 缺省 = 该批 confirmed 球数 ×3
-    （--best-crops 默认 3，docs/scorer-reid/spec.md）；build 自动模式固定
-    read_numbers=False（读号走 K3 烧 token，自动合集允许有误，不开）。
+    （--best-crops 默认 3，docs/scorer-reid/spec.md）；people 链默认
+    read_numbers=False（photo-roster T12，v2.1 零 token 定案，显式
+    --read-numbers 才开）；build 自动模式固定 read_numbers=False（读号走
+    K3 烧 token，自动合集允许有误，不开）。
 
     Args:
         batch: 批次产物路径集合。
@@ -407,9 +407,10 @@ def build_people_steps(
 
     --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
     --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
-    不传 --clusters。②.5 照片匹配（docs/photo-roster/spec.md T6）：photos/ 库存在
-    且非 --skip-cluster 才安排（candidates 与该批 clip_cache 配对，产物落本批
-    photo_matches.json），缺库 INFO 跳过不阻塞；安排后确认页预传 --photo-matches，
+    不传 --clusters。②.5 照片匹配（docs/photo-roster/spec.md T6 串法，T12 起执行体
+    换 face_match_scorers.py 人脸单路 L1）：photos/ 库存在且非 --skip-cluster 才安排
+    （face_cache 幂等缓存落该批 candidates 同目录，产物落本批 photo_matches.json），
+    缺库 INFO 跳过不阻塞；安排后确认页预传 --photo-matches，
     执行时探测产物缺失会剥掉该旗标（②.5 失败降级为无预填，见 _cmd_people）。
     """
     crop_argv: list[str] = build_crop_argv(
@@ -441,19 +442,18 @@ def build_people_steps(
             logger.info("照片库 %s 不存在，跳过照片匹配步骤（不阻塞认人链）", PHOTOS_DIR)
     if photo_enabled:
         # ②.5 允许失败降级（allow_fail）：ERROR 留痕、确认页照出、降级为无预填；
-        # CLIP 权重与聚类段同源，首跑下载同样走本机代理
+        # 人脸 matcher（T12 换 L1）：无 --cache 参数，face_cache 落 candidates 同目录；
+        # buffalo_l 权重首跑下载同样走本机代理
         steps.append(
             Step(
                 f"批次{batch.batch}②.5照片匹配",
                 (
                     sys.executable,
-                    str(SCRIPT_DIR / "photo_match_scorers.py"),
+                    str(SCRIPT_DIR / "face_match_scorers.py"),
                     "--photos",
                     str(PHOTOS_DIR),
                     "--candidates",
                     str(batch.scorer_candidates),
-                    "--cache",
-                    str(batch.scorer_clusters.parent / CLIP_CACHE_NAME),
                     "--out",
                     str(batch.photo_matches),
                 ),
@@ -541,7 +541,8 @@ def _cmd_people(args: argparse.Namespace) -> int:
 
     失败语义：①②③ 任一步失败中断整链（StepFailedError 上抛转退出 1）；仅 ②.5
     照片匹配允许失败降级——ERROR 留痕后继续，确认页照出（产物缺失剥
-    --photo-matches，降级为无预填；docs/photo-roster/spec.md T6）。
+    --photo-matches，降级为无预填；docs/photo-roster/spec.md T6 串法、T12 换人脸
+    matcher 后语义不变）。
     """
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
@@ -1320,19 +1321,22 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--batch", type=int, default=None, help="限定单批次 K")
     pp.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
     pp.add_argument(
-        "--read-numbers", action="store_true", help="K3 读号（默认已开，显式开关保留兼容）"
+        "--read-numbers",
+        action="store_true",
+        help="K3 读号（默认关，显式开启；v2.1 零 token 定案）",
     )
     pp.add_argument(
         "--no-read-numbers",
         action="store_false",
         dest="read_numbers",
-        help="关闭 K3 读号（便服/无号场次省 token）",
+        help="关闭 K3 读号（现默认已关，旗标保留兼容）",
     )
-    # 缺省 True 必须靠 set_defaults 兜底：argparse 填默认值带 hasattr 守卫、
-    # 先注册者胜出——靠 --no-read-numbers 的 add_argument(default=True) 会被
-    # 先注册的 --read-numbers（store_true 隐式 default False）压住、静默不生效
-    # （read-numbers-batch review01 B1，本机实证）
-    pp.set_defaults(read_numbers=True)
+    # 缺省 False 必须靠 set_defaults 兜底：argparse 填默认值带 hasattr 守卫、
+    # 先注册者胜出——本排列下先注册的 --read-numbers（store_true 隐式 default
+    # False）会压住 --no-read-numbers（store_false 隐式 default True），缺省
+    # 恰好得 False；set_defaults 显式钉死语义，防注册顺序调整静默翻车
+    # （read-numbers-batch review01 B1 同类坑，本机实证）
+    pp.set_defaults(read_numbers=False)
     pp.add_argument(
         "--max-reads",
         type=int,

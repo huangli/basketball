@@ -3,9 +3,8 @@
 ⚠️ 证伪不推荐（2026-08-27，docs/photo-roster/review03.md）：CLIP 整图 embedding
     对同款球衣不同人无身份判别力（跨人对相似度 0.936 超同人对下限、正确/错误
     号得分带完全重叠无阈值可切），v2.1 起认人级联改"免费信号→人裁"；本模块
-    在 photo-roster T12（video.py ②.5 换 L1 matcher）落地后退出 people 链，
-    此前 video.py 仍将其接为 ②.5（现状）。仅 --evaluate 机制保留
-    （T13 改造为级联评测器）。
+    已随 photo-roster T12（video.py ②.5 换 L1 人脸 matcher，2026-08-28）退出
+    people 链。仅 --evaluate 机制保留（T13 改造为级联评测器）。
 
 输入：--photos 照片库目录（``photos/<号码>/*.jpg|jpeg|png``，号码 = 文件夹名，
     归一化 ``str(int(名))`` 去前导零）；--candidates 可重复（scorer_candidates.json，
