@@ -1,114 +1,111 @@
-# Plan: 照片库认人（photo-roster）
+# Plan: 照片库认人 v2.1（免费信号 → 人裁）
 
-依据 `docs/photo-roster/spec.md`（四轮审查修订定稿）。按依赖序排，每个 Task
-留系统于可工作状态，Phase A 达标 checkpoint 由立哥过目后才进 Phase B。
+依据 `docs/photo-roster/spec.md`（v2.1，2026-08-27 立哥定：零 token 路线）。
+真值标尺：`work/20260822_citymonkey/truth_16.json`（16 球机器可读）。
 
 ## 架构决策
 
-- **新脚本 photo_match_scorers.py，复用 cluster_scorers 的现成件**：
-  `load_clip_cache`/`save_clip_cache`（cluster_scorers.py:238/273）、`file_md5`、
-  `build_clip_encoder`（:291）、`merge_candidates`（:204）全部 import 复用，
-  不抄代码；照片缓存与裁图缓存同格式（键 = `model_tag:md5`，向量 L2 归一化
-  后落盘），余弦相似度 = 归一化向量点积
-- **逐批串联**：`build_people_steps`（video.py:385）在 ②聚类 后插 ②.5 照片匹配
-  步骤，candidates 与该批 clip_cache.json 配对（该 cache 由 ② 聚类落盘在
-  `batch.scorer_clusters.parent`）；产出 `scorers_bK/photo_matches.json`
-- **确认页显式传参集成**：video.py 拼确认页参数时探测
-  `scorers_bK/photo_matches.json` 存在才拼 `--photo-matches`（与
-  --index/--roster-existing 同构，video.py:432-438）；gen_scorer_page 只认
-  显式参数、无参数一律旧行为（不自动摸目录——与 spec "无此参数行为不变"
-  的兼容性承诺一致）
-- **号码→人全靠既有名单机制**：`match_players_by_number`
-  （gen_scorer_page.py:1103）与 --players-file 不改造，照片命中只负责产出
-  "号码"，占位条目（名单缺号时 `半截篮<号>`）随 players 注入
-- **Phase A/B 硬闸**：T4 实跑不达标（<80% 或 >10%）→ 归档 review 停工，
-  人脸模型路线经立哥批准再议；Phase B 代码一律不进 main 链
+- **L1 双候选 spike 并行**：号码 OCR（PARSeq 系）与人脸（insightface）互不
+  依赖，同一真值标尺评分，spike 后立哥 checkpoint 定选型——不预判哪路赢
+- **T5 预填机制复用**：L1 matcher 产出对齐 photo_matches.json 现 schema
+  （spec 数据契约写死映射），gen_scorer_page 零改动；video.py 仅换 ②.5 的
+  生产者调用
+- **spike 与产品代码分离**：spike 一律 work/ 一次性脚本（豁免四件套），
+  选型定了才在 scripts/ 建产品 matcher（走完整四件套）
+- **crop-quality 是并行专项**（docs/crop-quality/ 自己的四件套）：裁图闸
+  修好前，spike 用现有含废图裁图——反映现状上限，废图球按 truth_16 的
+  invalid 类不计入成绩分母
+- **评测三指标**：覆盖率（机器采纳比例）/采纳误指认率（红线 ≤10%）/
+  人裁负担（进确认页比例）；覆盖率不硬卡
 
-## 前置依赖（立哥侧，非代码任务）
+## 前置依赖
 
-- P1 供照到位：`photos/<号码>/` 每号码正反各 1 张起步（✓ 2026-08-23 已到 7 人 14 张）
-- P2 测试场次 roster confirmed=true（2026-08-23 立哥定：另下载测试视频做评测，
-  淳化街道素材将删除不作评测依据；新场次跑 build 自动模式 + people 链确认，
-  照片库成员 tag 建议带号码）
-
-T1-T3 不依赖 P1/P2（合成数据 TDD），可先动手；T4 实跑卡 P1+P2。
+- D1 truth_16.json 已落盘 ✓（2026-08-27；**58 球分母 = goals_batch1.json
+  58 条 confirmed——同目录旧布局 goals_batch.json 为 57 条已弃用，差 1 球
+  系标注修订，勿混用旧文件**）
+- D2 立哥批准新依赖：PARSeq 系（S1）、insightface（S2）——随 spec v2.1 请批
 
 ## Task List
 
-### Phase A：匹配核心 + 对照实验
+### Phase A.0：spike（work/ 一次性脚本，豁免四件套）
 
-- [ ] T1 照片库加载 + 照片 embedding 缓存
-  - Acceptance: 扫 `photos/<号码>/` 产出 gallery（去零号码 → [照片路径]）；
-    非数字名/空文件夹/无合法图 WARNING 跳过、全无效显式报错；号码归一化
-    `07`→`7`（原名仅展示）；.photo_cache.json 幂等增量（新增照片只算新图）、
-    模型前缀隔离；**`.gitignore` 加 `photos/`（真人照片不入库红线，
-    `git check-ignore photos photos/.photo_cache.json` 通过）**
-  - Verify: `pytest tests/test_photo_match_scorers.py -k gallery or photo_cache`
-  - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py、.gitignore
-- [ ] T2 匹配主链（得分 + 闸 + 产物）
-  - Acceptance: --candidates 可重复合并、--cache 可重复并集查询；得分 =
-    max(crops × photos) 余弦；并列最高不采纳、单号码库 margin=+∞；
-    `score≥THRESHOLD 且 margin≥MARGIN` 才入 photo_matches.json（阈值常量
-    占位待 T4 标定）；裁图 md5 不在缓存 WARNING 跳过该球、cache 文件缺失
-    显式报错、本模型前缀命中率 0% 显式报错；产物 schema 显式校验
-  - Verify: `pytest tests/test_photo_match_scorers.py`
-  - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
-- [ ] T3 --evaluate 评估模式
-  - Acceptance: 真值映射（半截篮 tag 取号、无号半截篮 tag 单列"不可判"、
-    对方/便服记无号）；入统 = --goals 的 confirmed 球且 key ∈
-    roster.assignments（--evaluate 必须同时给 --roster 与 --goals，缺一
-    parser 报错）；报告含全部入统球 top-1 号码+score+margin 分布（不过闸）+
-    正样本命中率 + 负样本误命中率 + 按号码混淆矩阵；markdown 报告写到
-    --out；坏 roster SchemaError
-  - Verify: `pytest tests/test_photo_match_scorers.py -k evaluate`
-  - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py
+- [ ] T8 S1 号码 OCR spike
+  - Acceptance: PARSeq 系管线跑通（安装/权重下载走 HTTPS_PROXY，装不上记录
+    原因换备选实现不硬磕）；truth_16 出命中/误指认/漏；58 球出覆盖率
+    （有号球占比 + 库外读数率）；报告含"可读帧率"观察；**许可按实际选用
+    组件分别核实（PARSeq-B 本体 Apache-2.0 vs 整管线 CC-BY-NC，报告注明）**；
+    原始数据归档
+  - Verify: work/spike_ocr/ 报告 + truth_16 对账表（**对账表行数=16**：
+    我方 8 球正确率、对方 4 球误中率、废图 2 球行为、**未判 2 球单列不进
+    分母**；**覆盖率分母=58**；**PARSeq 装不上走"未验证"分支时，以对账表
+    缺失+原因记录为验收替代**）
+  - Files: work/spike_ocr/（一次性）
+- [ ] T9 S2 人脸 spike
+  - Acceptance: insightface buffalo_l 跑通（**装不上/权重下载失败记录原因、
+    结论记"未验证"，与 T8 失败路径对称**）；truth_16 出命中/误指认/漏
+    （多帧质量加权投票 vs 单帧，两口径都记）；小脸检出失败率单列；报告归档
+  - Verify: work/spike_face/ 报告 + truth_16 对账表（**行数=16**，未判 2 球
+    单列不进分母）
+  - Files: work/spike_face/（一次性）
 
-### Checkpoint A（立哥过目）
+### Checkpoint（立哥过目）
 
-- [ ] T4 Phase A 实跑 + 阈值标定（卡 P1+P2）
-  - Acceptance: 测试场次实跑出报告；按分布定 THRESHOLD/MARGIN 写死常量
-    （注释注明标定来源）；达标线双指标判定；报告+结论归档 review03.md
-    （**预置达标/不达标两个结论模板，实跑后只填数**，降低立哥过目摩擦）；
-    **不达标 → 停工报立哥，不进 Phase B**
-  - Verify: 实跑命令见 spec §Commands Phase A；review03.md 立哥确认
-  - Files: docs/photo-roster/review03.md、scripts/photo_match_scorers.py（阈值常量）
+- [ ] T10 选型拍板：L1 = OCR / 人脸 / 双路接力 / 皆弃
+  - Acceptance: 两 spike 报告呈阅，立哥结论记 review04.md；皆弃 → 本功能
+    终止（todo 余项划掉注明）
+  - Files: docs/photo-roster/review04.md
 
-### Phase B：集成（Phase A 达标才动）
+### Phase B：产品化（选型非"皆弃"才动；走四件套修订）
 
-- [ ] T5 gen_scorer_page 照片预填
-  - Acceptance: 只认显式 `--photo-matches`（须与 --scorers 同目录），无参数
-    行为零变化；优先级 读号>照片>印名>空白；
-    读号/照片冲突 → 预填读号 + 条目角标显示照片候选（号码+得分）可点击切换；
-    名单缺号 → 占位条目 `半截篮<号>` 随 players 注入（不依赖前缀推队）；
-    坏 photo_matches schema SchemaError
-  - Verify: `pytest tests/test_gen_scorer_page.py -k photo`
-  - Files: scripts/gen_scorer_page.py、tests/test_gen_scorer_page.py
-- [ ] T6 video.py people 串联
-  - Acceptance: build_people_steps 在 ②聚类 后插 ②.5 照片匹配步骤（条件：
-    `photos/` 存在且非 --skip-cluster；缺库 INFO 跳过整步不阻塞）；
-    拼确认页参数时探测 photo_matches.json 存在才传 --photo-matches；
-    **仅 ②.5 步允许失败降级（ERROR 留痕、确认页照出、降级为无预填），
-    ①②③ 失败语义不变（任一步失败中断整链）**；单测用假步骤列表断言串法
+- [ ] T11 L1 matcher 产品化
+  - Acceptance: scripts/ 下 matcher（按选型建）——缓存幂等（键=裁图 md5+
+    模型版本）、产出对齐 photo_matches.json schema（高置信映射 score、
+    margin=0.0 占位）、低置信/无命中不入 matches、名单先验（OCR 库外读数
+    不采纳）、**双路启用时接力编排 = OCR 高置信 > 人脸高置信 > 人裁，
+    OCR 命中不调人脸（mock 计数断言，仅选型=双路时生效）**、单球失败
+    ERROR 不炸批；单测注入假识别器
+  - Verify: `pytest tests/test_<matcher>.py` + validate_matches_payload 联调
+  - Files: scripts/<ocr|face>_match_scorers.py、tests/test_<matcher>.py
+- [ ] T12 video.py people 串联换 L1
+  - Acceptance: ②.5 步骤由 CLIP 匹配器换 L1 matcher（条件与降级语义同 T6
+    既有口径：photos/ 存在且非 --skip-cluster；仅 ②.5 允许失败降级）；
+    **people 链 read_numbers 默认翻转 False（v2.1 零 token 定案；
+    --read-numbers 显式开保留兼容，既有手工功能不删）**；单测断言串法
   - Verify: `pytest tests/test_video.py -k people`
   - Files: scripts/video.py、tests/test_video.py
-- [ ] T7 文档同步 + 真机验证 + 收尾
-  - Acceptance: 使用手册.html 加供照说明与流程变化；AGENTS.md 认人链路口径
-    更新（照片预填进 people 链）；测试场次 people 链真机重跑，确认页预填
-    肉眼抽验；review04.md 归档；四件套 todo 全勾
-  - Verify: 关口全绿 + 真机抽验 + `grep` 无旧口径残留
-  - Files: 使用手册.html、AGENTS.md、docs/photo-roster/review04.md
+
+### Phase A：级联评测 + 收尾
+
+- [ ] T13 Phase A 级联评测（卡 T12 + 测试场次 confirmed roster）
+  - Acceptance: **photo_match_scorers.py --evaluate 改造为级联评测器**
+    （L1 结果对账，spec Project Structure 契约点的实现载体）；测试场次
+    真值跑级联，出覆盖率/采纳误指认率/人裁负担三指标；采纳误指认 ≤10%
+    达标；高置信阈值按分布定稿（Ask first 立哥确认）；报告归档
+    review05.md；不达标 → 评估恢复 K3 兜底（**仅出报告不实施**，
+    Open Questions）报立哥
+  - Verify: 评测器单测 + 真值场实跑报告
+  - Files: scripts/photo_match_scorers.py、tests/test_photo_match_scorers.py、
+    work/<测试场次>/cascade_eval_report.md、docs/photo-roster/review05.md
+- [ ] T14 文档收尾 + 真机验证
+  - Acceptance: 使用手册.html 认人流程改免费信号口径；AGENTS.md 认人链路
+    更新；docs/经验教训.md 补"同制服认人级联"条目；**spec/plan 阶段命名
+    统一为执行序（spike/选型/产品化/评测/收尾，消除 Phase A/B 倒挂）**；
+    真机 people 链重跑肉眼抽验预填；review06.md 归档
+  - Verify: 关口全绿 + 真机抽验
+  - Files: 使用手册.html、AGENTS.md、docs/经验教训.md、docs/photo-roster/
+    （spec/plan 命名统一 + review06.md）
 
 ## Risks and Mitigations
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| Phase A 不达标（CLIP 域差距在 1:N 场景仍吃命中率） | 高 | 硬闸停工；备选人脸模型（Ask first）；读号链路不受影响仍是主信号 |
-| 照片质量差（模糊/多人/遮脸） | 中 | 供照说明前置给立哥；确认页角标人工兜底；照片可随时后补增量重算 |
-| 测试场次 roster 无号 tag 多 → "不可判"占比高、评估失真 | 中 | P2 操作建议 tag 带号码；不可判单列不计分母 |
-| 某批 ② 聚类未跑 → 该批 cache 缺失 | 低 | 契约已写死显式报错；people 链顺序保证聚类先于匹配 |
-| 阈值标定过拟合单场次 | 中 | 常量注释注明标定来源；后续场次确认页终裁天然纠偏，观察值记 review |
+| PARSeq 装不上（Py3.14/torch 2.13 兼容） | 中 | 记录原因换备选实现（其他开源 OCR 或自训小模型），不硬磕；S1 结论记"未验证" |
+| 号码可读帧率太低（俯视远景，冰球固定广角仅 5% 帧可读，arXiv:2405.13896，review03.md 归档） | 高 | spike 如实出数；OCR 覆盖率极低 → 选型靠人脸或皆弃，不硬上 |
+| 小脸检出失败/误认 | 中 | 检出失败率单列；多帧投票抬上限；人脸只作高置信预填 |
+| 废图污染 spike 成绩 | 低 | truth_16 invalid 类不计分母；crop-quality 修好后续场次自然受益 |
+| 非商业许可阻碍将来开源 | 中 | Open Questions 挂账；开源时评估替换或声明 |
 
 ## Open Questions
 
-- THRESHOLD/MARGIN 具体值：T4 标定后填（Ask first 边界内的立哥确认项）
-- 人脸模型备选的具体选型：仅当 Phase A 不达标才展开
+- L1 高置信阈值：spike 分布出来后定稿（Ask first）
+- Phase A 评测场次：citymonkey 续用 or 新素材，以 roster 确认进度为准

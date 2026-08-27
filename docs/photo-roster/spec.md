@@ -1,54 +1,69 @@
-# Spec: 照片库认人 v2（photo-roster）——级联识别：免费信号 → K3 读号 → K3 照片对照
+# Spec: 照片库认人 v2.1（photo-roster）——免费信号 → 人裁（零 token 路线）
 
-> **v2 变更记录（2026-08-27）**：v1 的 CLIP embedding 匹配路线经三方调研
-> （数据根因/文献/协议实验，结论归档 review03.md）**证伪判死刑**——
-> 通用 CLIP 对同款球衣不同人无判别力（跨人对相似度 0.936 超同人对下限，
-> 正确/错误号得分带完全重叠无阈值可切）。同小样实测 **K3 照片对照
-> 10/13 零误指认**（work/k3_photo_test/）。v2 主路线改为**级联识别**，
-> K3 照片对照做兜底裁判。v1 已交付物去向：照片库契约/号码归一化/确认页
-> 预填机制（T5）/评估口径**保留**；photo_match_scorers.py（CLIP）标记证伪
-> 不推荐，其 --evaluate 评测机制改造复用于级联评测；T6 串联改接 K3 匹配器。
+> **v2.1 变更（2026-08-27 立哥定）**：级联去掉全部 K3 层——**K3 读号不调、
+> K3 照片对照不调**，链路简化为 **L1 免费信号 → L4 确认页人裁**，零 token。
+> （L 编号沿用 v2 的四级级联——v2 的 L2 K3 读号、L3 K3 照片对照已删，
+> 读者找不到 L2/L3 属预期；阶段编号沿用 v1 的 Phase A/B 称谓，
+> **执行序以 plan 为准**：spike → 选型 → 产品化 → 评测 → 收尾。）
+> K3 照片对照小样 10/13 零误指认的实测记录留档（work/k3_photo_test/），
+> 若免费信号实测覆盖率太弱，恢复 K3 兜底经立哥批准即可（Open Questions）。
+> crop_scorers 既有 --read-numbers 功能是既有代码不删，级联不再调用；
+> **people 链 read_numbers 默认随之翻转 False**（--read-numbers 显式开
+> 保留兼容，承接任务见 plan T12）。
+>
+> **v2 变更记录（2026-08-27）**：v1 CLIP 匹配路线经三方调研证伪判死刑
+> （跨人对相似度 0.936 超同人对下限、正确/错误号得分带完全重叠无阈值可切，
+> 归档 review03.md）。v1 已交付物去向：照片库契约/号码归一化/确认页预填
+> 机制（T5）/评估口径**保留**；photo_match_scorers.py（CLIP）标记证伪
+> 不推荐，其 --evaluate 机制改造复用于级联评测。
 
 ## Objective
 
-进球归属识别改级联（文献标准答案，同制服场景号码是第一信号、外观只配辅助）：
+进球归属识别走零成本级联（同制服场景号码是第一信号、外观只配辅助，
+文献结论归档 review03.md）：
 
-- **L1 免费信号**（离线零成本，视 Phase A.0 spike 结果决定启用哪路）：
-  号码 OCR（PARSeq 类）/ 人脸 embedding 多帧投票——高置信命中的球直接定
-- **L2 K3 读号**（现成链路 crop_scorers --read-numbers，多帧众数投票）：
-  号码可见时一票定身份，~6K token/球
-- **L3 K3 照片对照**（v1 小样实测 10/13 零误指认）：裁图+照片库问 K3
-  "是几号/不在库/看不清"，~15K token/球，L1/L2 拿不下的球才调——
-  节省量待 S1 覆盖率回填（文献估算 50-80%）
-- **L4 确认页人裁**：以上全拿不下 → 簇级空白，立哥终裁（架构定位不变：
-  机器排序+人裁判；任何一层都不是终裁，确认页导出才算数）
+- **L1 免费信号**（离线零成本，具体启用哪路由 Phase A.0 两个 spike 定）：
+  - 候选 a：**号码 OCR**（PARSeq 类开源管线，多帧投票 + 在场名单先验）——
+    同制服场景第一信号
+  - 候选 b：**人脸 embedding**（insightface buffalo_l，多帧质量加权投票）
+  高置信命中的球直接预填，其余球落 L4
+- **L4 确认页人裁**：机器拿不下的球 → 簇级空白，立哥终裁（架构定位不变：
+  机器排序+人裁判；机器预填永远不是终裁，确认页导出才算数）
 
-对方球队不进照片库，各层正确行为 = 拒答/无命中，走现有聚类+人工。
+对方球队不进照片库/名单，正确行为 = 无命中，走现有聚类+人工。
 
 成功标准（可执行验证）：
 
-- **Phase A.0 两个 spike 先行**（半天级，work/ 一次性脚本豁免四件套）：
-  - S1 号码可读性：citymonkey 58 球跑现成 --read-numbers（新调用 ≤300 闸
-    内），出**覆盖率**（有号球占比）+ 对照已终裁 13 球的**准确率**——
-    同时回答"PARSeq 离线 OCR 值不值得投"（可读帧率是前提）与 L2 层实力
-  - S2 人脸路线：insightface buffalo_l 在已终裁 13 球 + 照片库（14 张）
-    上的命中率/误指认率——回答 L1 人脸路值不值得投
-- **Phase A 级联评测**：测试场次 confirmed roster 当真值，级联整体
-  （L1/L2/L3 各自+接力后总账）出命中率/误指认率/token 成本报告归档；
-  **达标线：正样本命中率 ≥80% 且误指认率 ≤10%**（立哥可改）才进 Phase B
-- Phase B：K3 匹配器产品化（缓存/逐批串联/确认页预填复用 T5 机制）+
-  文档同步 + 真机验证
+- **Phase A.0 两个 spike 先行**（work/ 一次性脚本豁免四件套，真值 =
+  `work/20260822_citymonkey/truth_16.json`，16 球：8 我方有号/4 对方/2 废图/
+  2 未判）：
+  - S1 号码 OCR spike：PARSeq 管线在 truth_16 上的**命中率/误指认率** +
+    citymonkey 58 球**覆盖率**（有号球占比）——决定 OCR 路去留
+  - S2 人脸 spike：insightface buffalo_l 在 truth_16 上的命中率/误指认率
+    ——决定人脸路去留
+- **选型 checkpoint**：两 spike 报告立哥过目，定 L1 = OCR / 人脸 / 双路接力 /
+  皆弃（皆弃则 Phase B 不做，认人维持纯人工确认页，本功能到此为止）
+- **Phase B**：L1 matcher 产品化（缓存/逐批串联/确认页预填复用 T5 机制）——
+  评测需要产品化 matcher 才能跑，故产品化先行
+- **Phase A 级联评测**（产品化后）：测试场次 confirmed roster 当真值，
+  出**机器高置信采纳率（覆盖率）+ 采纳部分误指认率 + 人裁负担**（进确认页
+  比例）三指标报告归档；**达标线：采纳部分误指认率 ≤10%**（红线，立哥可改）；
+  不达标 → 回退报立哥（评估恢复 K3 兜底或调阈值），覆盖率不硬卡
+  （低覆盖率 = 人裁多干活，不是事故）
+- 文档同步 + 真机验证
 - ruff+pytest 全绿；四件套齐全
 
 ## Tech Stack
 
-- 既有：open_clip（聚类用，认人不用于身份判别）、httpx、K3（api.kimi.com
-  /coding/v1，凭证 ~/.kimi-code/credentials/kimi-code.json 900s 临期重读，
-  复用 vlm_filter.load_token / crop_to_b64 / 重试口径）
-- **spike 新依赖（Ask first，随本 spec 请立哥批准）**：insightface（S2；
-  buffalo_l 权重**非商业许可**——个人使用无碍，开源产品化时需另评估，
-  见 Open Questions）；PARSeq 管线是否引入由 S1 结果再议（CC-BY-NC 同问题）
-- 零新依赖：Phase A.0 的 S1 用现成 --read-numbers 链路
+- 既有：torch 2.13 CPU、opencv、pillow、numpy、scikit-learn
+- **spike 新依赖（Ask first，随本 spec 请立哥批准）**：
+  - S1：PARSeq 号码识别（**许可按实际选用组件分别核实**：PARSeq-B 本体
+    Apache-2.0，整管线参考实现 mkoshkina/jersey-number-pipeline 为
+    CC-BY-NC 非商业——spike 报告注明实际用了哪个）
+  - S2：insightface + buffalo_l 权重（**非商业许可**）
+  许可口径：个人剪辑自用无碍；basketball-clip 开源产品化时需另评估
+  （Open Questions）
+- 明确不用：K3（本链路零 token）、CLIP 整图匹配（证伪）、OSNet（证伪）
 
 ## Commands
 
@@ -57,17 +72,8 @@
 python -m ruff format scripts tests && python -m ruff check --fix scripts tests && \
   python -m pytest -q
 
-# S1：citymonkey 全量读号（现成链路，参数签名照 video.py build_crop_argv:373-388
-# 实况；58 球 × ≤3 裁图 ≈ 174 次新调用 < 300 闸；缓存幂等）
-python scripts/crop_scorers.py \
-  --goals work/20260822_citymonkey/goals_batch1.json \
-  --candidates work/20260822_citymonkey/candidates_batch1.json \
-  --out work/20260822_citymonkey/scorers_b1 \
-  --detectdir work/detect --framesdir work/frames \
-  --rawdir "C:/2. Basketball Video/20260822_citymonkey" \
-  --read-numbers --max-reads 300
-
-# S2/Phase A：spike 与评测命令随 plan 落（work/ 一次性脚本）
+# S1/S2 spike：work/ 一次性脚本，命令随 plan 落
+# Phase A/B：产品化后命令随 plan 落
 ```
 
 ## Project Structure
@@ -75,98 +81,95 @@ python scripts/crop_scorers.py \
 ```
 photos/<号码>/*.jpg      → 照片库（契约同 v1：归一化/校验/gitignore，不重述）
 scripts/
-  k3_match_scorers.py   新（Phase B）：K3 照片对照产品化——prompt 定稿、
-                        按裁图 md5+prompt 版本缓存（number_cache 同模式）、
-                        产出对齐 photo_matches.json 现 schema（见数据契约）、
-                        逐批
+  ocr_match_scorers.py / face_match_scorers.py  新（Phase B，按选型建其一或全）：
+                        缓存幂等、产出对齐 photo_matches.json 现 schema
+                        （复用 T5 页面预填）、逐批
   photo_match_scorers.py 标证伪不推荐（docstring 注明）；--evaluate 机制
-                        改造为级联评测器（L1/L2/L3 结果合并对账）
-  video.py              改（Phase B）：people 链 ②.5 由 CLIP 匹配器换 K3 匹配器
-  gen_scorer_page.py    不改（T5 预填机制零改动消费，见数据契约映射规则）
-work/k3_photo_test/     → v1 小样实验存档（本 spec 的证据来源）
+                        改造为级联评测器（L1 结果对账）
+  video.py              改（Phase B）：people 链 ②.5 由 CLIP 匹配器换 L1 匹配器
+  gen_scorer_page.py    不改（T5 预填机制零改动消费）
+work/                   → S1/S2 spike 一次性脚本与报告（豁免四件套）
 docs/photo-roster/      → 本四件套
+docs/crop-quality/      → 裁图质量闸专项（并行，互为上下游）
 ```
 
 ## 数据契约
 
-### 级联接力规则（写死）
+### L1 接力与采纳规则（写死）
 
-- 每球按 L1→L2→L3 顺序求值，**高层命中即停**（省钱核心）：L1 高置信命中
-  → 不调 L2/L3；L2 读号采纳 → 不调 L3
-- L2 采纳 = 现成投票规则全分支（crop_scorers.py:246-276）：同号 ≥2 张采纳；
-  有效票 =1 时 conf=high 采纳、low 归 None；有效票 ≥2 且全不同取唯一
-  conf=high（多个 high 不采）；None 票不参与计数
-- **误指认是红线指标**：各层分开统计"答错号"（不是漏）——漏可以人补，
-  错会静默污染；L3 的"不在库/看不清"拒答**不算错算漏**（v1 实测口径）
-- 对方球（不在库）：正确行为 = 各层无命中/拒答；任何层误命中即误指认
+- 双路都启用时顺序：**OCR 高置信命中 > 人脸高置信命中 > 人裁**
+  （号码是离散直接证据，人脸是相似度证据，文献级联口径）
+- **误指认是红线指标**：答错号/认错人（不是漏）单列统计——漏可以人补，
+  错会静默污染；"不在库/无命中"**不算错算漏**（v1 实测口径）
+- 对方球（不在库）：正确行为 = 无命中；任何路误命中即误指认
+- **名单先验**：OCR 候选限定在场名单号码集合、**库外读数不采纳**——名单 =
+  确认页 `--players-file` 同源的用户提供名单（players.json 为用户运行时
+  输入、不入库）；**缺省时退化为照片库号码集合**（Vats CVPRW2022 实证
+  +4.4%，review03.md 归档）
 
-### K3 照片对照（L3，v1 实验口径产品化）
+### L1 输出 schema（写死，同 v2 K3 映射思路）
 
-- 输入：该球最优裁图 + 照片库全部照片（7 号码 × 2，顺序 prompt 声明）；
-  prompt 定稿存仓库（版本化，同 NUMBER_PROMPT_VERSION 模式，改版本缓存作废）
-- **输出 schema（写死）：保持 photo_matches.json 现 schema 不变**
-  （version=photo-match-v1、model/threshold/margin 顶层数值占位、
-  matches:{key:{number,score,margin}}）——T5 页面机制与
-  validate_matches_payload 零改动消费；映射规则：
-  - K3 答 high → 入 matches：`score=1.0`、`margin=0.0`（**固定占位，
-    注释注明语义=置信度映射、非余弦分**，页面角标得分列对 K3 来源显示
-    固定 1.000 属预期）
-  - K3 答 low / null（不在库/看不清）/ 解析失败 → **不入 matches**；
-    该球由确认页全量列球天然进页面（簇级空白），"low 进确认页"由此满足
-  - K3 原始回复（含 confidence/reason/拒答）写入 k3_match 自有缓存
-    （键 = 裁图 md5 + prompt 版本；拒答也缓存，重跑零新调用）
-- 缓存：K3 调用不免费，幂等落盘（同 number_cache 模式）
+- 产出保持 photo_matches.json 现 schema 不变（version=photo-match-v1、
+  model/threshold/margin 顶层数值占位、matches:{key:{number,score,margin}}）
+  ——T5 页面机制与 validate_matches_payload 零改动消费
+- 映射：高置信命中 → 入 matches（score=置信度映射值、margin=0.0 占位，
+  注释注明语义）；低置信/无命中 → 不入 matches（确认页全量列球天然进页面）
+- 原始结果（置信度/票数/各帧明细）写 matcher 自有缓存（幂等，重跑零重算）
 
 ### 照片库 / 评估口径 / 确认页预填
 
 - 照片库契约（结构/归一化 `str(int())` 去零/校验/gitignore）：**同 v1，不变**
 - 评估口径（真值映射/无号半截篮 tag 单列"不可判"/入统 = goals confirmed
-  ∩ assignments/正负样本双指标/混淆矩阵）：**同 v1，不变**；级联评测按层
-  出分 + 接力总账
+  ∩ assignments/正负样本/混淆矩阵）：**同 v1，不变**；指标改三指标
+  （覆盖率/采纳误指认率/人裁负担）
 - 确认页预填（读号>照片>印名>空白、显式传参、冲突角标、占位注入）：
-  **同 v1，不变**（T5 已交付，生产者从 CLIP 换 K3 它无感）
+  **同 v1，不变**（T5 已交付，生产者换人它无感；读号预填因级联不调 K3
+  读号而自然空缺，页面逻辑不受影响）
 
 ## Code Style
 
-遵守根目录 rules.md；K3 调用失败不炸批（单球失败记 ERROR 跳过该层进下一层，
-同 vlm_filter 口径）；token 消耗逐场统计落日志。
+遵守根目录 rules.md；模型加载惰性（测试注入假检测器/假识别器，不碰真模型
+ 真权重）；单球失败记 ERROR 不炸批。
 
 ## Testing Strategy
 
 - spike（Phase A.0）：work/ 一次性脚本，豁免四件套，结果归档 review
-- Phase B 产品代码：pytest 单测不碰网络/凭证（注入假 K3 reader，同
-  crop_scorers NumberReader 注入模式）：
-  - 接力规则：高层命中不调低层（mock 计数断言）、各层失败降级
-  - K3 回复解析：合法 JSON/号码不在库归 null/无法解析/幻觉硬答的处理
-  - schema 映射：high → score=1.0/margin=0.0 入 matches；low/null/解析失败
-    不入；validate_matches_payload 对产物校验通过（联调断言）
-  - 缓存：幂等、prompt 版本变更作废、拒答缓存
-  - 输出 schema 与 T5 消费端联调（假数据端到端）
+- Phase B 产品代码：pytest 单测不碰真模型/真权重/网络：
+  - 接力规则：OCR 命中不调人脸（mock 计数断言）、单路失败降级
+  - 名单先验：库外读数不采纳
+  - schema 映射与 validate_matches_payload 联调断言
+  - 缓存：幂等、版本变更作废
+  - 输出与 T5 消费端联调（假数据端到端）
 
 ## Boundaries
 
-- Always：质量门全绿后提交；spike/评测原始数据归档 review；token 成本记账
-- Ask first：insightface/PARSeq 等新依赖与非商业许可（本 spec 已请批 S2）；
-  prompt 定稿变更；级联层顺序调整；达标线数值调整
-- Never：任何层不是终裁（确认页导出才算）；不删 v1 已交付的 T5 预填机制与
-  照片库契约；不调 K3 做事件级进球判定（2026-08-01 已下线，场景不同勿混）
+- Always：质量门全绿后提交；spike/评测原始数据归档 review
+- Ask first：S1/S2 新依赖与非商业许可（本 spec 已请批）；L1 选型（spike 后
+  立哥 checkpoint）；达标线数值调整；恢复 K3 兜底
+- Never：任何层不是终裁（确认页导出才算）；不删 T5 预填机制与照片库契约；
+  不在本链路调 K3（零 token 是立哥定案）
 
 ## Success Criteria
 
-- [ ] S1：citymonkey 58 球读号覆盖率 + 13 球准确率报告归档；PARSeq 去留结论
-- [ ] S2：insightface 13 球命中率/误指认率报告归档；人脸路去留结论
-- [ ] Phase A：级联接力评测（测试场次真值）双指标达标，token 成本账归档
-- [ ] Phase B：k3_match_scorers.py 产品化 + video.py 串联 + 真机验证
+- [ ] S1：PARSeq truth_16 命中/误指认 + 58 球覆盖率（有号球占比+库外读数率）
+  报告归档；OCR 路去留结论
+- [ ] S2：insightface truth_16 命中/误指认报告归档；人脸路去留结论
+- [ ] 选型 checkpoint 立哥拍板（OCR/人脸/双路/皆弃）
+- [ ] Phase B：L1 matcher 产品化 + video.py 串联（评测的前置：评测用产品化
+  matcher 跑）
+- [ ] Phase A：级联评测三指标达标（采纳误指认 ≤10%），报告归档；
+  不达标回退报立哥
+- [ ] 真机验证 + 文档同步
 - [ ] ruff+pytest 全绿；四件套齐全（review 按轮次编号）
 
 ## Open Questions
 
-- **许可风险**：insightface/buffalo_l 与 PARSeq 均为非商业许可——个人剪辑
-  自用无碍；若 basketball-clip 开源（docs/basketball-clip/）且含认人功能，
-  需评估替换（自训/换许可友好模型）或在开源文档中声明依赖许可
-- 测试场次：立哥新下载的素材（citymonkey 已承担 v1 小样+S1，Phase A 正式
-  评测是否续用 citymonkey 取决于其 roster 确认进度）
-- 库外球员：t471.7 已澄清为对方蓝 15（无需补照）；后续我方新队员入库走
-  正常供照
-- 裁图质量分工：无人框/畸形框由 docs/crop-quality/ 专项处理；**错人框
-  （裁到对手）两边均边界外**，与 team_guess 不可靠是同坑两侧，后续单独立项
+- **许可风险**：PARSeq/insightface 均非商业许可——个人自用无碍；
+  basketball-clip 开源且含认人功能时需评估替换或声明依赖许可
+- **K3 兜底恢复阀**：若 L1 采纳率过低（人裁负担过重），可经立哥批准恢复
+  K3 照片对照兜底（v1 小样 10/13 零误指认留档 work/k3_photo_test/，
+  prompt 与实验脚本现成）
+- 测试场次：citymonkey（truth_16 已机器可读）+ 立哥新素材；Phase A 正式
+  评测场次以 roster 确认进度为准
+- 裁图质量分工：无人框/畸形框由 docs/crop-quality/ 专项处理；错人框
+  （裁到对手）两边均边界外，后续单独立项
