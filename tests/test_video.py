@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 import video
-from errors import BasketballPipelineError
+from errors import BasketballPipelineError, SchemaError
 from roster import format_key
 from video import Batch
 
@@ -692,6 +692,121 @@ class TestPeoplePhotoMatch:
         # Assert：①②③ 失败语义不变——非零即停，②.5/③ 未执行
         assert rc == 1
         assert len(calls) == 2
+
+
+class TestNamesPlayers:
+    """photos/names.json 全局号码→姓名名单自动注入 --players（2026-08-28 立哥供名单）。
+
+    串法：确认页拼参时 --players-file 显式优先，否则 names.json 存在即自动注入
+    --players（tag=白<号>，号码升序去零）；名单损坏 SchemaError 显式失败。
+    """
+
+    def _setup_batch(self, session_dir: pathlib.Path) -> pathlib.Path:
+        """备好批次 2 前置产物 + photos/ 目录，返回 rawdir。"""
+        _write_json(session_dir / "goals_batch2.json", _goals_payload(2))
+        _write_json(session_dir / "candidates_batch2.json", [])
+        photos = session_dir.parent.parent / "photos"
+        photos.mkdir()
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    @staticmethod
+    def _args(**over: object) -> argparse.Namespace:
+        base: dict[str, object] = {
+            "skip_cluster": False,
+            "read_numbers": False,
+            "max_reads": None,
+            "players_file": None,
+        }
+        base.update(over)
+        return argparse.Namespace(**base)
+
+    def test_names_json_injects_players(self, session_dir: pathlib.Path) -> None:
+        # Arrange：乱序+前导零 → 号码升序去零
+        rawdir = self._setup_batch(session_dir)
+        _write_json(
+            session_dir.parent.parent / "photos" / "names.json",
+            {"22": "朱勇", "6": "黄立", "07": "老七"},
+        )
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert
+        page = list(steps[-1].argv)
+        assert page[page.index("--players") + 1] == "白6=黄立,白7=老七,白22=朱勇"
+
+    def test_explicit_players_file_wins(self, session_dir: pathlib.Path) -> None:
+        # Arrange：显式 --players-file 优先于 names.json 自动注入
+        rawdir = self._setup_batch(session_dir)
+        _write_json(session_dir.parent.parent / "photos" / "names.json", {"6": "黄立"})
+        players_file = session_dir / "players.json"
+        _write_json(players_file, [])
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(
+            self._args(players_file=players_file), batch, rawdir, session_dir
+        )
+        # Assert
+        page = list(steps[-1].argv)
+        assert "--players-file" in page
+        assert "--players" not in page
+
+    def test_empty_names_no_flag(self, session_dir: pathlib.Path) -> None:
+        # Arrange：空对象 → 不传 --players
+        rawdir = self._setup_batch(session_dir)
+        _write_json(session_dir.parent.parent / "photos" / "names.json", {})
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert
+        assert "--players" not in list(steps[-1].argv)
+
+    def test_no_names_file_no_flag(self, session_dir: pathlib.Path) -> None:
+        # Arrange：无 names.json → 不传 --players（现状行为不变）
+        rawdir = self._setup_batch(session_dir)
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert
+        assert "--players" not in list(steps[-1].argv)
+
+    def test_names_with_roster_existing_coexists(self, session_dir: pathlib.Path) -> None:
+        # Arrange：已有 roster.json（既有确认）+ names.json 同存——两旗标并传
+        # （页面侧"players 以新名单为准"为既有惯例，此测试锁定编排侧行为不漂移）
+        rawdir = self._setup_batch(session_dir)
+        _write_json(session_dir.parent.parent / "photos" / "names.json", {"6": "黄立"})
+        _write_json(
+            session_dir / "roster.json",
+            {"session": "s", "confirmed": True, "players": [], "assignments": {}},
+        )
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
+        # Assert
+        page = list(steps[-1].argv)
+        assert "--roster-existing" in page
+        assert page[page.index("--players") + 1] == "白6=黄立"
+
+    @pytest.mark.parametrize(
+        ("payload", "err_part"),
+        [
+            ([1, 2], "顶层必须是对象"),
+            ({"x": "张三"}, "纯数字"),
+            ({"６": "张三"}, "纯数字"),  # 全角数字同拒
+            ({"6": ""}, "非空 str"),
+            ({"6": 7}, "非空 str"),
+            ({"6": "黄,立"}, "逗号"),  # --players 串分隔符，防拆出假球员
+            ({"07": "甲", "7": "乙"}, "撞车"),  # 去零后同号
+        ],
+    )
+    def test_schema_error(self, tmp_path: pathlib.Path, payload: object, err_part: str) -> None:
+        # Arrange
+        bad = tmp_path / "names.json"
+        _write_json(bad, payload)
+        # Act / Assert：名单损坏显式失败（类型锁定 SchemaError）
+        with pytest.raises(SchemaError, match=err_part):
+            video.load_names_players(bad)
 
 
 class TestResolveOutSize:

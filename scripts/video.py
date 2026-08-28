@@ -47,6 +47,10 @@ STATE_NAME: str = "video_cli.json"
 STATE_VERSION: int = 1
 # 照片库目录（people ②.5 照片匹配串接条件；docs/photo-roster/spec.md T6）
 PHOTOS_DIR: Path = Path("photos")
+# 号码→姓名全局名单（people ③自动注入 --players；用户维护，gitignore 随 photos/）
+PHOTOS_NAMES: Path = PHOTOS_DIR / "names.json"
+# 自动名单 tag 前缀（半截篮现行白球衣，team_of_tag 白→半截篮；换色改这里）
+NAMES_TAG_PREFIX: str = "白"
 # 聚类段 CLIP 权重首跑下载需走本机代理（AGENTS.md 环境节）
 CLUSTER_HTTPS_PROXY: str = "http://127.0.0.1:7897"
 # 聚类定稿口径（docs/scorer-cluster/；底层默认 average/0.25 是未标定起点，勿依赖）
@@ -397,6 +401,45 @@ def build_crop_argv(
     return crop_argv
 
 
+def load_names_players(path: Path = PHOTOS_NAMES) -> str:
+    """读 photos/names.json（号码→姓名）合成 --players 名单串（号码升序）。
+
+    tag = NAMES_TAG_PREFIX+号码（team_of_tag 白→半截篮自动归队，与确认页既有
+    名单惯例一致）；号码归一化 str(int()) 去前导零（同照片库契约）。
+
+    Args:
+        path: names.json 路径。
+
+    Returns:
+        "白6=黄立,白8=小浩,..." 式名单串；文件为空对象返回空串（调用方不传参）。
+
+    Raises:
+        SchemaError: 顶层非对象 / 键非纯数字 / 值非非空 str（名单损坏显式失败）。
+    """
+    data: Any = read_json(path, what="names.json")
+    if not isinstance(data, dict):
+        raise SchemaError(f"{path}: 顶层必须是对象（号码→姓名），实际 {type(data).__name__}")
+    pairs: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for k, v in data.items():
+        if not isinstance(k, str) or not k.isascii() or not k.isdigit():
+            raise SchemaError(f"{path}: 号码键必须是 ASCII 纯数字 str，实际 {k!r}")
+        if not isinstance(v, str) or not v.strip():
+            raise SchemaError(f"{path}: 号码 {k} 的姓名必须是非空 str，实际 {v!r}")
+        name: str = v.strip()
+        if "," in name:
+            raise SchemaError(
+                f"{path}: 号码 {k} 的姓名含逗号 {name!r}（--players 串分隔符，会拆出假球员）"
+            )
+        n: int = int(k)
+        if n in seen:
+            raise SchemaError(f"{path}: 号码去零后撞车（{k} 与已有 {n}）")
+        seen.add(n)
+        pairs.append((n, name))
+    pairs.sort()
+    return ",".join(f"{NAMES_TAG_PREFIX}{n}={name}" for n, name in pairs)
+
+
 def build_people_steps(
     args: argparse.Namespace,
     batch: Batch,
@@ -484,6 +527,11 @@ def build_people_steps(
         page_argv.extend(["--roster-existing", str(roster_path)])
     if args.players_file:
         page_argv.extend(["--players-file", str(args.players_file)])
+    elif PHOTOS_NAMES.is_file():
+        # 全局号码→姓名名单自动注入（--players 串；显式 --players-file 优先）
+        players_str: str = load_names_players()
+        if players_str:
+            page_argv.extend(["--players", players_str])
     steps.append(Step(f"批次{batch.batch}③确认页", tuple(page_argv)))
     return steps
 
