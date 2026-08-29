@@ -19,6 +19,11 @@
     v4 框人纠偏——持球点搜索只看 sec ≤ anchor−0.5s 的截断轨迹（v3 实测
     22/27 错球种子在入网后，球穿网落进筐下人躯干框）；队色硬守卫：落点帧
     框中人队色与 roster 队伍期望队色明确相反 → uncovered(team_mismatch)。
+    v4.3 飞行段链接——落点链路 run_mot 用放宽门限 FLIGHT_MATCH_DIST_PX=250
+    （默认 80px 为静止球候选挖掘标定，飞行球碎成单点轨迹是 citymonkey
+    no_landing 主根因）；select_goal_track 加 prefer_longer（端点距 100px
+    滑窗内取最长轨迹，防筐锚点把选择吸向网内碎片）；主链与认人链默认
+    参数不变（docs/heatmap-flight-link/）。
     坐标——原点 hoops 筐心（时刻最近采样；多覆盖取时刻最近、并列取空间最近；
     零覆盖退化全局时刻最近 + WARNING）；cx 中位切两端、归一小端、大端取反；
     尺度 = 人框高 / 1.75m；不校正旋转（同机位假设）。
@@ -70,6 +75,9 @@ HELD_SEARCH_BEFORE_SEC: float = (
 )
 TRACE_TOL_SEC: float = 0.3  # 追人链目标帧容差（5fps 即 ±1.5 帧）
 TRACK_START_MIN_SEC: float = 0.8  # 兜底路：轨迹起点须在锚点前 ≥0.8s
+FLIGHT_MATCH_DIST_PX: int = 250  # 落点链路 MOT 放宽门限（v4.3：默认 80px 为静止球
+# 候选挖掘标定，飞行球 5fps 帧间位移超限碎成单点；调研实测 15/19 no_landing 在此门限可链，
+# docs/heatmap-flight-link/）
 PERSON_HEIGHT_M: float = 1.75  # 假设身高（像素→米尺度锚；模块常量可调）
 HOOP_WINDOW_TOL_SEC: float = 1.0  # hoops 事件 window 覆盖锚点的容差
 COVERAGE_MIN_RATIO: float = 0.55  # 覆盖率过关线（分母 = roster 已归属球，含便服）
@@ -352,6 +360,10 @@ def find_landing(
 ) -> tuple[str, str, int, Box | None]:
     """单球落点：两路并集 + v4 队色硬守卫（spec v4 落点口径写死）。
 
+    v4.3：MOT 重链用放宽门限 FLIGHT_MATCH_DIST_PX（飞行球在默认 80px 门限下
+    碎成单点轨迹），轨迹选择 prefer_longer=True（防选中网内碎片）；
+    主路/兜底/守卫口径不变。
+
     主路 = 种子框（find_held_box / start_nearest_box，**均喂 sec ≤
     anchor−HELD_SEARCH_BEFORE_SEC 的截断轨迹**——v3 实测 22/27 错球种子在
     入网后，球穿网落进筐下人躯干框；截断为空则无种子直接落兜底）→
@@ -374,10 +386,17 @@ def find_landing(
         reason=""、box 非空；未覆盖时 path=""、reason 为原因、frame_idx=-1、
         box=None。
     """
-    tracks = run_mot(track_window_dets(cache, event.anchor_time), min_length=1)
+    tracks = run_mot(
+        track_window_dets(cache, event.anchor_time),
+        min_length=1,
+        max_match_dist=FLIGHT_MATCH_DIST_PX,
+    )
     if not tracks:
         return "", "no_track", -1, None
-    track = select_goal_track(tracks, event.anchor_time, anchor_xy)
+    track = select_goal_track(tracks, event.anchor_time, anchor_xy, prefer_longer=True)
+    if track is None and anchor_xy is not None:
+        # 机器候选空间误导（手工锚远离候选/候选错位）→ 退化时间域长轨偏好
+        track = select_goal_track(tracks, event.anchor_time, None, prefer_longer=True)
     if track is None:
         return "", "no_track_near_anchor", -1, None
 
@@ -1326,6 +1345,7 @@ def heat_session(
             "held_search_before_sec": HELD_SEARCH_BEFORE_SEC,
             "trace_tol_sec": TRACE_TOL_SEC,
             "track_start_min_sec": TRACK_START_MIN_SEC,
+            "flight_match_dist_px": FLIGHT_MATCH_DIST_PX,
             "person_height_m": PERSON_HEIGHT_M,
             "coverage_min_ratio": COVERAGE_MIN_RATIO,
             "flip_threshold_cx": threshold,

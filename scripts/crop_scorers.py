@@ -99,6 +99,10 @@ SAMPLE_FPS: int = 5  # 抽帧帧率（extract_frames 全线约定：帧 i 对应
 TRACK_WINDOW_PRE_SEC: float = 4.0  # 轨迹重链窗口起点 = anchor − 4.0s
 TRACK_WINDOW_POST_SEC: float = 0.5  # 轨迹重链窗口终点 = anchor + 0.5s
 GOAL_TRACK_MAX_DIST_PX: int = 200  # 进球轨迹端点距候选锚点上界，超出 = 没链到 → SKIP
+PREFER_LONGER_SLACK_PX: int = (
+    100  # 长轨偏好滑窗：端点距 ≤ 最优+此值的轨迹进候选池（docs/heatmap-flight-link/）
+)
+PREFER_LONGER_SLACK_SEC: float = 1.0  # 长轨偏好时间滑窗（anchor_xy=None 分支，秒；同上文档）
 CANDIDATE_MATCH_DT_SEC: float = 0.3  # goals 锚点与 candidates t0 的匹配容差
 _EPS: float = 1e-9  # 浮点窗口边界的容差
 
@@ -806,28 +810,53 @@ def track_window_dets(cache: MotCache, anchor_sec: float) -> list[list[Detection
 
 
 def select_goal_track(
-    tracks: list[Track], anchor_sec: float, anchor_xy: tuple[int, int] | None
+    tracks: list[Track],
+    anchor_sec: float,
+    anchor_xy: tuple[int, int] | None,
+    *,
+    prefer_longer: bool = False,
 ) -> Track | None:
     """选进球轨迹：端点（末端）与候选锚点最近的轨迹。
 
     有 anchor_xy（候选 cx/cy）时按端点空间距离最近，距离超 GOAL_TRACK_MAX_DIST_PX
     视为没链到（None → SKIP）；无 anchor_xy 退化为端点时间距 anchor 最近。
+    prefer_longer=True（落点链路专用，docs/heatmap-flight-link/）：端点距
+    ≤ 最优+PREFER_LONGER_SLACK_PX（anchor_xy=None 时为端点时刻距 ≤ 最优
+    +PREFER_LONGER_SLACK_SEC）的轨迹组成候选池，池中取最长轨迹（长度并列
+    取距锚更近者）——纯按距离/时刻会把选择吸向网内单点碎片，而网内点
+    被 v4 的 anchor−0.5s 截断排除，飞行长轨迹才是落点证据；anchor_xy 分支
+    外层 GOAL_TRACK_MAX_DIST_PX 上界判定不变。默认 False 行为逐点不变。
 
     Args:
         tracks: 窗口内重链的全部轨迹。
         anchor_sec: 进球锚点（秒）。
         anchor_xy: 候选锚点 (cx, cy)；None 表示无候选位置。
+        prefer_longer: 长轨偏好开关（见上）。
 
     Returns:
         进球轨迹；无轨迹或端点离锚点太远返回 None。
     """
     if not tracks:
         return None
+
+    def _dt(t: Track) -> float:
+        return abs(t.last_det.sec - anchor_sec)
+
     if anchor_xy is None:
-        return min(tracks, key=lambda t: abs(t.last_det.sec - anchor_sec))
-    best: Track = min(tracks, key=lambda t: euclidean((t.last_det.cx, t.last_det.cy), anchor_xy))
-    dist: float = euclidean((best.last_det.cx, best.last_det.cy), anchor_xy)
-    if dist > GOAL_TRACK_MAX_DIST_PX:
+        if not prefer_longer:
+            return min(tracks, key=_dt)
+        best_dt: float = _dt(min(tracks, key=_dt))
+        pool_t: list[Track] = [t for t in tracks if _dt(t) <= best_dt + PREFER_LONGER_SLACK_SEC]
+        return max(pool_t, key=lambda t: (t.length, -_dt(t)))
+
+    def _dist(t: Track) -> float:
+        return euclidean((t.last_det.cx, t.last_det.cy), anchor_xy)
+
+    best: Track = min(tracks, key=_dist)
+    if prefer_longer:
+        pool: list[Track] = [t for t in tracks if _dist(t) <= _dist(best) + PREFER_LONGER_SLACK_PX]
+        best = max(pool, key=lambda t: (t.length, -_dist(t)))
+    if _dist(best) > GOAL_TRACK_MAX_DIST_PX:
         return None
     return best
 

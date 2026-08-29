@@ -79,6 +79,24 @@ def _shot_cache(balls_end: int = 21, persons: list[tuple[Box, ...]] | None = Non
     return _cache(balls, persons)
 
 
+def _flight_cache(extra_net_det: bool = False) -> MotCache:
+    """飞行段缓存（docs/heatmap-flight-link/）：帧 10..20 球从 (50,50) 每帧 +100px。
+
+    100px 超 run_mot 默认 80px 门限（旧行为碎成单点 → no_landing），落点链路
+    放宽门限 FLIGHT_MATCH_DIST_PX=250 下链成一条。全程人框 A(0,0,100,100)
+    （持球种子 = 帧 10）。extra_net_det=True 时帧 20 追加网内碎片球 (1080,60)
+    （锁 prefer_longer 接线用：碎片端点距锚更近，长轨迹在 100px 滑窗内）。
+    """
+    persons = [(Box(0, 0, 100, 100),)] * N_FRAMES
+    balls: list[tuple[Detection, ...]] = [()] * N_FRAMES
+    for fi in range(10, 21):
+        dets: list[Detection] = [_ball(0.9, 50 + (fi - 10) * 100, 50, fi)]
+        if extra_net_det and fi == 20:
+            dets.append(_ball(0.9, 1080, 60, fi))
+        balls[fi] = tuple(dets)
+    return _cache(balls, persons)
+
+
 def _frame(tmp_path: Path, fid: str, frame_idx: int, box: Box | None, color: str) -> Path:
     """写合成帧图（box 区域填纯色，其余白色），返回帧图根目录。"""
     img = Image.new("RGB", (300, 200), "white")
@@ -227,6 +245,37 @@ def test_find_landing_trace_hit(tmp_path: Path) -> None:
     # Act（无帧图 → 守卫 WARNING 归便服不剔除）
     path, reason, fi, box = find_landing(cache, _event(), (250, 50), tmp_path / "frames")
     # Assert：主路命中，落点帧 15，框 A
+    assert (path, reason) == ("trace", "")
+    assert fi == 15 and box == Box(0, 0, 100, 100)
+
+
+def test_find_landing_flight_segment_rescued(tmp_path: Path) -> None:
+    # Arrange：飞行段每帧 100px，默认 80px 门限下碎成单点（旧行为 no_landing）
+    cache = _flight_cache()
+    # Act：anchor_xy 指向轨迹末端 (1050,50)
+    path, reason, fi, box = find_landing(cache, _event(), (1050, 50), tmp_path / "frames")
+    # Assert：放宽门限链成长轨迹 → 主路命中（持球种子帧 10，落点帧 15，框 A）
+    assert (path, reason) == ("trace", "")
+    assert fi == 15 and box == Box(0, 0, 100, 100)
+
+
+def test_find_landing_prefers_flight_over_net_fragment(tmp_path: Path) -> None:
+    # Arrange：网内碎片 (1080,60) 端点距锚更近，长飞行轨迹在 100px 滑窗内
+    cache = _flight_cache(extra_net_det=True)
+    # Act：anchor_xy 指向碎片（漏传 prefer_longer 则选碎片 → no_landing，本例锁接线）
+    path, reason, fi, box = find_landing(cache, _event(), (1080, 60), tmp_path / "frames")
+    # Assert：prefer_longer 选长飞行轨迹 → 主路命中
+    assert (path, reason) == ("trace", "")
+    assert fi == 15 and box == Box(0, 0, 100, 100)
+
+
+def test_find_landing_anchor_xy_misleading_falls_back(tmp_path: Path) -> None:
+    # Arrange：anchor_xy 远离一切轨迹端点（>200px → anchor_xy 分支落空；
+    # 对应实场"手工锚远离机器候选/候选空间错位"）
+    cache = _flight_cache()
+    # Act
+    path, reason, fi, box = find_landing(cache, _event(), (1900, 900), tmp_path / "frames")
+    # Assert：回退时间域长轨选择 → 主路命中
     assert (path, reason) == ("trace", "")
     assert fi == 15 and box == Box(0, 0, 100, 100)
 

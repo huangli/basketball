@@ -31,6 +31,12 @@ video build 阶段自动生成**（立哥指令）；待 spec-reviewer 两轮审
 - v4.2（本版，2026-08-16）：① 立哥看打样分区图后定**副图蜂巢→分区统计
   替换**（蜂巢渲染器下线，上线不足一天无用户依赖）；② 立哥指令
   **热图并入 video build 阶段**自动生成（见"v4.2 分区副图与 build 集成"节）
+- v4.3（2026-08-29，详见 `docs/heatmap-flight-link/`）：落点链路飞行段
+  链接修复——run_mot 落点侧放宽门限 250px（默认 80px 候选挖掘口径不变）、
+  select_goal_track 加 prefer_longer 长轨偏好（含 anchor_xy=None 时间分支
+  与落空回退）；citymonkey 覆盖率 45.7%→85.7%（16→30/35）。v4 边界条款
+  "不改 goal_heatmap.py 以外文件"经立哥批准以"新增关键字参数、默认行为
+  不变"方式超越
 - v1/v2 的 Q1/Q2 双门槛验证框架随 v2 证伪封存；release_probe.py /
   scorer_landings.py 留档（复算依据），不再发展
 

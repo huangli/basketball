@@ -321,6 +321,7 @@ def run_mot(
     all_balls: list[list[Detection]],
     *,
     min_length: int = STATIC_WINDOW,
+    max_match_dist: float = MAX_MATCH_DIST,
 ) -> list[Track]:
     """简单 MOT：贪心最近邻匹配跟踪所有球检测。
 
@@ -328,6 +329,10 @@ def run_mot(
         all_balls: 每帧的球检测列表。
         min_length: 收录轨迹的最小长度（检测数）；默认 STATIC_WINDOW（候选挖掘口径）。
             crop_scorers 轨迹法定位传 1——窗口内短轨迹（入网/落地片段）也是有效证据。
+        max_match_dist: 帧间最近邻匹配门限（像素）；默认 MAX_MATCH_DIST（80，
+            为静止/慢速球候选挖掘标定）。落点链路（goal_heatmap）传放宽值——
+            飞行球 5fps 下帧间位移轻松超 80px，默认门限会碎成单点轨迹
+            （docs/heatmap-flight-link/）。
 
     Returns:
         所有长度 >= min_length 的轨迹列表。
@@ -343,7 +348,7 @@ def run_mot(
                 continue
             last: Detection = track.last_det
             best_i: int = -1
-            best_d: float = float(MAX_MATCH_DIST)
+            best_d: float = float(max_match_dist)
             for i, det in enumerate(available):
                 d: float = euclidean((last.cx, last.cy), (det.cx, det.cy))
                 if d < best_d:

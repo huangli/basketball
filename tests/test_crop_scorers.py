@@ -232,6 +232,43 @@ class TestSelectGoalTrack:
         # Arrange / Act / Assert
         assert select_goal_track([], 4.0, (100, 100)) is None
 
+    def test_prefer_longer_picks_long_track_within_slack(self) -> None:
+        # Arrange：碎片端点距锚 10px，长轨迹端点距锚 90px（100px 滑窗内）
+        frag = _track([(110, 100, 19)])
+        long_t = _track([(500, 100, 15), (620, 100, 16), (740, 100, 17), (190, 100, 19)])
+        # Act / Assert：prefer_longer → 选长轨迹；默认 False 行为不变 → 选碎片
+        assert select_goal_track([frag, long_t], 4.0, (100, 100), prefer_longer=True) is long_t
+        assert select_goal_track([frag, long_t], 4.0, (100, 100)) is frag
+
+    def test_prefer_longer_respects_slack_bound(self) -> None:
+        # Arrange：长轨迹端点距锚 120px，超滑窗（10+100=110）
+        frag = _track([(110, 100, 19)])
+        long_t = _track([(500, 100, 15), (620, 100, 16), (740, 100, 17), (220, 100, 19)])
+        # Act / Assert：滑窗外不迁就，仍选碎片
+        assert select_goal_track([frag, long_t], 4.0, (100, 100), prefer_longer=True) is frag
+
+    def test_prefer_longer_still_enforces_max_dist(self) -> None:
+        # Arrange：池内全部端点超 GOAL_TRACK_MAX_DIST_PX=200
+        t1 = _track([(400, 100, 19)])
+        t2 = _track([(500, 100, 15), (520, 100, 19)])
+        # Act / Assert
+        assert select_goal_track([t1, t2], 4.0, (100, 100), prefer_longer=True) is None
+
+    def test_prefer_longer_time_branch_picks_long_track(self) -> None:
+        # Arrange：碎片端点 4.0s（dt=0），长轨迹端点 3.4s（dt=0.6，1.0s 时间滑窗内）
+        frag = _track([(1050, 50, 20)])
+        long_t = _track([(100, 50, 13), (300, 50, 15), (600, 50, 17)])
+        # Act / Assert：anchor_xy=None + prefer_longer → 选长轨迹；默认 False → 时间最近选碎片
+        assert select_goal_track([frag, long_t], 4.0, None, prefer_longer=True) is long_t
+        assert select_goal_track([frag, long_t], 4.0, None) is frag
+
+    def test_prefer_longer_time_branch_respects_slack(self) -> None:
+        # Arrange：长轨迹端点 2.6s（dt=1.4，超 0+1.0 时间滑窗）
+        frag = _track([(1050, 50, 20)])
+        long_t = _track([(100, 50, 9), (300, 50, 11), (600, 50, 13)])
+        # Act / Assert：滑窗外不迁就，仍选时间最近的碎片
+        assert select_goal_track([frag, long_t], 4.0, None, prefer_longer=True) is frag
+
 
 class TestFindHeldBox:
     """持球点回放：从末端往回放找最后一个球心严格落在人框内的轨迹点。"""
