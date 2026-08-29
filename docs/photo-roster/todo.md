@@ -36,9 +36,9 @@
     --read-numbers 显式开保留兼容）**；单测断言
   - Verify: `pytest tests/test_video.py -k people`
   - Files: scripts/video.py、tests/test_video.py
-- [x] T13 Phase A 级联评测（卡 T12 + 测试场次 confirmed roster）——**不达标出口**
+- [x] T13 级联评测（卡 T12 + 测试场次 confirmed roster）——**不达标出口**
   - Acceptance: **级联评测器落地 face_match_scorers.py --evaluate**（人脸缓存
-    数据源自然同模块；spec/todo 原写 photo_match_scorers.py 改造，载体修订见
+    数据源自然同模块；spec/plan/todo 原写 photo_match_scorers.py 改造，载体修订见
     review06）；覆盖率/采纳误指认率/人裁负担三指标；采纳误指认 ≤10% 达标
   - 实跑结果（review05.md）：覆盖率 11.4%、**采纳误指认 100%（4/4）不达标**；
     根因 = 错人框一阶 + 注册太弱 + 阈值全场失效；2026-08-29 立哥定
@@ -46,7 +46,7 @@
   - Verify: 评测器单测 21 条 + 真值场实跑报告 + Santa 双审 PASS
   - Files: scripts/face_match_scorers.py、tests/test_face_match_scorers.py、
     work/20260822_citymonkey/cascade_eval_report.md、docs/photo-roster/review05.md
-- [ ] T14 文档收尾 + 真机验证
+- [x] T14 文档收尾 + 真机验证
   - Acceptance: 使用手册.html / AGENTS.md / docs/经验教训.md 同步免费信号
     口径；**spec/plan 阶段命名统一为执行序（spike/选型/产品化/评测/收尾，
     消除 Phase A/B 倒挂）**；真机 people 链重跑肉眼抽验；review06.md 归档

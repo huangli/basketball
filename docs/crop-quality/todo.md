@@ -32,7 +32,7 @@
     核对表；归档 review01.md 验证章
   - Verify: 真机重跑 + 逐球核对表
   - Files: work/20260822_citymonkey/、docs/crop-quality/review01.md
-- [ ] C5 文档同步 + 收尾
+- [x] C5 文档同步 + 收尾
   - Acceptance: AGENTS.md / docs/经验教训.md 同步；todo 全勾；review01.md
     完整归档
   - Verify: `python -m ruff format scripts tests && python -m ruff check --fix

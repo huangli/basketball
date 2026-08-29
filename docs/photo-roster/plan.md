@@ -27,7 +27,7 @@
 
 ## Task List
 
-### Phase A.0：spike（work/ 一次性脚本，豁免四件套）
+### spike（work/ 一次性脚本，豁免四件套）
 
 - [ ] T8 S1 号码 OCR spike
   - Acceptance: PARSeq 系管线跑通（安装/权重下载走 HTTPS_PROXY，装不上记录
@@ -55,7 +55,7 @@
     终止（todo 余项划掉注明）
   - Files: docs/photo-roster/review04.md
 
-### Phase B：产品化（选型非"皆弃"才动；走四件套修订）
+### 产品化（选型非"皆弃"才动；走四件套修订）
 
 - [ ] T11 L1 matcher 产品化
   - Acceptance: scripts/ 下 matcher（按选型建）——缓存幂等（键=裁图 md5+
@@ -74,9 +74,9 @@
   - Verify: `pytest tests/test_video.py -k people`
   - Files: scripts/video.py、tests/test_video.py
 
-### Phase A：级联评测 + 收尾
+### 级联评测 + 收尾
 
-- [ ] T13 Phase A 级联评测（卡 T12 + 测试场次 confirmed roster）
+- [ ] T13 级联评测（卡 T12 + 测试场次 confirmed roster）
   - Acceptance: **photo_match_scorers.py --evaluate 改造为级联评测器**
     （L1 结果对账，spec Project Structure 契约点的实现载体）；测试场次
     真值跑级联，出覆盖率/采纳误指认率/人裁负担三指标；采纳误指认 ≤10%
@@ -108,4 +108,4 @@
 ## Open Questions
 
 - L1 高置信阈值：spike 分布出来后定稿（Ask first）
-- Phase A 评测场次：citymonkey 续用 or 新素材，以 roster 确认进度为准
+- 评测场次：citymonkey 续用 or 新素材，以 roster 确认进度为准

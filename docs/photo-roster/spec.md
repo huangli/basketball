@@ -1,10 +1,17 @@
 # Spec: 照片库认人 v2.1（photo-roster）——免费信号 → 人裁（零 token 路线）
 
+> **v2.2 终态（2026-08-29 立哥定）**：人脸 matcher 产品化后全场评测**采纳误指认
+> 100%（4/4）不达标**（review05.md；第一根因 = 错人框，裁图裁到旁观队友而非
+> 进球者）——**立哥定认人维持纯人工**：people ②.5 人脸预填默认关
+> （`--photo-match` 显式开可恢复），确认页 = 聚类分组 + 名单按钮
+> （photos/names.json）+ 视频终裁。本 spec 的 L1 路线正文留档作证据链，
+> 错人框治理挂后续立项（当前不作排产）。
+>
 > **v2.1 变更（2026-08-27 立哥定）**：级联去掉全部 K3 层——**K3 读号不调、
 > K3 照片对照不调**，链路简化为 **L1 免费信号 → L4 确认页人裁**，零 token。
 > （L 编号沿用 v2 的四级级联——v2 的 L2 K3 读号、L3 K3 照片对照已删，
-> 读者找不到 L2/L3 属预期；阶段编号沿用 v1 的 Phase A/B 称谓，
-> **执行序以 plan 为准**：spike → 选型 → 产品化 → 评测 → 收尾。）
+> 读者找不到 L2/L3 属预期；阶段命名 2026-08-29 起统一为执行序：
+> **spike → 选型 → 产品化 → 评测 → 收尾**（v1 的 Phase A/B 倒挂已消除）。
 > K3 照片对照小样 10/13 零误指认的实测记录留档（work/k3_photo_test/），
 > 若免费信号实测覆盖率太弱，恢复 K3 兜底经立哥批准即可（Open Questions）。
 > crop_scorers 既有 --read-numbers 功能是既有代码不删，级联不再调用；
@@ -22,7 +29,7 @@
 进球归属识别走零成本级联（同制服场景号码是第一信号、外观只配辅助，
 文献结论归档 review03.md）：
 
-- **L1 免费信号**（离线零成本，具体启用哪路由 Phase A.0 两个 spike 定）：
+- **L1 免费信号**（离线零成本，具体启用哪路由 spike 阶段两个 spike 定）：
   - 候选 a：**号码 OCR**（PARSeq 类开源管线，多帧投票 + 在场名单先验）——
     同制服场景第一信号
   - 候选 b：**人脸 embedding**（insightface buffalo_l，多帧质量加权投票）
@@ -34,7 +41,7 @@
 
 成功标准（可执行验证）：
 
-- **Phase A.0 两个 spike 先行**（work/ 一次性脚本豁免四件套，真值 =
+- **spike 阶段：两个 spike 先行**（work/ 一次性脚本豁免四件套，真值 =
   `work/20260822_citymonkey/truth_16.json`，16 球：8 我方有号/4 对方/2 废图/
   2 未判）：
   - S1 号码 OCR spike：PARSeq 管线在 truth_16 上的**命中率/误指认率** +
@@ -42,10 +49,10 @@
   - S2 人脸 spike：insightface buffalo_l 在 truth_16 上的命中率/误指认率
     ——决定人脸路去留
 - **选型 checkpoint**：两 spike 报告立哥过目，定 L1 = OCR / 人脸 / 双路接力 /
-  皆弃（皆弃则 Phase B 不做，认人维持纯人工确认页，本功能到此为止）
-- **Phase B**：L1 matcher 产品化（缓存/逐批串联/确认页预填复用 T5 机制）——
+  皆弃（皆弃则产品化不做，认人维持纯人工确认页，本功能到此为止）
+- **产品化阶段**：L1 matcher 产品化（缓存/逐批串联/确认页预填复用 T5 机制）——
   评测需要产品化 matcher 才能跑，故产品化先行
-- **Phase A 级联评测**（产品化后）：测试场次 confirmed roster 当真值，
+- **评测阶段（级联）**（产品化后）：测试场次 confirmed roster 当真值，
   出**机器高置信采纳率（覆盖率）+ 采纳部分误指认率 + 人裁负担**（进确认页
   比例）三指标报告归档；**达标线：采纳部分误指认率 ≤10%**（红线，立哥可改）；
   不达标 → 回退报立哥（评估恢复 K3 兜底或调阈值），覆盖率不硬卡
@@ -73,7 +80,7 @@ python -m ruff format scripts tests && python -m ruff check --fix scripts tests 
   python -m pytest -q
 
 # S1/S2 spike：work/ 一次性脚本，命令随 plan 落
-# Phase A/B：产品化后命令随 plan 落
+# 产品化/评测阶段：命令随 plan 落
 ```
 
 ## Project Structure
@@ -81,12 +88,12 @@ python -m ruff format scripts tests && python -m ruff check --fix scripts tests 
 ```
 photos/<号码>/*.jpg      → 照片库（契约同 v1：归一化/校验/gitignore，不重述）
 scripts/
-  ocr_match_scorers.py / face_match_scorers.py  新（Phase B，按选型建其一或全）：
+  ocr_match_scorers.py / face_match_scorers.py  新（产品化阶段，按选型建其一或全）：
                         缓存幂等、产出对齐 photo_matches.json 现 schema
                         （复用 T5 页面预填）、逐批
   photo_match_scorers.py 标证伪不推荐（docstring 注明）；--evaluate 机制
                         改造为级联评测器（L1 结果对账）
-  video.py              改（Phase B）：people 链 ②.5 由 CLIP 匹配器换 L1 匹配器
+  video.py              改（产品化阶段）：people 链 ②.5 由 CLIP 匹配器换 L1 匹配器
   gen_scorer_page.py    不改（T5 预填机制零改动消费）
 work/                   → S1/S2 spike 一次性脚本与报告（豁免四件套）
 docs/photo-roster/      → 本四件套
@@ -134,8 +141,8 @@ docs/crop-quality/      → 裁图质量闸专项（并行，互为上下游）
 
 ## Testing Strategy
 
-- spike（Phase A.0）：work/ 一次性脚本，豁免四件套，结果归档 review
-- Phase B 产品代码：pytest 单测不碰真模型/真权重/网络：
+- spike（spike 阶段）：work/ 一次性脚本，豁免四件套，结果归档 review
+- 产品化阶段代码：pytest 单测不碰真模型/真权重/网络：
   - 接力规则：OCR 命中不调人脸（mock 计数断言）、单路失败降级
   - 名单先验：库外读数不采纳
   - schema 映射与 validate_matches_payload 联调断言
@@ -156,9 +163,9 @@ docs/crop-quality/      → 裁图质量闸专项（并行，互为上下游）
   报告归档；OCR 路去留结论
 - [ ] S2：insightface truth_16 命中/误指认报告归档；人脸路去留结论
 - [ ] 选型 checkpoint 立哥拍板（OCR/人脸/双路/皆弃）
-- [ ] Phase B：L1 matcher 产品化 + video.py 串联（评测的前置：评测用产品化
+- [ ] 产品化阶段：L1 matcher 产品化 + video.py 串联（评测的前置：评测用产品化
   matcher 跑）
-- [ ] Phase A：级联评测三指标达标（采纳误指认 ≤10%），报告归档；
+- [ ] 评测阶段：级联三指标达标（采纳误指认 ≤10%），报告归档；
   不达标回退报立哥
 - [ ] 真机验证 + 文档同步
 - [ ] ruff+pytest 全绿；四件套齐全（review 按轮次编号）
@@ -170,7 +177,7 @@ docs/crop-quality/      → 裁图质量闸专项（并行，互为上下游）
 - **K3 兜底恢复阀**：若 L1 采纳率过低（人裁负担过重），可经立哥批准恢复
   K3 照片对照兜底（v1 小样 10/13 零误指认留档 work/k3_photo_test/，
   prompt 与实验脚本现成）
-- 测试场次：citymonkey（truth_16 已机器可读）+ 立哥新素材；Phase A 正式
+- 测试场次：citymonkey（truth_16 已机器可读）+ 立哥新素材；评测阶段正式
   评测场次以 roster 确认进度为准
 - 裁图质量分工：无人框/畸形框由 docs/crop-quality/ 专项处理；错人框
   （裁到对手）两边均边界外，后续单独立项
