@@ -1,5 +1,11 @@
 """人脸 matcher：照片库人脸 embedding 1:N 高置信预填（photo-roster T11，L1=人脸单路）。
 
+⚠️ 默认停用（2026-08-29 立哥定纯人工，docs/photo-roster/review05.md）：citymonkey
+    全场真值评测——覆盖率 11.4%、采纳误指认率 100%（4/4，红线 ≤10% 踩破）；
+    第一根因 = 错人框（裁图裁到旁观队友而非进球者，t173.8 抽帧实锤），人脸模型
+    在错框上结构性无解。video.py people ②.5 默认不串联本模块（--photo-match
+    显式开可恢复）；--evaluate 评测器保留可用。
+
 选型依据（2026-08-28 立哥拍板，docs/photo-roster/review04.md）：L1 = 人脸单路
 高置信档（insightface buffalo_l）。spike 结论（work/spike_face/report.md）：
 raw top-1 误指认率 50% 不可用，sim≥0.40 档 16 球小样 2/8 采纳全对、0 误指认、
@@ -18,6 +24,14 @@ raw top-1 误指认率 50% 不可用，sim≥0.40 档 16 球小样 2/8 采纳全
     photo_match_scorers.validate_matches_payload 校验（误指认红线：宁可漏不可错）。
     注册审计落 ``<photos>/face_registration_audit.json``（kept/dropped+原因+尺寸，
     同 work/spike_face/registration_audit.json 口径）。
+--evaluate 级联评测（photo-roster T13）：另加 --roster 与 --goals（真值来源），
+    --out 改写 markdown 报告——全部入统球 top-1+score 分布（不过闸，供阈值定稿）
+    + 三指标（覆盖率 = 机器高置信采纳球数/入统球数；采纳误指认率 = 采纳球中
+    top-1 与真值不符的比例，真值无号球被采纳同计误指认；人裁负担 = 1-覆盖率）
+    + 按号码混淆矩阵。评测零模型零网络：注册库与裁图 embedding 全部读缓存
+    重算余弦（纯 numpy），缓存文件缺失显式报错提示先跑匹配，缓存条目缺失的球
+    WARNING 跳过不阻塞；真值映射/入统口径沿用 v1（复用 photo_match_scorers 的
+    classify_truth / load_confirmed_goal_keys）。
 缓存：照片注册 + 裁图脸 embedding 按 ``模型tag:文件md5`` 幂等缓存（仿
     clip_cache 模式，键含模型版本）：照片缓存落 ``<photos>/.face_cache.json``，
     裁图缓存落各批 ``<candidates 同目录>/face_cache.json``；检不出脸（None）也
@@ -55,8 +69,21 @@ import numpy as np
 
 from cluster_scorers import STATUS_OK, GoalCrops, file_md5, l2_normalize, merge_candidates
 from errors import BasketballPipelineError, SchemaError
-from photo_match_scorers import MATCH_VERSION, Gallery, scan_gallery, validate_matches_payload
+from photo_match_scorers import (
+    MATCH_VERSION,
+    NO_TOP1_LABEL,
+    TRUTH_NO_NUMBER,
+    TRUTH_OURS,
+    TRUTH_UNJUDGEABLE,
+    Gallery,
+    Truth,
+    classify_truth,
+    load_confirmed_goal_keys,
+    scan_gallery,
+    validate_matches_payload,
+)
 from pipe_common import atomic_write_json, configure_logging, new_run_id, read_json
+from roster import Roster, validate_roster
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +93,8 @@ MODEL_TAG: str = "insightface/buffalo_l"  # 模型标识（缓存键前缀，模
 # （docs/photo-roster/spec.md §Boundaries）。
 THRESHOLD: float = 0.40
 MIN_FACE_WIDTH: int = 120  # 注册净化尺寸闸（spike curated 口径：最大面积脸宽 ≥120px 才注册）
+# 评测达标线（spec §Objective，立哥可改）：采纳误指认率 ≤10%（红线）
+ADOPT_ERROR_PASS_MAX: float = 0.10
 
 PHOTO_FACE_CACHE_NAME: str = ".face_cache.json"  # 照片注册缓存（落 --photos 目录下）
 FACE_CACHE_NAME: str = "face_cache.json"  # 裁图脸缓存（落各批 candidates 同目录）
@@ -123,6 +152,39 @@ class AuditEntry:
     face_w: int | None  # 最大面积脸宽（弃用也留尺寸；检不出脸为 None）
     face_h: int | None
     det_score: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class EvalRow:
+    """一个入统球的评测行（--evaluate 用；top-1 不过闸全量列出，供阈值定稿）。"""
+
+    key: str
+    category: str  # TRUTH_OURS / TRUTH_NO_NUMBER / TRUTH_UNJUDGEABLE
+    truth_number: str | None
+    top_number: str | None  # None = 无脸/并列/未出分（缓存缺失跳过）
+    score: float | None  # best 帧 sim（未出分为 None）
+    margin: float | None  # best 帧 top1-top2 分差
+    adopted: bool  # 是否过闸（best sim ≥ THRESHOLD 且非并列/非无脸）
+    correct: bool | None  # 仅有号球被采纳时有意义：top-1 == 真值号码
+
+
+@dataclass(frozen=True, slots=True)
+class EvalReport:
+    """--evaluate 评测报告数据。比率为 None 表示分母为 0（待定）。"""
+
+    rows: tuple[EvalRow, ...]
+    n_ours: int  # 半截篮有号球数
+    n_no_number: int  # 真值无号球数（对方/便服）
+    n_unjudgeable: int  # 不可判球数（半截篮无号 tag）
+    n_skipped: int  # 未出分球数（缓存缺失/不在 candidates，WARNING 跳过）
+    n_adopted: int  # 机器高置信采纳球数
+    n_adopted_judged: int  # 误指认率分母（采纳的有号+无号球；不可判不进）
+    n_errors: int  # 误指认球数（有号错号 + 真值无号被采纳）
+    n_adopted_unjudgeable: int  # 不可判球被采纳数（单列展示，不进误指认率分母）
+    coverage: float | None  # 覆盖率 = n_adopted / 入统球数
+    adopt_error_rate: float | None  # 采纳误指认率 = n_errors / n_adopted_judged
+    human_burden: float | None  # 人裁负担 = 1 - coverage（未采纳球占比）
+    confusion: dict[str, dict[str, int]]  # 真值号码 → top-1 号码（不过闸）→ 球数
 
 
 def _imread_unicode(path: Path) -> np.ndarray:
@@ -632,8 +694,367 @@ def build_matches_payload(
     }
 
 
+def load_cached_registry(photos_dir: Path, model_tag: str) -> dict[str, tuple[np.ndarray, ...]]:
+    """零模型重建注册库（--evaluate 用）：扫描照片库，embedding 全部读照片 face_cache。
+
+    净化口径与 register_gallery 一致：无脸条目（None）/ 小脸（宽 <MIN_FACE_WIDTH）
+    不注册；缓存条目缺失的照片（注册后新增）WARNING 跳过不阻塞；某号码全灭
+    WARNING 不阻塞；全库无可用注册显式报错。缓存文件缺失 = 尚未跑过匹配，显式
+    报错提示先跑匹配（rules.md §0.2：不静默空跑）。
+
+    Args:
+        photos_dir: 照片库目录（``photos/<号码>/``）。
+        model_tag: 模型标识（缓存键前缀）。
+
+    Returns:
+        去零号码 → 注册向量元组（缓存写入时已 L2 归一，命中向量视为已归一）。
+
+    Raises:
+        BasketballPipelineError: 照片 face_cache 文件缺失（提示先跑匹配）/
+            全部号码无可用注册。
+    """
+    cache_path: Path = photos_dir / PHOTO_FACE_CACHE_NAME
+    if not cache_path.is_file():
+        raise BasketballPipelineError(
+            f"照片注册缓存缺失: {cache_path}（请先跑 face_match_scorers 匹配产出该缓存）"
+        )
+    gallery: Gallery = scan_gallery(photos_dir)
+    cache: FaceCache = load_face_cache(cache_path)
+    vectors: dict[str, tuple[np.ndarray, ...]] = {}
+    for number, paths in gallery.photos.items():
+        vecs: list[np.ndarray] = []
+        for path in paths:
+            if not path.is_file():
+                logger.warning("照片扫描后消失，跳过: %s (号码 %s)", path, number)
+                continue
+            cache_key: str = f"{model_tag}:{file_md5(path)}"
+            if cache_key not in cache:
+                logger.warning("照片无缓存条目（注册后新增？），跳过: %s (号码 %s)", path, number)
+                continue
+            entry: dict[str, Any] | None = cache[cache_key]
+            if entry is None or int(entry["w"]) < MIN_FACE_WIDTH:
+                continue  # 无脸/小脸不注册（净化口径同 register_gallery）
+            vecs.append(np.asarray(entry["emb"], dtype=np.float64))
+        if vecs:
+            vectors[number] = tuple(vecs)
+        else:
+            logger.warning("号码 %s 无可用注册（缓存内无合格正脸），跳过该号码", number)
+    if not vectors:
+        raise BasketballPipelineError(f"照片库全部号码无可用注册: {photos_dir}")
+    return vectors
+
+
+def score_goal_cached(
+    goal: GoalCrops,
+    gallery_vecs: dict[str, tuple[np.ndarray, ...]],
+    cache: FaceCache,
+    model_tag: str,
+) -> GoalMatch | None:
+    """零模型单球出分（--evaluate 用）：crops 逐张查缓存 embedding 重算余弦，聚合 = best 帧。
+
+    无脸缓存条目（None）跳过记数；裁图文件缺失 / 缓存条目缺失 → 返回 None
+    （调用方 WARNING 跳过该球不阻塞）。并列最高 number=None（保守交人裁，
+    与 match_goal 同口径）。
+
+    Args:
+        goal: 一球裁图信息。
+        gallery_vecs: load_cached_registry 产物。
+        cache: 本批裁图 face 缓存（只读）。
+        model_tag: 模型标识（缓存键前缀）。
+
+    Returns:
+        GoalMatch（best 帧口径）；缓存不完整无法出分时为 None。
+    """
+    best: CropHit | None = None
+    n_face = n_no_face = 0
+    for name in goal.crops:
+        path: Path = goal.base_dir / name
+        if not path.is_file():
+            return None
+        cache_key: str = f"{model_tag}:{file_md5(path)}"
+        if cache_key not in cache:
+            return None
+        entry: dict[str, Any] | None = cache[cache_key]
+        if entry is None:
+            n_no_face += 1
+            continue
+        n_face += 1
+        hit: CropHit = top_hit(score_crop(np.asarray(entry["emb"], dtype=np.float64), gallery_vecs))
+        if best is None or hit.sim > best.sim:
+            best = hit
+    if best is None:
+        return GoalMatch(
+            number=None,
+            score=None,
+            margin=None,
+            n_crops=len(goal.crops),
+            n_face=n_face,
+            n_no_face=n_no_face,
+            n_missing=0,
+        )
+    return GoalMatch(
+        number=best.number,
+        score=best.sim,
+        margin=best.margin,
+        n_crops=len(goal.crops),
+        n_face=n_face,
+        n_no_face=n_no_face,
+        n_missing=0,
+    )
+
+
+def evaluate(
+    results: dict[str, GoalMatch],
+    truth: dict[str, Truth],
+    scope_keys: list[str],
+    threshold: float,
+) -> EvalReport:
+    """级联评测三指标（spec §评估口径 + T13 契约）：top-1 不过闸全量入报告，指标看过闸。
+
+    指标口径：
+    - 覆盖率 = 机器高置信采纳球数 / 入统球数（全部入统球，含不可判——未采纳
+      的不可判球同样进确认页占人裁）；
+    - 采纳误指认率 = 采纳球中 top-1 与真值不符的比例（有号错号 + 真值无号球
+      被采纳同计误指认；不可判球可能是照片库成员、正确命中不该计误，沿用 v1
+      "不可判不进分母"口径，被采纳数单列展示）；
+    - 人裁负担 = 1 - 覆盖率（未采纳球占比）。
+    混淆矩阵按号码展开，用 top-1（不过闸），top-1 缺失（无脸/并列/未出分）
+    归入 NO_TOP1_LABEL 列。
+
+    Args:
+        results: 入统球的缓存出分（未过闸全量；未出分球不在内按 n_skipped 计）。
+        truth: classify_truth 产物（photo_match_scorers 复用件）。
+        scope_keys: 入统键（goals confirmed 且 key ∈ roster.assignments），调用方算好。
+        threshold: 采纳闸（现 THRESHOLD 单闸：best sim ≥ threshold）。
+
+    Returns:
+        EvalReport（比率为 None 表示分母为 0）。
+    """
+    rows: list[EvalRow] = []
+    confusion: dict[str, dict[str, int]] = {}
+    n_ours = n_no_number = n_unjudgeable = 0
+    n_adopted = n_adopted_judged = n_errors = n_adopted_unjudgeable = 0
+    for key in scope_keys:
+        t: Truth = truth[key]
+        m: GoalMatch | None = results.get(key)
+        adopted: bool = m is not None and adopt(m, threshold)
+        correct: bool | None = None
+        if t.category == TRUTH_OURS:
+            n_ours += 1
+            col: str = (m.number if m is not None else None) or NO_TOP1_LABEL
+            if t.number is not None:
+                row_counts: dict[str, int] = confusion.setdefault(t.number, {})
+                row_counts[col] = row_counts.get(col, 0) + 1
+            if adopted and m is not None:
+                correct = m.number == t.number
+                n_adopted_judged += 1
+                if not correct:
+                    n_errors += 1
+        elif t.category == TRUTH_NO_NUMBER:
+            n_no_number += 1
+            if adopted:
+                n_adopted_judged += 1
+                n_errors += 1  # 真值无号球被采纳 = 误指认
+        else:
+            n_unjudgeable += 1
+            if adopted:
+                n_adopted_unjudgeable += 1
+        if adopted:
+            n_adopted += 1
+        rows.append(
+            EvalRow(
+                key=key,
+                category=t.category,
+                truth_number=t.number,
+                top_number=m.number if m is not None else None,
+                score=m.score if m is not None else None,
+                margin=m.margin if m is not None else None,
+                adopted=adopted,
+                correct=correct,
+            )
+        )
+    n_scope: int = len(scope_keys)
+    coverage: float | None = (n_adopted / n_scope) if n_scope else None
+    return EvalReport(
+        rows=tuple(rows),
+        n_ours=n_ours,
+        n_no_number=n_no_number,
+        n_unjudgeable=n_unjudgeable,
+        n_skipped=n_scope - len([k for k in scope_keys if k in results]),
+        n_adopted=n_adopted,
+        n_adopted_judged=n_adopted_judged,
+        n_errors=n_errors,
+        n_adopted_unjudgeable=n_adopted_unjudgeable,
+        coverage=coverage,
+        adopt_error_rate=(n_errors / n_adopted_judged) if n_adopted_judged else None,
+        human_burden=(1.0 - coverage) if coverage is not None else None,
+        confusion=confusion,
+    )
+
+
+def _fmt_rate(value: float | None) -> str:
+    """格式化比率：None（分母 0）→ ``待定``，否则百分比。"""
+    if value is None:
+        return "待定（分母 0）"
+    return f"{value * 100:.1f}%"
+
+
+def _fmt_float(value: float | None) -> str:
+    """格式化得分/margin：None → ``-``，+inf → ``inf``，否则 4 位小数。"""
+    if value is None:
+        return "-"
+    if math.isinf(value):
+        return "inf"
+    return f"{value:.4f}"
+
+
+_CATEGORY_LABELS: dict[str, str] = {
+    TRUTH_OURS: "半截篮有号",
+    TRUTH_NO_NUMBER: "无号(对方/便服)",
+    TRUTH_UNJUDGEABLE: "不可判(半截篮无号tag)",
+}
+
+
+def _verdict(row: EvalRow) -> str:
+    """逐球行判定列：有号采纳→对/错；真值无号被采纳→误指；不可判被采纳→采纳；其余 -。"""
+    if row.category == TRUTH_OURS and row.adopted:
+        return "对" if row.correct else "错"
+    if row.category == TRUTH_NO_NUMBER and row.adopted:
+        return "误指"
+    if row.category == TRUTH_UNJUDGEABLE and row.adopted:
+        return "采纳"
+    return "-"
+
+
+def render_markdown(report: EvalReport, model_tag: str, threshold: float) -> str:
+    """渲染 --evaluate markdown 评测报告（写 --out；阈值定稿与达标判定以此为准）。
+
+    Args:
+        report: evaluate 产物。
+        model_tag: 模型标识。
+        threshold: 本次采纳闸（best sim ≥ threshold 单闸）。
+
+    Returns:
+        markdown 文本（UTF-8，含参数/入统数/三指标/混淆矩阵/逐球 top-1+score 分布）。
+    """
+    lines: list[str] = [
+        "# 人脸 L1 级联评测报告（photo-roster T13）",
+        "",
+        f"- 模型: `{model_tag}`",
+        f"- 采纳闸: best sim ≥ {threshold}（现 THRESHOLD 单闸；分布见下供阈值定稿）",
+        f"- 入统球: {len(report.rows)}（半截篮有号 {report.n_ours} / "
+        f"无号 {report.n_no_number} / 不可判 {report.n_unjudgeable}；"
+        f"缓存缺失未出分 {report.n_skipped}）",
+        "",
+        "## 三指标",
+        "",
+        f"- 覆盖率: {report.n_adopted}/{len(report.rows)} = {_fmt_rate(report.coverage)}"
+        "（机器高置信采纳球 / 全部入统球）",
+        f"- 采纳误指认率: {report.n_errors}/{report.n_adopted_judged} = "
+        f"{_fmt_rate(report.adopt_error_rate)}（达标线 ≤ {ADOPT_ERROR_PASS_MAX * 100:.0f}%；"
+        "真值无号球被采纳同计误指认）",
+        f"- 人裁负担: {_fmt_rate(report.human_burden)}（= 1 - 覆盖率，未采纳球占比）",
+        f"- 附: 不可判球被采纳 {report.n_adopted_unjudgeable} 个"
+        "（可能是照片库成员，正确命中不计误，不进误指认率分母）",
+        "",
+        "## 混淆矩阵（真值号码 × top-1 号码，不过闸）",
+        "",
+    ]
+    cols: list[str] = sorted({c for row in report.confusion.values() for c in row})
+    lines.append("| 真值\\top-1 | " + " | ".join(cols) + " |")
+    lines.append("|" + "---|" * (len(cols) + 1))
+    for truth_number in sorted(report.confusion):
+        row = report.confusion[truth_number]
+        lines.append(f"| {truth_number} | " + " | ".join(str(row.get(c, 0)) for c in cols) + " |")
+    lines += [
+        "",
+        "## 逐球分布（top-1 不过闸，供阈值定稿）",
+        "",
+        "| key | 真值类别 | 真值号码 | top-1 | score | margin | 采纳 | 判定 |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in report.rows:
+        lines.append(
+            f"| {r.key} | {_CATEGORY_LABELS.get(r.category, r.category)} | "
+            f"{r.truth_number or '-'} | {r.top_number or NO_TOP1_LABEL} | "
+            f"{_fmt_float(r.score)} | {_fmt_float(r.margin)} | "
+            f"{'是' if r.adopted else '否'} | {_verdict(r)} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _run_evaluate(args: argparse.Namespace) -> None:
+    """--evaluate 分支：读真值 → 纯缓存出分（零模型）→ 三指标评估 → markdown 写 --out。
+
+    裁图 face_cache 按 candidates 所在目录（base_dir）分组加载；缓存文件缺失
+    显式报错提示先跑匹配（rules.md §0.2）；入统球不在 candidates / 缓存条目
+    缺失 WARNING 跳过不阻塞（计未出分）。
+
+    Args:
+        args: CLI 参数（roster/goals/out 已校验非 None）。
+
+    Raises:
+        BasketballPipelineError: 照片/裁图缓存文件缺失、注册库无效。
+    """
+    roster_data: Any = read_json(args.roster, what="roster.json")
+    roster: Roster = validate_roster(roster_data, str(args.roster))
+    confirmed: set[str] = load_confirmed_goal_keys(args.goals)
+    truth: dict[str, Truth] = classify_truth(roster)
+    scope: list[str] = sorted(k for k in confirmed if k in truth)
+    logger.info(
+        "入统 %d 球（goals confirmed %d 键，roster assignments %d 键）",
+        len(scope),
+        len(confirmed),
+        len(truth),
+    )
+    gallery_vecs: dict[str, tuple[np.ndarray, ...]] = load_cached_registry(args.photos, MODEL_TAG)
+    logger.info("注册库（纯缓存重建）: %d 个号码 ← %s", len(gallery_vecs), args.photos)
+
+    goals: dict[str, GoalCrops] = merge_candidates(args.candidates)
+    caches: dict[Path, FaceCache] = {}
+    results: dict[str, GoalMatch] = {}
+    for key in scope:
+        goal: GoalCrops | None = goals.get(key)
+        if goal is None:
+            logger.warning("入统球不在 candidates，跳过（计未出分）: %s", key)
+            continue
+        if goal.status != STATUS_OK or not goal.crops:
+            logger.warning("入统球非 OK 或无裁图，跳过（计未出分）: %s (%s)", key, goal.status)
+            continue
+        if goal.base_dir not in caches:
+            cache_path: Path = goal.base_dir / FACE_CACHE_NAME
+            if not cache_path.is_file():
+                raise BasketballPipelineError(
+                    f"裁图脸缓存缺失: {cache_path}（请先跑 face_match_scorers 匹配产出该缓存）"
+                )
+            caches[goal.base_dir] = load_face_cache(cache_path)
+        m: GoalMatch | None = score_goal_cached(
+            goal, gallery_vecs, caches[goal.base_dir], MODEL_TAG
+        )
+        if m is None:
+            logger.warning("入统球裁图缓存条目缺失，跳过不阻塞（计未出分）: %s", key)
+            continue
+        results[key] = m
+
+    report: EvalReport = evaluate(results, truth, scope, THRESHOLD)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(render_markdown(report, MODEL_TAG, THRESHOLD), encoding="utf-8")
+    logger.info(
+        "评测完成: 覆盖率 %s（%d/%d），采纳误指认率 %s（%d/%d），人裁负担 %s → %s",
+        _fmt_rate(report.coverage),
+        report.n_adopted,
+        len(scope),
+        _fmt_rate(report.adopt_error_rate),
+        report.n_errors,
+        report.n_adopted_judged,
+        _fmt_rate(report.human_burden),
+        args.out,
+    )
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    """解析 CLI 参数。"""
+    """解析 CLI 参数（--evaluate 必须同时给 --roster 与 --goals，缺一报错）。"""
     parser = argparse.ArgumentParser(
         description="照片库认人 L1：人脸 embedding 1:N 高置信预填（insightface buffalo_l）"
     )
@@ -645,8 +1066,25 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=Path,
         help="scorer_candidates.json 路径（可重复；键集并集，同 key 后者覆盖前者）",
     )
-    parser.add_argument("--out", required=True, type=Path, help="输出 photo_matches.json 路径")
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="输出路径：非 evaluate 写 photo_matches.json；--evaluate 写 markdown 评测报告",
+    )
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="级联评测模式（需同时给 --roster 与 --goals；纯缓存零模型，报告写 --out）",
+    )
+    parser.add_argument("--roster", type=Path, default=None, help="roster.json（--evaluate 用）")
+    parser.add_argument("--goals", type=Path, default=None, help="goals.json（--evaluate 用）")
+    ns = parser.parse_args(argv)
+    if ns.evaluate and (ns.roster is None or ns.goals is None):
+        parser.error("--evaluate 需同时给 --roster 与 --goals")
+    if not ns.evaluate and (ns.roster is not None or ns.goals is not None):
+        parser.error("--roster/--goals 仅 --evaluate 模式使用")
+    return ns
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -655,6 +1093,9 @@ def main(argv: list[str] | None = None) -> int:
     run_id: str = new_run_id()
     configure_logging(run_id)
     try:
+        if args.evaluate:
+            _run_evaluate(args)  # 纯缓存零模型：不注册、不构建检测器
+            return 0
         gallery: Gallery = scan_gallery(args.photos)
         logger.info(
             "照片库: %d 个号码 / %d 张照片 ← %s",

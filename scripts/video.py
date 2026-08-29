@@ -451,17 +451,21 @@ def build_people_steps(
     --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
     --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
     不传 --clusters。②.5 照片匹配（docs/photo-roster/spec.md T6 串法，T12 起执行体
-    换 face_match_scorers.py 人脸单路 L1）：photos/ 库存在且非 --skip-cluster 才安排
-    （face_cache 幂等缓存落该批 candidates 同目录，产物落本批 photo_matches.json），
-    缺库 INFO 跳过不阻塞；安排后确认页预传 --photo-matches，
-    执行时探测产物缺失会剥掉该旗标（②.5 失败降级为无预填，见 _cmd_people）。
+    换 face_match_scorers.py 人脸单路 L1）：**默认关**（2026-08-29 立哥定纯人工，
+    review05 评测不达标），--photo-match 显式开 + photos/ 库存在且非
+    --skip-cluster 才安排（face_cache 幂等缓存落该批 candidates 同目录，
+    产物落本批 photo_matches.json），缺库 INFO 跳过不阻塞；安排后确认页预传
+    --photo-matches，执行时探测产物缺失会剥掉该旗标（②.5 失败降级为无预填，
+    见 _cmd_people）。
     """
     crop_argv: list[str] = build_crop_argv(
         batch, rawdir, read_numbers=args.read_numbers, max_reads=args.max_reads
     )
     steps: list[Step] = [Step(f"批次{batch.batch}①裁图", tuple(crop_argv))]
 
-    photo_enabled: bool = not args.skip_cluster and PHOTOS_DIR.is_dir()
+    # ②.5 人脸匹配默认关（2026-08-29 立哥定纯人工：review05 全场评测采纳误指认
+    # 100% 不达标，错人框是一阶根因；--photo-match 显式开保留可恢复）
+    photo_enabled: bool = args.photo_match and not args.skip_cluster and PHOTOS_DIR.is_dir()
     if not args.skip_cluster:
         steps.append(
             Step(
@@ -481,8 +485,10 @@ def build_people_steps(
                 {"HTTPS_PROXY": CLUSTER_HTTPS_PROXY},
             )
         )
-        if not photo_enabled:
-            logger.info("照片库 %s 不存在，跳过照片匹配步骤（不阻塞认人链）", PHOTOS_DIR)
+    if args.photo_match and not PHOTOS_DIR.is_dir():
+        logger.info("照片库 %s 不存在，跳过照片匹配步骤（不阻塞认人链）", PHOTOS_DIR)
+    elif args.photo_match and args.skip_cluster:
+        logger.info("--photo-match 与 --skip-cluster 同带：跳过照片匹配步骤")
     if photo_enabled:
         # ②.5 允许失败降级（allow_fail）：ERROR 留痕、确认页照出、降级为无预填；
         # 人脸 matcher（T12 换 L1）：无 --cache 参数，face_cache 落 candidates 同目录；
@@ -1392,6 +1398,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="读号新调用上限（缺省 = 该批 confirmed 球数 ×3）",
     )
     pp.add_argument("--players-file", default=None, help="球员名单 JSON 文件")
+    pp.add_argument(
+        "--photo-match",
+        action="store_true",
+        help="开人脸匹配预填（默认关：2026-08-29 立哥定纯人工，review05 评测不达标；"
+        "显式开才串联 ②.5 人脸匹配）",
+    )
     pp.add_argument(
         "--skip-cluster", action="store_true", help="跳过聚类段（确认页不传 --clusters）"
     )

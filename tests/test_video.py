@@ -579,9 +579,38 @@ class TestPeoplePhotoMatch:
             "read_numbers": False,
             "max_reads": None,
             "players_file": None,
+            "photo_match": True,  # 既有用例测的是显式开启路径；默认关见 test_default_off
         }
         base.update(over)
         return argparse.Namespace(**base)
+
+    def test_default_off_no_photo_step(self, session_dir: pathlib.Path) -> None:
+        # Arrange：photos/ 存在但 --photo-match 未开（默认关，2026-08-29 纯人工定案）
+        rawdir = self._setup_batch(session_dir)
+        batch = video.discover_batches(REL)[0]
+        # Act
+        steps = video.build_people_steps(self._args(photo_match=False), batch, rawdir, session_dir)
+        # Assert：无 ②.5、确认页不带 --photo-matches，聚类照跑
+        assert [s.title for s in steps] == ["批次2①裁图", "批次2②聚类", "批次2③确认页"]
+        assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
+        assert "--photo-matches" not in steps[2].argv
+
+    def test_default_off_main_level(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：photos/ 存在 + main() 不带 --photo-match（argparse 默认关端到端锁定）
+        rawdir = self._setup_batch(session_dir)
+        # Act
+        rc = video.main(
+            ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+        )
+        # Assert：三段链、无人脸匹配调用、确认页无 --photo-matches
+        assert rc == 0
+        assert len(run_recorder) == 3
+        assert all("face_match_scorers.py" not in cmd[1] for cmd, _ in run_recorder)
+        assert "--photo-matches" not in run_recorder[2][0]
 
     def test_photo_step_and_page_flag(self, session_dir: pathlib.Path) -> None:
         # Arrange
@@ -652,7 +681,15 @@ class TestPeoplePhotoMatch:
         # Act
         with caplog.at_level(logging.ERROR):
             rc = video.main(
-                ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+                [
+                    "people",
+                    "--session",
+                    SESSION,
+                    "--rawdir",
+                    str(rawdir),
+                    "--no-read-numbers",
+                    "--photo-match",
+                ]
             )
         # Assert：ERROR 留痕、不中断整链、③ 确认页照出且剥掉 --photo-matches（无预填）
         assert rc == 0
@@ -671,7 +708,15 @@ class TestPeoplePhotoMatch:
         _write_json(session_dir / "scorers_b2" / "photo_matches.json", {"matches": {}})
         # Act
         rc = video.main(
-            ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
+            [
+                "people",
+                "--session",
+                SESSION,
+                "--rawdir",
+                str(rawdir),
+                "--no-read-numbers",
+                "--photo-match",
+            ]
         )
         # Assert
         assert rc == 0
@@ -684,11 +729,11 @@ class TestPeoplePhotoMatch:
     def test_other_steps_failure_semantics_unchanged(
         self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Arrange：② 聚类失败（photos 存在，链含 ②.5）
+        # Arrange：② 聚类失败（photos 存在 + --photo-match 开，链含 ②.5）
         rawdir = self._setup_batch(session_dir)
         calls = _fail_recorder(monkeypatch, fail_at=1)
         # Act
-        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir), "--photo-match"])
         # Assert：①②③ 失败语义不变——非零即停，②.5/③ 未执行
         assert rc == 1
         assert len(calls) == 2
@@ -718,6 +763,7 @@ class TestNamesPlayers:
             "read_numbers": False,
             "max_reads": None,
             "players_file": None,
+            "photo_match": False,  # 名单注入与 ②.5 无关，默认关路径即可
         }
         base.update(over)
         return argparse.Namespace(**base)
