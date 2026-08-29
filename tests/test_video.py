@@ -1999,3 +1999,13 @@ class TestDefaultSession:
         rc = video.main(["people"])
         assert rc == 1
         assert run_recorder == []
+
+    def test_explicit_empty_session_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # --session "" ≠ 未给：显式失败（不猜场次），people/score 一致
+        assert video.main(["people", "--session", ""]) == 1
+        assert video.main(["score", "素材目录", "--session", ""]) == 1
+        assert run_recorder == []

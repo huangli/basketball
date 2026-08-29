@@ -206,6 +206,9 @@ def save_current_session(session: str) -> None:
 
     仅 score 成功后调用（dry-run 不写，与 state 口径一致）；显式 --session 跑
     people/build/photo 只是临时覆盖，不改写指针。
+
+    Raises:
+        OSError: IO 重试耗尽（atomic_write_json 抛出）。
     """
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
     atomic_write_json(
@@ -246,14 +249,28 @@ def load_current_session() -> str:
     return session
 
 
+def _explicit_session(args: argparse.Namespace) -> str | None:
+    """取显式 --session；给了空串显式失败（空串≠未给，不猜场次）。
+
+    Raises:
+        BasketballPipelineError: --session 为空串。
+    """
+    if args.session is None:
+        return None
+    if not args.session:
+        raise BasketballPipelineError("--session 空串非法（场次 ID 必须是非空字符串）")
+    return str(args.session)
+
+
 def resolve_session(args: argparse.Namespace) -> str:
     """people/build/photo 场次解析：显式 --session 优先，否则读当前场次指针。
 
     Raises:
-        BasketballPipelineError: 两路皆缺或指针异常（不猜场次）。
+        BasketballPipelineError: 两路皆缺、--session 空串或指针异常（不猜场次）。
     """
-    if args.session:
-        return str(args.session)
+    explicit: str | None = _explicit_session(args)
+    if explicit is not None:
+        return explicit
     return load_current_session()
 
 
@@ -261,10 +278,11 @@ def _resolve_score_session(args: argparse.Namespace) -> str:
     """score 场次解析：显式 --session 优先，否则取素材目录 basename。
 
     Raises:
-        BasketballPipelineError: basename 为空（如盘符根，不猜场次）。
+        BasketballPipelineError: --session 空串，或 basename 为空（如盘符根，不猜场次）。
     """
-    if args.session:
-        return str(args.session)
+    explicit: str | None = _explicit_session(args)
+    if explicit is not None:
+        return explicit
     name: str = Path(args.srcdir).resolve().name
     if not name:
         raise BasketballPipelineError(
