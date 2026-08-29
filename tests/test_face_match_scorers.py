@@ -1,4 +1,4 @@
-"""face_match_scorers.py 单元测试（注册净化/比对/采纳闸/缓存/schema/CLI）。
+"""face_match_scorers.py 单元测试（注册净化/比对/采纳闸/缓存/schema/CLI/级联评测）。
 
 全部合成数据 + 假识别器：不 import insightface/onnxruntime、不碰真模型真权重、
 不碰网络与真实素材（console cp1252：测试内不 print 中文）。
@@ -7,7 +7,9 @@
 max over photos、best 帧采纳、并列不采纳、单号码库 margin=+inf）、阈值边界
 （sim==THRESHOLD 过、低即不过）、无脸裁图跳过记数、裁图缺失记数、单球失败
 ERROR 不炸批、缓存幂等（含无脸缓存、模型前缀隔离、损坏显式失败）、号码归一化
-（07→7）、产物过 validate_matches_payload 联调、CLI 端到端与失败路径 rc=1。
+（07→7）、产物过 validate_matches_payload 联调、CLI 端到端与失败路径 rc=1、
+--evaluate 级联评测（缓存注册表/缓存出分/三指标含分母 0 边界/真值无号被采纳
+计误指认/混淆矩阵/报告关键行/零模型零加载断言/评测 CLI 端到端）。
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ import logging
 import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -40,16 +42,27 @@ from face_match_scorers import (
     adopt,
     audit_payload,
     build_matches_payload,
+    evaluate,
+    load_cached_registry,
     load_face_cache,
     main,
     match_goal,
     match_goals,
     register_gallery,
+    render_markdown,
     save_face_cache,
     score_crop,
+    score_goal_cached,
     top_hit,
 )
-from photo_match_scorers import scan_gallery, validate_matches_payload
+from photo_match_scorers import (
+    TRUTH_NO_NUMBER,
+    TRUTH_OURS,
+    TRUTH_UNJUDGEABLE,
+    Truth,
+    scan_gallery,
+    validate_matches_payload,
+)
 
 
 def _vec(*xs: float) -> np.ndarray:
@@ -670,6 +683,388 @@ class TestMainCli:
             "build_face_detector",
             lambda: FakeDetector({"p7a.jpg": [], "p9a.jpg": []}),
         )
+        rc = main(self._argv(paths))
+        assert rc == 1
+        assert not paths["out"].exists()
+
+
+def _cache_entry(w: int, emb: tuple[float, ...]) -> dict[str, Any]:
+    """合成 face_cache 条目（embedding 已 L2 归一后转 list，与 _picked_face 落盘同形）。"""
+    return {"w": w, "h": 400, "det": 0.9, "emb": [float(x) for x in _unit(*emb)]}
+
+
+class TestEvalParseArgs:
+    """--evaluate CLI 契约：必须同时给 --roster 与 --goals；非 evaluate 拒收。"""
+
+    _BASE: ClassVar[list[str]] = ["--photos", "p", "--candidates", "c.json", "--out", "o.md"]
+
+    def test_evaluate_requires_roster_and_goals(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--evaluate"])
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--evaluate", "--roster", "r.json"])
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--evaluate", "--goals", "g.json"])
+
+    def test_roster_goals_without_evaluate_rejected(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--roster", "r.json"])
+        with pytest.raises(SystemExit):
+            _parse_args([*self._BASE, "--goals", "g.json"])
+
+    def test_evaluate_full_accepted(self) -> None:
+        ns = _parse_args([*self._BASE, "--evaluate", "--roster", "r.json", "--goals", "g.json"])
+        assert ns.evaluate
+        assert ns.roster == Path("r.json")
+        assert ns.goals == Path("g.json")
+
+
+class TestCachedRegistry:
+    """缓存注册表：零模型从照片 face_cache 重建注册库（净化口径同 register_gallery）。"""
+
+    def test_missing_photo_cache_raises(self, tmp_path: Path) -> None:
+        photos = _write_photos(tmp_path / "photos", {"7": ["a.jpg"]})
+        with pytest.raises(BasketballPipelineError, match="先跑"):
+            load_cached_registry(photos, MODEL_TAG)
+
+    def test_registry_from_cache_purified(self, tmp_path: Path) -> None:
+        photos = _write_photos(
+            tmp_path / "photos", {"07": ["a.jpg", "b.jpg", "c.jpg"], "9": ["d.jpg"]}
+        )
+        entries = {
+            _cache_key(photos / "07" / "a.jpg"): _cache_entry(300, (1.0, 0.0, 0.0)),
+            _cache_key(photos / "07" / "b.jpg"): None,  # 无脸照片不注册
+            _cache_key(photos / "07" / "c.jpg"): _cache_entry(
+                MIN_FACE_WIDTH - 1, (0.0, 0.0, 1.0)
+            ),  # 小脸不注册（净化口径同 register_gallery）
+            _cache_key(photos / "9" / "d.jpg"): _cache_entry(300, (0.0, 1.0, 0.0)),
+        }
+        save_face_cache(photos / PHOTO_FACE_CACHE_NAME, MODEL_TAG, entries)
+        vecs = load_cached_registry(photos, MODEL_TAG)
+        assert sorted(vecs) == ["7", "9"]  # 07 归一化为 7
+        assert len(vecs["7"]) == 1  # 仅 a.jpg 合格
+        assert np.allclose(vecs["7"][0], _unit(1.0, 0.0, 0.0))
+        assert np.allclose(vecs["9"][0], _unit(0.0, 1.0, 0.0))
+
+    def test_cache_entry_missing_skips_photo(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Arrange：a.jpg 无缓存条目（注册后新增的照片）→ WARNING 跳过不阻塞；b.jpg 正常
+        photos = _write_photos(tmp_path / "photos", {"7": ["a.jpg", "b.jpg"]})
+        save_face_cache(
+            photos / PHOTO_FACE_CACHE_NAME,
+            MODEL_TAG,
+            {_cache_key(photos / "7" / "b.jpg"): _cache_entry(300, (1.0, 0.0, 0.0))},
+        )
+        with caplog.at_level(logging.WARNING):
+            vecs = load_cached_registry(photos, MODEL_TAG)
+        assert list(vecs) == ["7"]
+        assert len(vecs["7"]) == 1
+        assert any("a.jpg" in r.message for r in caplog.records if r.levelno == logging.WARNING)
+
+    def test_all_photos_no_cached_face_raises(self, tmp_path: Path) -> None:
+        photos = _write_photos(tmp_path / "photos", {"7": ["a.jpg"]})
+        save_face_cache(
+            photos / PHOTO_FACE_CACHE_NAME,
+            MODEL_TAG,
+            {_cache_key(photos / "7" / "a.jpg"): None},
+        )
+        with pytest.raises(BasketballPipelineError, match="无可用"):
+            load_cached_registry(photos, MODEL_TAG)
+
+
+class TestScoreGoalCached:
+    """缓存出分（零模型）：best 帧聚合；缓存缺失的球返回 None（调用方 WARNING 跳过）。"""
+
+    def _goal(self, d: Path, key: str, crops: list[str]) -> GoalCrops:
+        return GoalCrops(key=key, status=STATUS_OK, crops=tuple(crops), crop_scores=(), base_dir=d)
+
+    def test_best_frame_from_cache(self, tmp_path: Path) -> None:
+        d = tmp_path / "scorers"
+        _write_crops(d, ["c1.jpg", "c2.jpg", "c3.jpg"])
+        cache = {
+            _cache_key(d / "c1.jpg"): None,  # 无脸裁图跳过
+            _cache_key(d / "c2.jpg"): _cache_entry(50, (0.6, 0.8, 0.0)),  # 9@0.8
+            _cache_key(d / "c3.jpg"): _cache_entry(50, (0.0, 1.0, 0.0)),  # 9@1.0 全场最佳
+        }
+        m = score_goal_cached(
+            self._goal(d, "a.mp4#1.0", ["c1.jpg", "c2.jpg", "c3.jpg"]),
+            _gallery_vecs(),
+            cache,
+            MODEL_TAG,
+        )
+        assert m is not None
+        assert m.number == "9"
+        assert m.score == pytest.approx(1.0)
+        assert m.n_no_face == 1
+        assert m.n_face == 2
+
+    def test_all_crops_no_face_not_adopted(self, tmp_path: Path) -> None:
+        d = tmp_path / "scorers"
+        _write_crops(d, ["c1.jpg"])
+        cache = {_cache_key(d / "c1.jpg"): None}
+        m = score_goal_cached(
+            self._goal(d, "a.mp4#1.0", ["c1.jpg"]), _gallery_vecs(), cache, MODEL_TAG
+        )
+        assert m is not None
+        assert m.number is None
+        assert m.score is None
+        assert not adopt(m, THRESHOLD)
+
+    def test_missing_cache_entry_returns_none(self, tmp_path: Path) -> None:
+        d = tmp_path / "scorers"
+        _write_crops(d, ["c1.jpg", "c2.jpg"])
+        cache = {_cache_key(d / "c1.jpg"): _cache_entry(50, (1.0, 0.0, 0.0))}  # c2 未缓存
+        m = score_goal_cached(
+            self._goal(d, "a.mp4#1.0", ["c1.jpg", "c2.jpg"]), _gallery_vecs(), cache, MODEL_TAG
+        )
+        assert m is None
+
+    def test_missing_crop_file_returns_none(self, tmp_path: Path) -> None:
+        d = tmp_path / "scorers"
+        _write_crops(d, ["c1.jpg"])
+        cache = {_cache_key(d / "c1.jpg"): _cache_entry(50, (1.0, 0.0, 0.0))}
+        m = score_goal_cached(
+            self._goal(d, "a.mp4#1.0", ["c1.jpg", "ghost.jpg"]), _gallery_vecs(), cache, MODEL_TAG
+        )
+        assert m is None
+
+
+class TestEvaluate:
+    """三指标：覆盖率/采纳误指认率/人裁负担（含分母 0 边界与真值无号被采纳计误）。"""
+
+    def _m(self, number: str | None, score: float | None) -> GoalMatch:
+        return GoalMatch(number, score, 0.5 if score is not None else None, 1, 1, 0, 0)
+
+    def _inputs(self) -> tuple[dict[str, GoalMatch], dict[str, Truth], list[str]]:
+        results = {
+            "k1": self._m("7", 0.9),  # 半截篮有号 7，采纳且正确
+            "k2": self._m("9", 0.9),  # 半截篮有号 7，采纳但错号 → 误指认
+            "k3": self._m("9", 0.3),  # 半截篮有号 9，阈值下未采纳
+            "k4": self._m("7", 0.9),  # 真值无号（对方），被采纳 → 误指认
+            "k5": self._m(None, None),  # 真值无号（便服），无脸未采纳
+            "k6": self._m("9", 0.9),  # 不可判，被采纳（不进误指认率分母）
+            # k7 不可判且未出分（缓存缺失跳过）
+        }
+        truth = {
+            "k1": Truth(TRUTH_OURS, "7"),
+            "k2": Truth(TRUTH_OURS, "7"),
+            "k3": Truth(TRUTH_OURS, "9"),
+            "k4": Truth(TRUTH_NO_NUMBER, None),
+            "k5": Truth(TRUTH_NO_NUMBER, None),
+            "k6": Truth(TRUTH_UNJUDGEABLE, None),
+            "k7": Truth(TRUTH_UNJUDGEABLE, None),
+        }
+        scope = ["k1", "k2", "k3", "k4", "k5", "k6", "k7"]
+        return results, truth, scope
+
+    def test_metrics(self) -> None:
+        results, truth, scope = self._inputs()
+        report = evaluate(results, truth, scope, THRESHOLD)
+        assert report.n_ours == 3
+        assert report.n_no_number == 2
+        assert report.n_unjudgeable == 2
+        assert report.n_skipped == 1  # k7 未出分
+        # 采纳：k1/k2/k4/k6 → 覆盖率 4/7；人裁负担 = 1 - 覆盖率
+        assert report.n_adopted == 4
+        assert report.coverage == pytest.approx(4 / 7)
+        assert report.human_burden == pytest.approx(3 / 7)
+        # 误指认率：判得的采纳球 = k1/k2/k4，其中 k2 错号 + k4 真值无号被采纳 → 2/3
+        assert report.n_adopted_judged == 3
+        assert report.n_errors == 2
+        assert report.adopt_error_rate == pytest.approx(2 / 3)
+        assert report.n_adopted_unjudgeable == 1  # 单列不进分母
+        assert len(report.rows) == 7
+
+    def test_no_number_adopted_counts_as_error(self) -> None:
+        # 契约点：真值无号球被采纳也算误指认（k4）
+        results, truth, scope = self._inputs()
+        report = evaluate(results, truth, scope, THRESHOLD)
+        row4 = next(r for r in report.rows if r.key == "k4")
+        assert row4.adopted
+        assert row4.correct is None  # correct 仅有号球有意义；误指认经 n_errors 体现
+        assert report.n_errors == 2  # k2 错号 + k4 真值无号被采纳
+
+    def test_rows_content(self) -> None:
+        results, truth, scope = self._inputs()
+        report = evaluate(results, truth, scope, THRESHOLD)
+        row1 = next(r for r in report.rows if r.key == "k1")
+        assert row1.adopted and row1.correct is True
+        row2 = next(r for r in report.rows if r.key == "k2")
+        assert row2.adopted and row2.correct is False  # 采纳但错号
+        row3 = next(r for r in report.rows if r.key == "k3")
+        assert not row3.adopted and row3.correct is None
+        assert row3.top_number == "9" and row3.score == pytest.approx(0.3)  # 不过闸也入分布
+        row7 = next(r for r in report.rows if r.key == "k7")
+        assert row7.top_number is None and row7.score is None and not row7.adopted
+
+    def test_confusion_matrix(self) -> None:
+        results, truth, scope = self._inputs()
+        report = evaluate(results, truth, scope, THRESHOLD)
+        # 真值 7：k1→7、k2→9；真值 9：k3→9（不过闸 top-1 全量入矩阵）
+        assert report.confusion == {"7": {"7": 1, "9": 1}, "9": {"9": 1}}
+
+    def test_zero_scope_rates_none(self) -> None:
+        report = evaluate({}, {}, [], THRESHOLD)
+        assert report.coverage is None
+        assert report.human_burden is None
+        assert report.adopt_error_rate is None
+
+    def test_zero_judged_adopted_error_rate_none(self) -> None:
+        # Arrange：只有不可判球被采纳 → 误指认率分母 0
+        results = {"k1": self._m("9", 0.9)}
+        truth = {"k1": Truth(TRUTH_UNJUDGEABLE, None)}
+        report = evaluate(results, truth, ["k1"], THRESHOLD)
+        assert report.n_adopted == 1
+        assert report.n_adopted_judged == 0
+        assert report.adopt_error_rate is None
+        assert report.coverage == pytest.approx(1.0)
+
+    def test_render_markdown_content(self) -> None:
+        results, truth, scope = self._inputs()
+        report = evaluate(results, truth, scope, THRESHOLD)
+        md = render_markdown(report, MODEL_TAG, THRESHOLD)
+        assert "覆盖率" in md
+        assert "57.1%" in md  # 4/7
+        assert "采纳误指认率" in md
+        assert "66.7%" in md  # 2/3
+        assert "人裁负担" in md
+        assert "42.9%" in md  # 3/7
+        assert "达标线" in md
+        assert "混淆矩阵" in md
+        assert "| k1 |" in md  # 逐球分布含全部入统球（不过闸）
+        assert "| k7 |" in md
+
+
+class TestMainEvaluateCli:
+    """--evaluate 端到端：纯缓存出报告；零模型（build_face_detector 永不被调）。"""
+
+    def _setup(self, tmp_path: Path) -> dict[str, Path]:
+        photos = _write_photos(tmp_path / "photos", {"07": ["p7a.jpg"], "9": ["p9a.jpg"]})
+        save_face_cache(
+            photos / PHOTO_FACE_CACHE_NAME,
+            MODEL_TAG,
+            {
+                _cache_key(photos / "07" / "p7a.jpg"): _cache_entry(300, (1.0, 0.0, 0.0)),
+                _cache_key(photos / "9" / "p9a.jpg"): _cache_entry(300, (0.0, 1.0, 0.0)),
+            },
+        )
+        scorers = tmp_path / "scorers"
+        crops = [f"c{i}.jpg" for i in range(1, 7)]
+        _write_crops(scorers, crops)
+        cand = _write_candidates(
+            scorers / "scorer_candidates.json",
+            [
+                {"key": f"a.mp4#{float(i)}", "status": "OK", "crops": [f"c{i}.jpg"]}
+                for i in range(1, 7)
+            ],
+        )
+        save_face_cache(
+            scorers / FACE_CACHE_NAME,
+            MODEL_TAG,
+            {
+                _cache_key(scorers / "c1.jpg"): _cache_entry(50, (1.0, 0.0, 0.0)),  # 7 采纳正确
+                _cache_key(scorers / "c2.jpg"): _cache_entry(50, (0.0, 1.0, 0.0)),  # 9 采纳错号
+                _cache_key(scorers / "c3.jpg"): _cache_entry(50, (0.3, 0.1, 1.0)),  # 阈值下
+                _cache_key(scorers / "c4.jpg"): _cache_entry(50, (1.0, 0.0, 0.0)),  # 无号被采纳
+                _cache_key(scorers / "c5.jpg"): _cache_entry(50, (0.0, 1.0, 0.0)),  # 不可判采纳
+                _cache_key(scorers / "c6.jpg"): None,  # 无脸
+            },
+        )
+        roster = tmp_path / "roster.json"
+        roster.write_text(
+            json.dumps(
+                {
+                    "session": "s",
+                    "confirmed": True,
+                    "players": [
+                        {"tag": "白7", "name": "", "team": "半截篮"},
+                        {"tag": "白9", "name": "", "team": "半截篮"},
+                        {"tag": "白色中锋", "name": "", "team": "半截篮"},
+                        {"tag": "黑3", "name": "", "team": "地平线"},
+                        {"tag": "红T恤-A", "name": "", "team": "便服"},
+                    ],
+                    "assignments": {
+                        "a.mp4#1.0": "白7",
+                        "a.mp4#2.0": "白7",
+                        "a.mp4#3.0": "白9",
+                        "a.mp4#4.0": "黑3",
+                        "a.mp4#5.0": "白色中锋",
+                        "a.mp4#6.0": "红T恤-A",
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps(
+                {
+                    "goals": [
+                        {"file": "a.mp4", "anchor_time": float(i), "status": "confirmed"}
+                        for i in range(1, 7)
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "photos": photos,
+            "candidates": cand,
+            "roster": roster,
+            "goals": goals,
+            "out": tmp_path / "cascade_eval_report.md",
+        }
+
+    def _argv(self, paths: dict[str, Path]) -> list[str]:
+        return [
+            "--photos",
+            str(paths["photos"]),
+            "--candidates",
+            str(paths["candidates"]),
+            "--evaluate",
+            "--roster",
+            str(paths["roster"]),
+            "--goals",
+            str(paths["goals"]),
+            "--out",
+            str(paths["out"]),
+        ]
+
+    def test_end_to_end_zero_model(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        paths = self._setup(tmp_path)
+
+        def _forbidden() -> fms.FaceDetector:
+            raise AssertionError("evaluate 不得加载模型")
+
+        monkeypatch.setattr(fms, "build_face_detector", _forbidden)
+        rc = main(self._argv(paths))
+        assert rc == 0
+        assert "insightface" not in sys.modules  # 零模型零网络
+        md = paths["out"].read_text(encoding="utf-8")
+        # 入统 6 球；采纳 k1/k2/k4/k5 → 覆盖率 4/6；误指认 k2 错号+k4 无号被采纳 → 2/3
+        assert "覆盖率" in md and "66.7%" in md
+        assert "采纳误指认率" in md
+        assert "人裁负担" in md and "33.3%" in md
+        assert "| a.mp4#1.0 |" in md
+
+    def test_missing_crop_cache_returns_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        paths = self._setup(tmp_path)
+        (paths["candidates"].parent / FACE_CACHE_NAME).unlink()
+        monkeypatch.setattr(fms, "build_face_detector", lambda: FakeDetector({}))
+        rc = main(self._argv(paths))
+        assert rc == 1  # 缓存文件缺失显式报错（提示先跑匹配）
+        assert not paths["out"].exists()
+
+    def test_missing_photo_cache_returns_1(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        paths = self._setup(tmp_path)
+        (paths["photos"] / PHOTO_FACE_CACHE_NAME).unlink()
+        monkeypatch.setattr(fms, "build_face_detector", lambda: FakeDetector({}))
         rc = main(self._argv(paths))
         assert rc == 1
         assert not paths["out"].exists()
