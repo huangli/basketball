@@ -1788,3 +1788,214 @@ class TestClean:
         assert rc == 1
         assert (src / "a.mp4").is_file()
         assert (tmp_path / "output" / "s1" / "x.mp4").is_file()
+
+
+class TestDefaultSession:
+    """--session 可省略（docs/default-session/spec.md）：
+
+    score 缺省取素材目录 basename 且成功后写当前场次指针（dry-run 不写）；
+    people/build/photo 缺省读指针；显式 --session 永远优先且不改写指针；
+    指针缺失/损坏/version 不符/session 空全部显式失败（不猜场次）。
+    """
+
+    def _pointer_path(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        return tmp_path / "work" / "current_session.json"
+
+    def _write_pointer(self, tmp_path: pathlib.Path, session: str = SESSION) -> None:
+        _write_json(
+            self._pointer_path(tmp_path),
+            {
+                "version": 1,
+                "session": session,
+                "updated_at": "2026-08-29T00:00:00",
+                "source": "score",
+            },
+        )
+
+    def _setup_people_batch(self, session_dir: pathlib.Path) -> pathlib.Path:
+        """备好现行布局批次 2 前置产物（同 TestPeople._setup_batch），返回 rawdir。"""
+        _write_json(session_dir / "goals_batch2.json", _goals_payload(2))
+        _write_json(session_dir / "candidates_batch2.json", [])
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    # ---- score 缺省场次 ----
+
+    def test_score_default_session_basename(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Act：不带 --session，场次 = 素材目录 basename
+        rc = video.main(["score", "素材目录"])
+        # Assert
+        assert rc == 0
+        assert run_recorder[0][0] == [
+            sys.executable,
+            str(SCRIPT_DIR / "run_session.py"),
+            "素材目录",
+            "--session",
+            "素材目录",
+        ]
+
+    def test_score_writes_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        rc = video.main(["score", "素材目录"])
+        assert rc == 0
+        pointer = json.loads(self._pointer_path(tmp_path).read_text(encoding="utf-8"))
+        assert pointer["version"] == 1
+        assert pointer["session"] == "素材目录"
+
+    def test_score_explicit_session_also_writes_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        rc = video.main(["score", "素材目录", "--session", SESSION])
+        assert rc == 0
+        pointer = json.loads(self._pointer_path(tmp_path).read_text(encoding="utf-8"))
+        assert pointer["session"] == SESSION
+
+    def test_score_dry_run_no_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        rc = video.main(["score", "素材目录", "--dry-run"])
+        assert rc == 0
+        assert not self._pointer_path(tmp_path).exists()
+
+    def test_score_root_srcdir_empty_name(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # 盘符根 basename 为空 → 显式失败（不猜场次），且未发出任何子进程
+        rc = video.main(["score", "/"])
+        assert rc == 1
+        assert run_recorder == []
+
+    # ---- people/build/photo 读指针 ----
+
+    def test_people_reads_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        rawdir = self._setup_people_batch(session_dir)
+        self._write_pointer(tmp_path)
+        rc = video.main(["people", "--rawdir", str(rawdir)])
+        assert rc == 0
+        # 确认页步骤带解析出的场次
+        page_cmd = run_recorder[-1][0]
+        assert page_cmd[page_cmd.index("--session") + 1] == SESSION
+
+    def test_explicit_session_overrides_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        rawdir = self._setup_people_batch(session_dir)
+        self._write_pointer(tmp_path, session="other")
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        assert rc == 0
+        page_cmd = run_recorder[-1][0]
+        assert page_cmd[page_cmd.index("--session") + 1] == SESSION
+        # 显式覆盖只是临时的：指针不被 people 改写
+        pointer = json.loads(self._pointer_path(tmp_path).read_text(encoding="utf-8"))
+        assert pointer["session"] == "other"
+
+    def test_build_reads_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        _write_json(session_dir / "goals_batch1.json", _goals_payload())
+        _write_json(session_dir / "candidates_batch1.json", [])
+        _write_json(session_dir / "session_facts.json", _facts_payload())
+        # 自动模式 ④ 的产物由夹具代写（mock 子进程不产真文件，同 TestBuildAuto 口径）
+        _write_json(
+            session_dir / "auto_roster.json",
+            {
+                "confirmed": False,
+                "players": [{"tag": "A", "name": "", "team": "黑"}],
+                "assignments": {format_key("f0.mp4", 0.5): "A"},
+            },
+        )
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        self._write_pointer(tmp_path)
+        rc = video.main(["build", "--rawdir", str(rawdir)])
+        assert rc == 0
+        assert run_recorder  # 有子进程发出即证明场次解析到了 s1（否则目录不存在会失败）
+
+    def test_photo_apply_reads_pointer(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        self._write_pointer(tmp_path)
+        rc = video.main(["photo", "--apply"])
+        assert rc == 0
+        cmd = run_recorder[0][0]
+        assert cmd[cmd.index("--session") + 1] == SESSION
+
+    # ---- 指针异常 ----
+
+    def test_missing_pointer_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.ERROR)
+        rc = video.main(["people"])
+        assert rc == 1
+        assert run_recorder == []
+        assert "--session" in caplog.text
+
+    def test_corrupt_pointer_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        p = self._pointer_path(tmp_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("{不是合法JSON", encoding="utf-8")
+        rc = video.main(["people"])
+        assert rc == 1
+        assert run_recorder == []
+
+    def test_pointer_bad_version_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        _write_json(self._pointer_path(tmp_path), {"version": 999, "session": SESSION})
+        rc = video.main(["people"])
+        assert rc == 1
+        assert run_recorder == []
+
+    def test_pointer_empty_session_exit1(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        tmp_path: pathlib.Path,
+    ) -> None:
+        _write_json(self._pointer_path(tmp_path), {"version": 1, "session": ""})
+        rc = video.main(["people"])
+        assert rc == 1
+        assert run_recorder == []

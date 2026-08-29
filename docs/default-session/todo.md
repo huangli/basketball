@@ -1,0 +1,21 @@
+# Todo: CLI 默认场次（--session 可省略）
+
+- [x] 1. 失败测试先行：`tests/test_video.py` 追加 TestDefaultSession
+  - Acceptance: 覆盖 spec 测试策略全部用例，实现前运行相关用例全红
+  - Verify: `pytest tests/test_video.py -q -k default_session` 见红
+  - Files: tests/test_video.py
+- [x] 2. 指针读写 + 解析 helper（save/load_current_session、resolve_session、_resolve_score_session）
+  - Acceptance: 缺失/损坏/version 不符/空 basename 全部显式失败
+  - Verify: 对应测试转绿
+  - Files: scripts/video.py
+- [x] 3. argparse 去 required + 四个 _cmd_* 改走解析 + score 写指针
+  - Acceptance: 显式 --session 路径零行为变更（既有测试全绿）
+  - Verify: `pytest tests/test_video.py -q` 全绿
+  - Files: scripts/video.py
+- [x] 4. 质量关口：ruff format + ruff check --fix + pytest -q 全绿（--fix 后复核 diff）
+  - Files: scripts/video.py、tests/test_video.py
+- [x] 5. 文档同步：使用手册.html、AGENTS.md
+  - Verify: spec-reviewer 子代理自审无阻断问题（review01.md：通过，S1-S3 措辞建议已回改）
+  - Files: 使用手册.html、AGENTS.md
+- [x] 6. review01.md 存档 + 分逻辑 commit（只 commit 不 push）
+  - Files: docs/default-session/review01.md

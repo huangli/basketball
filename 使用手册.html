@@ -72,16 +72,17 @@
 </div>
 
 <h2>〇、命令卡（照抄即用）</h2>
-<pre>video score "20260805车百鼎" --session 20260805_车百鼎  <span class="c"># ① 检测：几个小时，挂着跑</span>
+<pre>video score "20260805车百鼎" --session 20260805_车百鼎  <span class="c"># ① 检测：几个小时，挂着跑；跑完自动记住当前场次，后面命令都不用再写 --session</span>
 <span class="c"># ② 人工：浏览器标注（见下），导出 goals_batch1.json（batch2 页面就导出 goals_batch2.json）移到 work\20260805_车百鼎\</span>
-video build --session 20260805_车百鼎                    <span class="c"># ③ 出片：颜色分队集锦+每球独立片段+自动个人合集，成品在 output\20260805_车百鼎\</span>
+video build                                             <span class="c"># ③ 出片：颜色分队集锦+每球独立片段+自动个人合集，成品在 output\20260805_车百鼎\</span>
 <span class="c"># ④ 可选认人（要实名/分队合集才做）：</span>
-video people --session 20260805_车百鼎 --batch 1         <span class="c">#   认人：机器几分钟；逐批跑（--batch 2、3……）</span>
+video people --batch 1                                  <span class="c">#   认人：机器几分钟；逐批跑（--batch 2、3……）</span>
 <span class="c">#   人工：浏览器确认认人（有预填时可先点「接受全部号码预填」），导出 roster.json 移到 work\20260805_车百鼎\</span>
-video build --session 20260805_车百鼎 --all              <span class="c">#   认人后重跑出实名合集：约 20 分钟</span>
-video photo --session 20260805_车百鼎                    <span class="c"># ⑤ 照片（可选）：页面选完导出后加 --apply 落盘</span></pre>
+video build --all                                       <span class="c">#   认人后重跑出实名合集：约 20 分钟</span>
+video photo                                             <span class="c"># ⑤ 照片（可选）：页面选完导出后加 --apply 落盘</span></pre>
 <ul>
-  <li><b>换新场次</b>：score 换两处（素材目录名 + 场次 ID），其余命令只换场次 ID；场次 ID 规则 <code>日期_对手名</code>（如 <code>20260805_车百鼎</code>）。</li>
+  <li><b>换新场次</b>：score 换两处（素材目录名 + 场次 ID），跑完当前场次自动切到新场次，后续命令照旧不带 --session；场次 ID 规则 <code>日期_对手名</code>（如 <code>20260805_车百鼎</code>）。素材目录名本身就符合场次 ID 规则时，score 的 <code>--session</code> 也能省（缺省取目录名）。</li>
+  <li><b>--session 都能省</b>（2026-08-29 起）：score 成功后把场次记进 <code>work\current_session.json</code>，people/build/photo 缺省读它；想临时操作别的场次，那条命令显式加 <code>--session &lt;场次&gt;</code> 即可（不会改动当前场次记录）。</li>
   <li><b>中断/报错</b>：重跑同一条命令，已完成的阶段自动跳过。</li>
   <li>各步细节、按键表、常见问题往下翻（编号跟顶部流程图走、含人工步，正文「第 N 步」另算）。</li>
 </ul>
@@ -98,7 +99,7 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 <h3>第 1 步：检测 <span class="tag">机器</span></h3>
 <pre>video score "20260805车百鼎" --session 20260805_车百鼎</pre>
 <ul>
-  <li><b>场次 ID</b> 规则：<code>日期_对手名</code>（如 <code>20260805_车百鼎</code>），之后所有命令都用它。</li>
+  <li><b>场次 ID</b> 规则：<code>日期_对手名</code>（如 <code>20260805_车百鼎</code>），之后所有命令都用它。素材目录名本身符合规则时 <code>--session</code> 可省（缺省取目录名）。<b>score 成功后自动把本场记为当前场次</b>（存在 <code>work\current_session.json</code>），之后的 people/build/photo 都不用再写 <code>--session</code>。</li>
   <li>全自动串联：探测规格 → 抽帧 → 双模型检测 → 候选挖掘 → 筐轨迹 → 切审核片段 → 生成标注页。CPU 检测约 <b>1.1 秒/帧</b>，整场要跑几个小时，挂着就行。</li>
   <li><b>耗时实测</b>（车百鼎场次：148 个短片 / 37 分钟素材 / 4K）：抽帧约 <b>30 分钟</b>（全场只跑一次）；之后每批（约 50 个文件）约 <b>1.5～2 小时</b>；整场 3 批合计约 <b>6 小时</b>纯机器时间（本场按默认每批 50 文件切了 3 批，批数随素材量变化）。<b>2026-08-16 起筐检测走缓存免重复检测</b>，新场次整场预计再省约 2 小时。耗时与素材量成正比，建议睡前挂上。</li>
   <li>文件多会自动切批（batch1、batch2……），中断/报错后直接<b>重跑同一条命令</b>，已完成的阶段自动跳过。</li>
@@ -128,7 +129,7 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 
 <h3>第 3 步（可选）：认人 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
 <p><b>2026-08-22 起认人是可选项</b>：不认人也能直接出片（见第 4 步）。要<b>实名个人合集和分队集锦</b>才做这步。</p>
-<pre>video people --session 20260805_车百鼎 --batch 1</pre>
+<pre>video people --batch 1</pre>
 <ul>
   <li>机器自动：轨迹法定位投篮者 → 多裁选帧（<b>质量闸自动拦废帧</b>：畸形框/无人框，2026-08-28 起）→ CLIP 聚类分组 → 生成确认页（首批实测约 <b>3 分钟</b>，进球多的批会久一些）。<b>K3 读号默认关</b>（2026-08-27 定案、08-28 落地，零 token 路线）：球衣有号场次想自动读号预填，加 <code>--read-numbers</code> 显式开（token 成本每批 ≤ 进球数×3 张图、结果按裁图缓存不重复扣）。人脸匹配预填同样默认关（2026-08-29 全场评测不达标，立哥定纯人工；想试加 <code>--photo-match</code>）。</li>
   <li><b>球员名单维护（一次配置长期受益）</b>：<code>photos\names.json</code> 里号码=姓名一行一个（如 <code>"6": "黄立"</code>），下次跑 people 确认页按钮直接就是真人名（白6=黄立），合集出 <code>半截篮_黄立_进球合集.mp4</code>。加新队员：加一行名单即可。（可选）<code>photos\&lt;号码&gt;\</code> 扔两张<b>单人正脸照</b>——<b>照片只在开 <code>--photo-match</code>（人脸预填，默认关）时才被使用</b>，纯人工默认流程不用扔照片。名单和照片都只在本地、不进 git。</li>
@@ -146,7 +147,7 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 <div class="tip"><b>提示</b>预填（聚类分组、读号、颜色分队）都可能错，一律可一键改；球衣互换时读号必错，以画面为准。</div>
 
 <h3>第 4 步：出片 <span class="tag">机器</span></h3>
-<pre>video build --session 20260805_车百鼎</pre>
+<pre>video build</pre>
 <ul>
   <li><b>没认人（或认人没确认导出）也能直接出片</b>（2026-08-22 起），一条命令出三样：
     <code>队伍_黑_进球集锦.mp4</code> / <code>队伍_白_进球集锦.mp4</code>（按球衣颜色自动分队，<b>允许分错</b>——撞色/便服多的场次会分不准）、
@@ -161,13 +162,13 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 </ul>
 
 <h3>第 5 步（可选）：精彩照片 <span class="tag">机器</span>+<span class="tag blue">人工</span></h3>
-<pre>video photo --session 20260805_车百鼎</pre>
+<pre>video photo</pre>
 <ul>
   <li>机器自动：用检测缓存打分（球速/人球交互/主体大小/球高度）→ 时间分桶选约 200 张 → 抽帧防抖 + 自动构图裁切放大（148 个 4K 短片规模约 <b>10～30 分钟</b>，可断点续跑——重跑同一条命令，视频清单没变就跳过抽帧）。</li>
   <li>浏览器打开 <code>work\20260805_车百鼎\photos\photo_page.html</code>：瀑布流点选（再点取消），双击看原图，<kbd>←</kbd><kbd>→</kbd>/数字键翻页，<kbd>A</kbd> 全选本页，回车导出。</li>
   <li>导出得到 <code>photo_selections.json</code>，<b>移动</b>到 <code>work\20260805_车百鼎\photos\</code>，然后落盘：</li>
 </ul>
-<pre>video photo --session 20260805_车百鼎 --apply</pre>
+<pre>video photo --apply</pre>
 <ul>
   <li>成品在 <code>output\20260805_车百鼎\照片精选\</code>：<code>照片_XXX_视频序号_时刻.jpg</code>（1080p，比例跟随素材）。</li>
 </ul>
@@ -179,13 +180,13 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
     <td><code>video score &lt;目录&gt;</code></td>
     <td>检测链路，一路跑到生成标注页</td>
     <td>整场约 <b>6 小时</b>（抽帧 30 分钟只跑一次 + 每批 1.5～2 小时），可断点续跑；<b>新场次筐检测走缓存，预计约 4 小时</b></td>
-    <td><code>--session</code> 必填；<code>--dry-run</code> 只打印；<code>--force</code> 全部重算；<code>--batch-size</code> 每批文件数</td>
+    <td><code>--session</code> 可省（缺省=素材目录名；成功后记为当前场次）；<code>--dry-run</code> 只打印（不记当前场次）；<code>--force</code> 全部重算；<code>--batch-size</code> 每批文件数</td>
   </tr>
   <tr>
     <td><code>video people</code></td>
     <td>认人链路：裁图 → 聚类 → 确认页</td>
     <td>机器首批实测约 <b>3 分钟</b>（进球多的批更久）；人工确认每批几分钟</td>
-    <td><code>--session</code> 必填；<code>--batch K</code> 指定批次（建议逐批）；K3 读号<b>默认关</b>（2026-08-27 定案零 token），<code>--read-numbers</code> 显式开；人脸预填默认关，<code>--photo-match</code> 显式开</td>
+    <td><code>--session</code> 可省（缺省=当前场次）；<code>--batch K</code> 指定批次（建议逐批）；K3 读号<b>默认关</b>（2026-08-27 定案零 token），<code>--read-numbers</code> 显式开；人脸预填默认关，<code>--photo-match</code> 显式开</td>
   </tr>
   <tr>
     <td><code>video build</code></td>
@@ -236,6 +237,9 @@ video photo --session 20260805_车百鼎                    <span class="c"># �
 
 <h3>想出实名合集但 roster 未确认</h3>
 <p>2026-08-22 起认人改为可选：<b>没认人不会再被拒</b>，build 会直接按球衣颜色分队出队伍集锦（黑/白，便服不出）+进球片段+自动个人合集。只有认人后用 <code>--all</code>/<code>--scorer</code>/<code>--team</code> 出实名合集时，才需要确认页导出的 <code>roster.json</code> 已位于 <code>work\&lt;场次&gt;\</code> 下（旧版页面导出的 <code>roster_&lt;场次&gt;.json</code> 需先改名）。</p>
+
+<h3>报错 <code>--session 未给且无当前场次记录</code></h3>
+<p>当前场次记录（<code>work\current_session.json</code>）还没有或被清掉了（<code>video clean</code> 会一起清）。先跑一场 <code>video score</code> 即自动重建；或者在这条命令上显式加 <code>--session &lt;场次&gt;</code>。</p>
 
 <h3>往已跑过的场次里补新视频</h3>
 <pre>video score "素材目录" --session 已存在场次 --fids 新视频fid1,新视频fid2</pre>

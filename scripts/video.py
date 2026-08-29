@@ -12,11 +12,14 @@
 依赖：scripts/pipe_common.py（read_json/atomic_write_json/configure_logging/new_run_id）、
     scripts/errors.py、scripts/roster.py（validate_roster）；命令拼装契约见
     docs/video-cli/spec.md（逐字照做，不改底层脚本任何行为）。
-典型调用（任意目录可运行；启动后自动 chdir 到仓库根，用户相对路径按启动目录解析）：
-    python scripts/video.py score <素材目录> --session 20260722
-    python scripts/video.py people --session 20260722 --batch 1
-    python scripts/video.py build --session 20260722 --all
-    python scripts/video.py photo --session 20260722 [--apply]
+典型调用（任意目录可运行；启动后自动 chdir 到仓库根，用户相对路径按启动目录解析；
+--session 均可省略：score 缺省取素材目录 basename 并记当前场次指针
+work/current_session.json，people/build/photo 缺省读指针，显式 --session 永远优先，
+docs/default-session/spec.md）：
+    python scripts/video.py score <素材目录> [--session 20260722]
+    python scripts/video.py people [--batch 1]
+    python scripts/video.py build --all
+    python scripts/video.py photo [--apply]
 """
 
 from __future__ import annotations
@@ -45,6 +48,10 @@ REPO_ROOT: Path = SCRIPT_DIR.parent  # 仓库根（work/ 等相对路径基准�
 WORK_ROOT: Path = Path("work")
 STATE_NAME: str = "video_cli.json"
 STATE_VERSION: int = 1
+# 当前场次指针（score 成功后写入；people/build/photo 缺省 --session 时读取，
+# 显式 --session 永远优先；docs/default-session/spec.md）
+CURRENT_SESSION_NAME: str = "current_session.json"
+CURRENT_SESSION_VERSION: int = 1
 # 照片库目录（people ②.5 照片匹配串接条件；docs/photo-roster/spec.md T6）
 PHOTOS_DIR: Path = Path("photos")
 # 号码→姓名全局名单（people ③自动注入 --players；用户维护，gitignore 随 photos/）
@@ -192,6 +199,78 @@ def save_state(session: str, state: dict[str, Any]) -> None:
     session_dir: Path = WORK_ROOT / session
     session_dir.mkdir(parents=True, exist_ok=True)
     atomic_write_json(session_dir / STATE_NAME, state, what=STATE_NAME)
+
+
+def save_current_session(session: str) -> None:
+    """把 score 的场次写为当前场次指针（people/build/photo 缺省 --session 时读取）。
+
+    仅 score 成功后调用（dry-run 不写，与 state 口径一致）；显式 --session 跑
+    people/build/photo 只是临时覆盖，不改写指针。
+    """
+    WORK_ROOT.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(
+        WORK_ROOT / CURRENT_SESSION_NAME,
+        {
+            "version": CURRENT_SESSION_VERSION,
+            "session": session,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "source": "score",
+        },
+        what=CURRENT_SESSION_NAME,
+    )
+
+
+def load_current_session() -> str:
+    """读当前场次指针；缺失/损坏/version 不符/session 空全部显式失败（不猜场次）。
+
+    Raises:
+        BasketballPipelineError: 指针缺失，或 version 不符 / session 非非空 str。
+        SchemaError: JSON 损坏（pipe_common.read_json 抛出）。
+
+    Returns:
+        当前场次 ID。
+    """
+    path: Path = WORK_ROOT / CURRENT_SESSION_NAME
+    if not path.is_file():
+        raise BasketballPipelineError(
+            f"--session 未给且无当前场次记录: {path}（先跑 score 或显式给 --session）"
+        )
+    data: Any = read_json(path, what=CURRENT_SESSION_NAME)
+    if not isinstance(data, dict) or data.get("version") != CURRENT_SESSION_VERSION:
+        raise BasketballPipelineError(
+            f"{path}: 指针版本不支持（期望 version={CURRENT_SESSION_VERSION}）"
+        )
+    session: Any = data.get("session")
+    if not isinstance(session, str) or not session:
+        raise BasketballPipelineError(f"{path}: session 必须是非空 str，实际 {session!r}")
+    return session
+
+
+def resolve_session(args: argparse.Namespace) -> str:
+    """people/build/photo 场次解析：显式 --session 优先，否则读当前场次指针。
+
+    Raises:
+        BasketballPipelineError: 两路皆缺或指针异常（不猜场次）。
+    """
+    if args.session:
+        return str(args.session)
+    return load_current_session()
+
+
+def _resolve_score_session(args: argparse.Namespace) -> str:
+    """score 场次解析：显式 --session 优先，否则取素材目录 basename。
+
+    Raises:
+        BasketballPipelineError: basename 为空（如盘符根，不猜场次）。
+    """
+    if args.session:
+        return str(args.session)
+    name: str = Path(args.srcdir).resolve().name
+    if not name:
+        raise BasketballPipelineError(
+            f"素材目录无有效 basename: {args.srcdir}（请显式给 --session）"
+        )
+    return name
 
 
 def resolve_rawdir(args_rawdir: str | None, state: dict[str, Any]) -> Path:
@@ -551,7 +630,11 @@ def _strip_flag(argv: list[str], flag: str) -> list[str]:
 
 
 def _cmd_score(args: argparse.Namespace) -> int:
-    """score：透传 run_session.py；成功后写 state（dry-run 不写）。"""
+    """score：透传 run_session.py；成功后写 state + 当前场次指针（dry-run 不写）。
+
+    --session 缺省取素材目录 basename（docs/default-session/spec.md）。
+    """
+    args.session = _resolve_score_session(args)
     cmd: list[str] = [
         sys.executable,
         str(SCRIPT_DIR / "run_session.py"),
@@ -587,6 +670,8 @@ def _cmd_score(args: argparse.Namespace) -> int:
     )
     save_state(args.session, state)
     logger.info("state 落盘: %s", WORK_ROOT / args.session / STATE_NAME)
+    save_current_session(args.session)
+    logger.info("当前场次指针: %s（session=%s）", WORK_ROOT / CURRENT_SESSION_NAME, args.session)
     return 0
 
 
@@ -597,7 +682,10 @@ def _cmd_people(args: argparse.Namespace) -> int:
     照片匹配允许失败降级——ERROR 留痕后继续，确认页照出（产物缺失剥
     --photo-matches，降级为无预填；docs/photo-roster/spec.md T6 串法、T12 换人脸
     matcher 后语义不变）。
+
+    --session 缺省读当前场次指针（docs/default-session/spec.md）。
     """
+    args.session = resolve_session(args)
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
     rawdir: Path = resolve_rawdir(args.rawdir, state)
@@ -760,7 +848,10 @@ def _cmd_build(args: argparse.Namespace) -> int:
     缺失或 confirmed=false → 自动模式（_cmd_build_auto，三产物链，认人可选化
     2026-08-22，spec: docs/build-auto-scorer/spec.md）；roster schema 损坏
     validate_roster 抛 SchemaError 显式失败（不降级不静默，rules.md §0.2）。
+
+    --session 缺省读当前场次指针（docs/default-session/spec.md）。
     """
+    args.session = resolve_session(args)
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
     rawdir: Path = resolve_rawdir(args.rawdir, state)
@@ -1159,7 +1250,10 @@ def _cmd_photo(args: argparse.Namespace) -> int:
 
     --apply 时只跑落盘段（selections 约定路径 work/<场次>/photos/photo_selections.json）；
     否则 rank + page 两步。rank 缺缓存/缺原片的文件由底层 WARNING 跳过。
+
+    --session 缺省读当前场次指针（docs/default-session/spec.md）。
     """
+    args.session = resolve_session(args)
     session_dir_or_die(args.session)
     steps: list[Step] = []
     if args.apply:
@@ -1363,7 +1457,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sc = sub.add_parser("score", help="检测链路：透传 run_session.py 至标注页生成")
     sc.add_argument("srcdir", help="原片目录（递归扫描 .mp4）")
-    sc.add_argument("--session", required=True, help="场次 ID")
+    sc.add_argument(
+        "--session", default=None, help="场次 ID（缺省取素材目录 basename；成功后记为当前场次）"
+    )
     sc.add_argument("--batch-size", type=int, default=None, help="每批文件数（缺省透传底层默认）")
     sc.add_argument("--fids", default="", help="逗号分隔 fid 清单（adhoc 模式）")
     sc.add_argument("--force", action="store_true", help="忽略断点产物全部重算")
@@ -1371,7 +1467,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=_cmd_score)
 
     pp = sub.add_parser("people", help="认人链路：裁图 → 聚类 → 确认页（逐批次）")
-    pp.add_argument("--session", required=True, help="场次 ID")
+    pp.add_argument(
+        "--session", default=None, help="场次 ID（缺省读当前场次指针 work/current_session.json）"
+    )
     pp.add_argument("--batch", type=int, default=None, help="限定单批次 K")
     pp.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
     pp.add_argument(
@@ -1411,7 +1509,9 @@ def _build_parser() -> argparse.ArgumentParser:
     pp.set_defaults(func=_cmd_people)
 
     bd = sub.add_parser("build", help="合成链路：build_highlight 全员/单人/单队/全量合集")
-    bd.add_argument("--session", required=True, help="场次 ID")
+    bd.add_argument(
+        "--session", default=None, help="场次 ID（缺省读当前场次指针 work/current_session.json）"
+    )
     bd.add_argument("--batch", type=int, default=None, help="限定单批次 K")
     bd.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
     grp = bd.add_mutually_exclusive_group()
@@ -1422,7 +1522,9 @@ def _build_parser() -> argparse.ArgumentParser:
     bd.set_defaults(func=_cmd_build)
 
     ph = sub.add_parser("photo", help="精彩照片：打分 → 抽帧裁切 → 确认页 / --apply 落盘精选")
-    ph.add_argument("--session", required=True, help="场次 ID")
+    ph.add_argument(
+        "--session", default=None, help="场次 ID（缺省读当前场次指针 work/current_session.json）"
+    )
     ph.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
     ph.add_argument("--total", type=int, default=None, help="候选目标张数（缺省透传底层 200）")
     ph.add_argument(
