@@ -900,6 +900,47 @@ class TestResolveOutSizes:
             video.resolve_out_sizes(session_dir)
 
 
+class TestCovers:
+    """covers 子命令：透传 gen_covers.py 的参数拼装（spec D4/SC4）。"""
+
+    def test_covers_scorer_command(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        rc = video.main(["covers", "--session", SESSION, "--scorer", "红-7"])
+        assert rc == 0
+        assert len(run_recorder) == 1
+        cmd = run_recorder[0][0]
+        assert cmd[0] == sys.executable
+        assert str(cmd[1]).endswith("gen_covers.py")
+        assert cmd[cmd.index("--session") + 1] == SESSION
+        assert cmd[cmd.index("--scorer") + 1] == "红-7"
+
+    def test_covers_default_no_filter(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # 无过滤缺省 = 等价 --all：不透传 --scorer/--team（gen_covers 内部按 无过滤=--all 处理）
+        rc = video.main(["covers", "--session", SESSION])
+        assert rc == 0
+        assert len(run_recorder) == 1
+        cmd = run_recorder[0][0]
+        assert "--scorer" not in cmd and "--team" not in cmd and "--batch" not in cmd
+
+    def test_covers_team_and_batch_flags(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        rc = video.main(["covers", "--session", SESSION, "--team", "半截篮", "--batch", "2"])
+        assert rc == 0
+        cmd = run_recorder[0][0]
+        assert cmd[cmd.index("--team") + 1] == "半截篮"
+        assert cmd[cmd.index("--batch") + 1] == "2"
+
+
 class TestBuild:
     """build：命令拼装、--all 展开、互斥、roster 缺失、错误传播。"""
 

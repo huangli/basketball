@@ -870,6 +870,28 @@ def _build_expand_all(session_dir: Path, known_keys: set[str]) -> list[tuple[str
     return pairs
 
 
+def _cmd_covers(args: argparse.Namespace) -> int:
+    """covers：为每条输出视频生成多张候选封面（薄封装 gen_covers.py）。
+
+    --session 缺省读当前场次指针（同 build）；其余旗标（--scorer/--team/--batch/--all）
+    原样透传 gen_covers。缺省无过滤 = 等价 build --all（不出"全员"总封面）。
+    """
+    args.session = resolve_session(args)
+    cmd: list[str] = [sys.executable, str(SCRIPT_DIR / "gen_covers.py"), "--session", args.session]
+    if args.rawdir:
+        cmd.extend(["--rawdir", args.rawdir])
+    if args.scorer:
+        cmd.extend(["--scorer", args.scorer])
+    if args.team:
+        cmd.extend(["--team", args.team])
+    if args.batch is not None:
+        cmd.extend(["--batch", str(args.batch)])
+    if args.all:
+        cmd.append("--all")
+    run_step(cmd)
+    return 0
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     """build：尺寸按 session_facts 主比例换算；按 roster 状态分派两条路径。
 
@@ -1582,6 +1604,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "半截篮集锦本已默认 4K，对该队为 no-op；未认人自动模式忽略",
     )
     bd.set_defaults(func=_cmd_build)
+
+    cv = sub.add_parser("covers", help="生成视频封面：每条输出视频多张候选（3:4 竖版，供挑选）")
+    cv.add_argument(
+        "--session", default=None, help="场次 ID（缺省读当前场次指针 work/current_session.json）"
+    )
+    cv.add_argument("--batch", type=int, default=None, help="限定单批次 K")
+    cv.add_argument("--rawdir", default=None, help="原片目录（缺省读 state.srcdir）")
+    grp = cv.add_mutually_exclusive_group()
+    grp.add_argument("--scorer", default="", help="单个人合集封面（tag 或姓名）")
+    grp.add_argument("--team", default="", help="单队伍集锦封面")
+    grp.add_argument(
+        "--all", action="store_true", help="全部产物封面（缺省行为，等价 build --all）"
+    )
+    cv.set_defaults(func=_cmd_covers)
 
     ph = sub.add_parser("photo", help="精彩照片：打分 → 抽帧裁切 → 确认页 / --apply 落盘精选")
     ph.add_argument(
