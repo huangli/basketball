@@ -71,6 +71,13 @@ RATIO_16_9: float = 16 / 9
 RATIO_4_3: float = 4 / 3
 OUT_16_9: str = "1920x1080"
 OUT_4_3: str = "1440x1080"
+# 4K 档（docs/build-4k/spec.md：半截篮集锦默认 4K + --4k 手动重出）
+OUT4K_16_9: str = "3840x2160"
+OUT4K_4_3: str = "2880x2160"
+# 本队队名（4K 默认档唯一受益队；--4k 对该队为幂等 no-op，spec D1/D3）
+OUR_TEAM: str = "半截篮"
+# --4k 手动重出的产物名后缀（透传 build_highlight --name-suffix，spec D2）
+FOUR_K_SUFFIX: str = "_4K"
 # 便服队不出分队集锦（build_highlight --team 便服 明文拒收退出 1；--all 展开时跳过）
 CASUAL_TEAM: str = "便服"
 # 多批次 build 的合并 goals 中间产物（work/<场次>/ 下，每次 build 重写——素材流动）
@@ -395,11 +402,15 @@ def confirmed_count(goals_path: Path) -> int:
     return sum(1 for g in data["goals"] if isinstance(g, dict) and g.get("status") == "confirmed")
 
 
-def resolve_out_size(session_dir: Path) -> str:
-    """读 session_facts.json 逐文件 width/height 主比例判定，换算输出尺寸。
+def resolve_out_sizes(session_dir: Path) -> tuple[str, str]:
+    """读 session_facts.json 逐文件 width/height 主比例判定，返回 (1080p 尺寸, 4K 尺寸)。
 
-    全部 ≈16:9（±1%）→ 1920x1080；全部 ≈4:3（±1%）→ 1440x1080；
+    全部 ≈16:9（±1%）→ ("1920x1080", "3840x2160")；
+    全部 ≈4:3（±1%）→ ("1440x1080", "2880x2160")；
     混比例或未知比例显式失败并列出各文件比例（混比例须分别合成，不自动选）。
+
+    Returns:
+        (1080p 尺寸, 4K 尺寸)，形如 ("1920x1080", "3840x2160")。
 
     Raises:
         BasketballPipelineError: 事实表缺失/损坏/无文件/比例混杂或未知。
@@ -438,9 +449,9 @@ def resolve_out_size(session_dir: Path) -> str:
         classes.add(cls)
         lines.append(f"  {name}: {width}x{height} 比例 {ratio:.4f}（{cls}）")
     if len(classes) == 1 and "16:9" in classes:
-        return OUT_16_9
+        return OUT_16_9, OUT4K_16_9
     if len(classes) == 1 and "4:3" in classes:
-        return OUT_4_3
+        return OUT_4_3, OUT4K_4_3
     detail: str = "\n".join(lines)
     raise BasketballPipelineError(
         f"素材比例混杂或未知（{sorted(classes)}），须按比例分别合成，CLI 不自动选:\n{detail}"
@@ -873,7 +884,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     session_dir: Path = session_dir_or_die(args.session)
     state: dict[str, Any] = load_state(args.session)
     rawdir: Path = resolve_rawdir(args.rawdir, state)
-    out_size: str = resolve_out_size(session_dir)
+    size_hd, size_4k = resolve_out_sizes(session_dir)
     batches: list[Batch] = _select_batches(discover_batches(session_dir), args.batch)
     roster_path: Path = session_dir / "roster.json"
     roster_confirmed: bool = False
@@ -881,15 +892,20 @@ def _cmd_build(args: argparse.Namespace) -> int:
         roster = validate_roster(read_json(roster_path, what="roster.json"), str(roster_path))
         roster_confirmed = roster.confirmed
     if roster_confirmed:
-        return _cmd_build_confirmed(args, session_dir, rawdir, out_size, batches, roster_path)
-    return _cmd_build_auto(args, session_dir, rawdir, out_size, batches)
+        return _cmd_build_confirmed(
+            args, session_dir, rawdir, size_hd, size_4k, batches, roster_path
+        )
+    if args.four_k:
+        logger.warning("未认人自动模式忽略 --4k（三件套口径不变；先认人再用 4K 档）")
+    return _cmd_build_auto(args, session_dir, rawdir, size_hd, batches)
 
 
 def _cmd_build_confirmed(
     args: argparse.Namespace,
     session_dir: Path,
     rawdir: Path,
-    out_size: str,
+    size_hd: str,
+    size_4k: str,
     batches: list[Batch],
     roster_path: Path,
 ) -> int:
@@ -897,6 +913,9 @@ def _cmd_build_confirmed(
 
     --all 展开 roster 逐人 + 逐队；多批次合并 goals 后每 filter 只调一次；
     收尾触发热图双风格（自动模式不触发，见 _cmd_build_auto）。
+
+    4K 档（docs/build-4k/spec.md）：半截篮 队伍集锦 默认 4K；--4k 手动重出
+    其余所选产物为 4K；半截篮步骤在 --4k 下为幂等 no-op（原名无后缀）。
     """
     filters: list[tuple[str, str]]
     if args.all:
@@ -937,12 +956,30 @@ def _cmd_build_confirmed(
             ]
             if roster_path.is_file():
                 base.extend(["--roster", str(roster_path)])
-            base.extend(["--rawdir", str(rawdir), "--out", out_size])
+            base.extend(["--rawdir", str(rawdir)])
             for flag, value in filters:
-                cmd: list[str] = [*base, flag, value] if flag else list(base)
+                # 4K 档：半截篮集锦默认 4K 原名；--4k 时其余步骤 4K+后缀；半截篮 no-op
+                step_out: str = size_hd
+                extra: list[str] = []
+                if flag == "--team" and value == OUR_TEAM:
+                    step_out = size_4k
+                    if args.four_k:
+                        logger.info("半截篮集锦已默认 4K，--4k 对 %s 为 no-op", OUR_TEAM)
+                elif args.four_k:
+                    step_out = size_4k
+                    extra = ["--name-suffix", FOUR_K_SUFFIX]
+                cmd: list[str] = [*base, "--out", step_out, *extra]
+                if flag:
+                    cmd.extend([flag, value])
                 title: str = (
                     f"{batch_label} 合成{(' ' + flag + ' ' + value) if flag else '（全员）'}"
                 )
+                if args.four_k or (flag == "--team" and value == OUR_TEAM):
+                    logger.info(
+                        "4K 步骤（--out %s，CPU 编码约为 1080p 的 3~4 倍耗时）: %s",
+                        step_out,
+                        title,
+                    )
                 if args.dry_run:
                     _log_dry_step(Step(title, tuple(cmd)))
                     dry_count += 1
@@ -960,9 +997,9 @@ def _cmd_build_confirmed(
                 (str(SCRIPT_DIR / "goal_heatmap.py"), "--sessiondir", str(session_dir)),
             )
         )
-        logger.info("DRY-RUN 共 %d 步（未执行，--out %s）", dry_count + 1, out_size)
+        logger.info("DRY-RUN 共 %d 步（未执行，1080p=%s / 4K=%s）", dry_count + 1, size_hd, size_4k)
     else:
-        logger.info("build 完成（%d 步，--out %s）", len(completed), out_size)
+        logger.info("build 完成（%d 步，1080p=%s / 4K=%s）", len(completed), size_hd, size_4k)
         _run_heatmap_step(session_dir, roster_path)
     return 0
 
@@ -1537,6 +1574,13 @@ def _build_parser() -> argparse.ArgumentParser:
     grp.add_argument("--team", default="", help="单队伍合集")
     grp.add_argument("--all", action="store_true", help="roster 逐人 + 逐队全量合集")
     bd.add_argument("--dry-run", action="store_true", help="只打印不执行")
+    bd.add_argument(
+        "--4k",
+        dest="four_k",
+        action="store_true",
+        help="手动重出 4K：所选产物（--scorer/--team/--all 或不带=全员）出 4K 并加 _4K 后缀；"
+        "半截篮集锦本已默认 4K，对该队为 no-op；未认人自动模式忽略",
+    )
     bd.set_defaults(func=_cmd_build)
 
     ph = sub.add_parser("photo", help="精彩照片：打分 → 抽帧裁切 → 确认页 / --apply 落盘精选")

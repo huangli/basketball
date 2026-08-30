@@ -92,12 +92,13 @@ KNOWN_STATUSES: frozenset[str] = frozenset(
 SILENT_AUDIO_SRC: str = "anullsrc=channel_layout=stereo:sample_rate=48000"
 
 
-def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool]:
+def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool, str]:
     """解析命令行参数。
 
     Returns:
         (goals.json 路径, scorer 标签, 原片目录, 输出宽, 输出高, roster.json 路径,
-        team 队别, per_goal 旗标, allow_unconfirmed 旗标；scorer/team 空串表示未给，
+        team 队别, per_goal 旗标, allow_unconfirmed 旗标, name_suffix 产物名后缀；
+        scorer/team/name_suffix 空串表示未给，
         roster 空串表示无 roster，原片目录默认 RAW_DIR，尺寸默认 OUT_W×OUT_H，
         两个旗标默认 False)。
     """
@@ -110,6 +111,7 @@ def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool]:
     team: str = ""
     per_goal: bool = False
     allow_unconfirmed: bool = False
+    name_suffix: str = ""
     args: list[str] = sys.argv[1:]
     i: int = 0
     while i < len(args):
@@ -132,6 +134,9 @@ def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool]:
         elif args[i] == "--team" and i + 1 < len(args):
             team = args[i + 1]
             i += 2
+        elif args[i] == "--name-suffix" and i + 1 < len(args):
+            name_suffix = args[i + 1]
+            i += 2
         elif args[i] == "--per-goal":
             per_goal = True
             i += 1
@@ -140,7 +145,18 @@ def parse_argv() -> tuple[str, str, str, int, int, str, str, bool, bool]:
             i += 1
         else:
             i += 1
-    return goals, scorer, rawdir, out_w, out_h, roster, team, per_goal, allow_unconfirmed
+    return (
+        goals,
+        scorer,
+        rawdir,
+        out_w,
+        out_h,
+        roster,
+        team,
+        per_goal,
+        allow_unconfirmed,
+        name_suffix,
+    )
 
 
 def load_roster(roster_path: str) -> Roster:
@@ -253,6 +269,40 @@ def select_goals(
 
     # ①：全员（stem 同③）
     return list(goals), "个人_全员_进球合集"
+
+
+# 产物主名尾部类型词（--name-suffix 插入锚点，review02-B4 钉死中段插入）
+_STEM_TYPE_WORDS: tuple[str, str] = ("进球集锦", "进球合集")
+
+
+def apply_name_suffix(out_stem: str, name_suffix: str) -> str:
+    """在产物主名尾部类型词（进球集锦/进球合集）之前插入后缀。
+
+    用于 video.py --4k 手动重出（docs/build-4k/spec.md D2）：4K 产物与 1080p
+    版并存（如 队伍_X_4K_进球集锦），防止后续 --all 重跑静默覆盖回 1080p。
+
+    Args:
+        out_stem: select_goals 返回的产物主名。
+        name_suffix: 后缀串（含前导下划线，如 "_4K"）；空串原样返回（缺省=现状）。
+
+    Returns:
+        插入后缀后的主名；name_suffix 为空时原样返回。
+
+    Raises:
+        BasketballPipelineError: 主名不以已知类型词结尾（命名真值表变更后需同步此处）。
+    """
+    if not name_suffix:
+        return out_stem
+    for word in _STEM_TYPE_WORDS:
+        if out_stem.endswith(word):
+            head: str = out_stem[: -len(word)]
+            # 类型词前的下划线分隔符让位给后缀：队伍_X_进球集锦 → 队伍_X_4K_进球集锦
+            if head.endswith("_"):
+                return head[:-1] + name_suffix + "_" + word
+            return head + name_suffix + word
+    raise BasketballPipelineError(
+        f"产物主名无已知类型词（{_STEM_TYPE_WORDS}），无法插入后缀: {out_stem}"
+    )
 
 
 def _encode_timeout_sec(duration_sec: float) -> int:
@@ -566,12 +616,16 @@ def main() -> int:
         team,
         per_goal,
         allow_unconfirmed,
+        name_suffix,
     ) = parse_argv()
     if not goals_path:
         logger.error("缺少 --goals 参数")
         return 1
     if per_goal and (scorer or team or roster_path):
         logger.error("--per-goal 与 --scorer/--team/--roster 互斥（真值表⑨），只能单独使用")
+        return 1
+    if per_goal and name_suffix:
+        logger.error("--per-goal 逐球出片无合集主名，--name-suffix 不适用")
         return 1
     if allow_unconfirmed and not roster_path:
         logger.error("--allow-unconfirmed 需配 --roster（真值表⑩），单独使用无意义")
@@ -596,6 +650,7 @@ def main() -> int:
                 return 1
             return _build_per_goal(goals, rawdir, session, out_w, out_h)
         goals, out_stem = select_goals(goals, roster, scorer, team)
+        out_stem = apply_name_suffix(out_stem, name_suffix)
         goals.sort(key=lambda g: (g["file"], g["anchor_time"]))
         if not goals:
             logger.error(

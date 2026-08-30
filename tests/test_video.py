@@ -855,26 +855,26 @@ class TestNamesPlayers:
             video.load_names_players(bad)
 
 
-class TestResolveOutSize:
-    """build 尺寸换算三态：16:9 / 4:3 / 混比例或未知报错。"""
+class TestResolveOutSizes:
+    """build 尺寸换算：返回 (1080p, 4K) 两态；16:9 / 4:3 / 混比例或未知报错。"""
 
     def test_16_9(self, session_dir: pathlib.Path) -> None:
         _write_json(session_dir / "session_facts.json", _facts_payload(3840, 2160))
-        assert video.resolve_out_size(session_dir) == "1920x1080"
+        assert video.resolve_out_sizes(session_dir) == ("1920x1080", "3840x2160")
 
     def test_16_9_within_tolerance(self, session_dir: pathlib.Path) -> None:
         # 容差 ±1% 内（3830x2160 ≈ 16:9 - 0.26%）
         _write_json(session_dir / "session_facts.json", _facts_payload(3830, 2160))
-        assert video.resolve_out_size(session_dir) == "1920x1080"
+        assert video.resolve_out_sizes(session_dir) == ("1920x1080", "3840x2160")
 
     def test_4_3(self, session_dir: pathlib.Path) -> None:
         _write_json(session_dir / "session_facts.json", _facts_payload(2880, 2160))
-        assert video.resolve_out_size(session_dir) == "1440x1080"
+        assert video.resolve_out_sizes(session_dir) == ("1440x1080", "2880x2160")
 
     def test_4_3_within_tolerance(self, session_dir: pathlib.Path) -> None:
         # 容差 ±1% 内（2860x2160 ≈ 4:3 - 0.69%，与 16:9 侧对称）
         _write_json(session_dir / "session_facts.json", _facts_payload(2860, 2160))
-        assert video.resolve_out_size(session_dir) == "1440x1080"
+        assert video.resolve_out_sizes(session_dir) == ("1440x1080", "2880x2160")
 
     def test_mixed_ratios_error_lists_files(self, session_dir: pathlib.Path) -> None:
         facts = {
@@ -885,7 +885,7 @@ class TestResolveOutSize:
         }
         _write_json(session_dir / "session_facts.json", facts)
         with pytest.raises(BasketballPipelineError) as exc_info:
-            video.resolve_out_size(session_dir)
+            video.resolve_out_sizes(session_dir)
         msg = str(exc_info.value)
         assert "a.mp4" in msg and "b.mp4" in msg
         assert "16:9" in msg and "4:3" in msg
@@ -893,11 +893,11 @@ class TestResolveOutSize:
     def test_unknown_ratio_error(self, session_dir: pathlib.Path) -> None:
         _write_json(session_dir / "session_facts.json", _facts_payload(1000, 1000))
         with pytest.raises(BasketballPipelineError, match="未知"):
-            video.resolve_out_size(session_dir)
+            video.resolve_out_sizes(session_dir)
 
     def test_missing_facts(self, session_dir: pathlib.Path) -> None:
         with pytest.raises(BasketballPipelineError, match="session_facts"):
-            video.resolve_out_size(session_dir)
+            video.resolve_out_sizes(session_dir)
 
 
 class TestBuild:
@@ -974,6 +974,142 @@ class TestBuild:
             "--scorer",
             "红-7",
         ]
+
+    def test_team_our_team_defaults_4k_named(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # 半截篮 队伍集锦 默认 4K（原名，无 _4K 后缀）
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(
+            ["build", "--session", SESSION, "--rawdir", str(rawdir), "--team", "半截篮"]
+        )
+        assert rc == 0
+        cmd = run_recorder[0][0]
+        assert "--out" in cmd and cmd[cmd.index("--out") + 1] == "3840x2160"
+        assert "--name-suffix" not in cmd
+
+    def test_4k_flag_scorer_adds_suffix_and_4k(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # --scorer + --4k：所选步骤 4K + _4K 后缀
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(
+            ["build", "--session", SESSION, "--rawdir", str(rawdir), "--scorer", "红-7", "--4k"]
+        )
+        assert rc == 0
+        assert len(run_recorder) == 1
+        cmd = run_recorder[0][0]
+        assert "--out" in cmd and cmd[cmd.index("--out") + 1] == "3840x2160"
+        assert "--name-suffix" in cmd and cmd[cmd.index("--name-suffix") + 1] == "_4K"
+
+    def test_4k_flag_all_expands_4k_except_our_team(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # --all --4k：其余步骤 4K+后缀；半截篮步骤 4K 原名（OUR_TEAM no-op）
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all", "--4k"])
+        assert rc == 0
+        assert len(run_recorder) == 4
+        our_team = next(c[0] for c in run_recorder if c[0][-2:] == ["--team", "半截篮"])
+        assert "--name-suffix" not in our_team
+        assert our_team[our_team.index("--out") + 1] == "3840x2160"
+        for c in run_recorder:
+            if c[0][-2:] == ["--team", "半截篮"]:
+                continue
+            assert c[0][c[0].index("--out") + 1] == "3840x2160"
+            assert "--name-suffix" in c[0] and c[0][c[0].index("--name-suffix") + 1] == "_4K"
+
+    def test_4k_flag_our_team_noop_no_duplicate(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # --team 半截篮 --4k：no-op——4K 原名、无后缀、无重复文件（仅 1 命令）
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(
+            ["build", "--session", SESSION, "--rawdir", str(rawdir), "--team", "半截篮", "--4k"]
+        )
+        assert rc == 0
+        assert len(run_recorder) == 1
+        cmd = run_recorder[0][0]
+        assert "--name-suffix" not in cmd
+        assert cmd[cmd.index("--out") + 1] == "3840x2160"
+
+    def test_4k_flag_auto_mode_warned_and_ignored(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # 未认人自动模式：--4k 被忽略并 WARNING（自动链无完整拍头时仍可能报错，
+        # 此处只验证 --4k 不透传、不影响自动模式三件套口径）
+        rawdir = self._setup(session_dir)  # 无 roster → 自动模式
+        caplog.set_level(logging.WARNING)
+        video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--4k"])
+        assert any("忽略 --4k" in r.message for r in caplog.records)
+        for c in run_recorder:
+            if not str(c[0][1]).endswith("build_highlight.py"):
+                continue
+            assert c[0][c[0].index("--out") + 1] == "1920x1080"
+            assert "--name-suffix" not in c[0]
+
+    def test_plain_all_4k_for_our_team(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # spec 用例 1：普通 --all，半截篮步骤 4K 原名，其余步骤 1080p 无后缀
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"])
+        assert rc == 0
+        assert len(run_recorder) == 4
+        our = next(c[0] for c in run_recorder if c[0][-2:] == ["--team", "半截篮"])
+        assert our[our.index("--out") + 1] == "3840x2160"
+        assert "--name-suffix" not in our
+        for c in run_recorder:
+            if c[0][-2:] == ["--team", "半截篮"]:
+                continue
+            assert c[0][c[0].index("--out") + 1] == "1920x1080"
+            assert "--name-suffix" not in c[0]
+
+    def test_4k_flag_without_selector_all_goal(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # spec 用例 4：--4k 不带选择器 → 全员合集 4K + _4K 后缀，无 --scorer/--team
+        rawdir = self._setup(session_dir, roster=True)
+        rc = video.main(["build", "--session", SESSION, "--rawdir", str(rawdir), "--4k"])
+        assert rc == 0
+        assert len(run_recorder) == 1
+        cmd = run_recorder[0][0]
+        assert cmd[cmd.index("--out") + 1] == "3840x2160"
+        assert "--name-suffix" in cmd and cmd[cmd.index("--name-suffix") + 1] == "_4K"
+        assert "--scorer" not in cmd and "--team" not in cmd
+
+    def test_all_idempotent_4k_stable(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # spec 用例 8：同参数连跑两次 --all，命令列表一致；半截篮始终 4K 原名无后缀
+        rawdir = self._setup(session_dir, roster=True)
+        argv = ["build", "--session", SESSION, "--rawdir", str(rawdir), "--all"]
+        assert video.main(argv) == 0
+        assert video.main(argv) == 0
+        assert len(run_recorder) == 8
+        first = [c[0] for c in run_recorder[:4]]
+        second = [c[0] for c in run_recorder[4:]]
+        assert first == second
+        our = next(c[0] for c in run_recorder[:4] if c[0][-2:] == ["--team", "半截篮"])
+        assert our[our.index("--out") + 1] == "3840x2160"
+        assert "--name-suffix" not in our
 
     def test_all_expands_players_and_teams(
         self,

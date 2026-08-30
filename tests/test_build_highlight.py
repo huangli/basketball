@@ -23,6 +23,7 @@ import build_highlight
 from build_highlight import (
     _remove_with_retry,
     _validate_goals,
+    apply_name_suffix,
     parse_argv,
     require_confirmed,
     scale_pad_filter,
@@ -115,13 +116,14 @@ def test_parse_argv_out_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
     monkeypatch.setattr(sys, "argv", ["build_highlight.py", "--goals", "g.json"])
     # Act
-    _, _, _, out_w, out_h, roster, team, per_goal, allow_unconfirmed = parse_argv()
-    # Assert：默认保持 4:3 老素材尺寸；roster/team 默认空；⑨⑩ 旗标默认 False
+    _, _, _, out_w, out_h, roster, team, per_goal, allow_unconfirmed, name_suffix = parse_argv()
+    # Assert：默认保持 4:3 老素材尺寸；roster/team/后缀默认空；⑨⑩ 旗标默认 False
     assert (out_w, out_h) == (1440, 1080)
     assert roster == ""
     assert team == ""
     assert per_goal is False
     assert allow_unconfirmed is False
+    assert name_suffix == ""
 
 
 def test_parse_argv_out_custom(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,7 +132,7 @@ def test_parse_argv_out_custom(monkeypatch: pytest.MonkeyPatch) -> None:
         sys, "argv", ["build_highlight.py", "--goals", "g.json", "--out", "1920x1080"]
     )
     # Act
-    _, _, _, out_w, out_h, _, _, _, _ = parse_argv()
+    _, _, _, out_w, out_h, _, _, _, _, _ = parse_argv()
     # Assert：16:9 场次注入 1920x1080
     assert (out_w, out_h) == (1920, 1080)
 
@@ -143,7 +145,7 @@ def test_parse_argv_roster_team(monkeypatch: pytest.MonkeyPatch) -> None:
         ["build_highlight.py", "--goals", "g.json", "--roster", "r.json", "--team", "地平线"],
     )
     # Act
-    _, _, _, _, _, roster, team, _, _ = parse_argv()
+    _, _, _, _, _, roster, team, _, _, _ = parse_argv()
     # Assert
     assert roster == "r.json"
     assert team == "地平线"
@@ -157,10 +159,47 @@ def test_parse_argv_per_goal_and_allow_unconfirmed(monkeypatch: pytest.MonkeyPat
         ["build_highlight.py", "--goals", "g.json", "--per-goal", "--allow-unconfirmed"],
     )
     # Act
-    *_, per_goal, allow_unconfirmed = parse_argv()
+    *_, per_goal, allow_unconfirmed, name_suffix = parse_argv()
     # Assert：⑨⑩ 旗标各自独立置位（互斥校验在 main，不在 parse_argv）
     assert per_goal is True
     assert allow_unconfirmed is True
+    assert name_suffix == ""
+
+
+def test_parse_argv_name_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["build_highlight.py", "--goals", "g.json", "--name-suffix", "_4K"],
+    )
+    # Act
+    *_, name_suffix = parse_argv()
+    # Assert
+    assert name_suffix == "_4K"
+
+
+class TestApplyNameSuffix:
+    """--name-suffix 在尾部类型词（进球集锦/进球合集）之前插入（review02-B4 中段插入）。"""
+
+    def test_empty_suffix_returns_stem_verbatim(self) -> None:
+        # Arrange / Act / Assert：缺省空串与现状逐字节一致
+        assert apply_name_suffix("队伍_地平线_进球集锦", "") == "队伍_地平线_进球集锦"
+        assert apply_name_suffix("个人_全员_进球合集", "") == "个人_全员_进球合集"
+
+    def test_team_highlight_inserts_before_type_word(self) -> None:
+        # Arrange / Act / Assert
+        assert apply_name_suffix("队伍_地平线_进球集锦", "_4K") == "队伍_地平线_4K_进球集锦"
+
+    def test_personal_and_all_inserts_before_type_word(self) -> None:
+        # Arrange / Act / Assert
+        assert apply_name_suffix("地平线_大斌_进球合集", "_4K") == "地平线_大斌_4K_进球合集"
+        assert apply_name_suffix("个人_全员_进球合集", "_4K") == "个人_全员_4K_进球合集"
+
+    def test_unknown_stem_raises(self) -> None:
+        # Arrange / Act / Assert：命名真值表变更未同步此处时显式报错（不静默）
+        with pytest.raises(BasketballPipelineError, match="无法插入后缀"):
+            apply_name_suffix("队伍_地平线", "_4K")
 
 
 def test_scale_pad_filter_uses_given_dims() -> None:

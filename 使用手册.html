@@ -192,7 +192,7 @@ video photo                                             <span class="c"># ⑤ �
     <td><code>video build</code></td>
     <td>合成合集（认人后另出进球热图，暗场/分区双图）</td>
     <td>实测约 <b>20 分钟</b>（122 球 / 20 个合集）；未认人自动模式多几分钟聚类</td>
-    <td><code>--session</code> 可省（缺省=当前场次）；默认出颜色分队集锦+进球片段+自动个人合集（无需认人）；认人后 <code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队</td>
+    <td><code>--session</code> 可省（缺省=当前场次）；默认出颜色分队集锦+进球片段+自动个人合集（无需认人）；认人后 <code>--all</code> 全量 / <code>--scorer</code> 单人 / <code>--team</code> 单队；<code>--4k</code> 手动重出所选产物为 4K（加 <code>_4K</code> 后缀），半截篮集锦本已默认 4K</td>
   </tr>
   <tr>
     <td><code>video clean</code></td>
@@ -216,7 +216,8 @@ video photo                                             <span class="c"># ⑤ �
 <h2>四、成品规格（已定型，不用管）</h2>
 <ul>
   <li>进球锚点 = 球入网瞬间；片段窗口 = 前 4 秒 + 后 2 秒。</li>
-  <li>输出 1080p / 50fps / H.264 + AAC；比例跟随素材等比缩放：16:9 出 1920×1080，4:3 出 1440×1080。</li>
+  <li>输出 1080p / 50fps / H.264 + AAC；比例跟随素材等比缩放：16:9 出 1920×1080，4:3 出 1440×1080。**半截篮队伍集锦默认 4K**（16:9 场次 3840×2160，4:3 场次 2880×2160），其余产物（对方集锦、个人合集、进球片段）维持 1080p。</li>
+  <li>手动重出 4K：<code>video build --scorer 黄立 --4k</code> / <code>--team citymonkey --4k</code> / <code>--all --4k</code>，产物名加 <code>_4K</code> 后缀（如 <code>半截篮_黄立_4K_进球合集.mp4</code>）与 1080p 版并存；半截篮集锦对 <code>--4k</code> 为 no-op（本已默认 4K）；未认人自动模式忽略 <code>--4k</code>。（2026-08-30 起，docs/build-4k/）</li>
   <li>100fps 素材：入网后 2 秒半速慢放，与常速段拼接；其他帧率不慢放。</li>
   <li>命名用真名，未填真名回退标签：<code>红队_张三</code> / <code>红队-7号</code>、<code>黑T恤-A</code> 风格；未认人的自动合集用颜色队+簇标签：<code>黑_A</code>、<code>白_B</code>……</li>
 </ul>

@@ -1,0 +1,21 @@
+# Todo: build 4K 输出
+
+- [x] Task 1: build_highlight.py 加 `--name-suffix`（类型词前插入，缺省=现状）
+  - Acceptance: `--name-suffix _4K` 出 `队伍_X_4K_进球集锦.mp4` 形态；不传与现状逐字节一致
+  - Verify: `pytest tests/test_build_highlight.py -q` → 46 passed
+  - Files: scripts/build_highlight.py, tests/test_build_highlight.py
+- [x] Task 2: video.py resolve_out_size → resolve_out_sizes（返回 (1080p, 4K) 对）+ OUT4K/OUR_TEAM/FOUR_K_SUFFIX 常量
+  - Acceptance: 16:9→("1920x1080","3840x2160")，4:3→("1440x1080","2880x2160")；混比例/未知仍显式报错
+  - Verify: `pytest tests/test_video.py -q`（基线用例全绿）
+  - Files: scripts/video.py, tests/test_video.py
+- [x] Task 3: video.py `--4k` 旗标 + per-filter 尺寸/后缀注入 + OUR_TEAM no-op + 自动模式 WARNING
+  - Acceptance: spec 测试用例 1-9 全过
+  - Verify: `pytest tests/test_video.py -q` → 用例 1/2/3/4/5/6/8/9 落地（7 由 resolve 测试覆盖）
+  - Files: scripts/video.py, tests/test_video.py
+- [x] Task 4: 关口全绿
+  - Verify: `ruff format scripts tests && ruff check --fix scripts tests && pytest -q` → 全过（全量 suite 退出码 0）
+- [x] Task 5: 实机验证 20260822_citymonkey（--scorer 半截篮6 --4k 出片 ffprobe 验尺寸；dry-run 验 --team 半截篮 4K 注入）
+  - Verify: ffprobe `半截篮_黄立_4K_进球合集.mp4` = 3840×2160/50fps；1080p 原版保留
+- [x] Task 6: 文档同步（AGENTS.md 剪辑规格段、使用手册.html build/规格章节）+ spec 两轮审查（review01/review02）+ 交付前一致性审查
+  - Verify: 审查无阻断问题（用例 1/4/8 已补齐，文件名义已更正）
+- [ ] Task 7: git commit（feat，中文 conventional，不 push）
