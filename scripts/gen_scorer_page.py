@@ -28,7 +28,13 @@ validate_roster 可校验），confirmed=true 仅当全部非 SKIP 球已归属�
     校验同构；照片库识别预填——优先级 读号命中 > 照片命中 > 印名匹配 > 空白，
     读号/照片冲突时预填读号、照片候选在条目上出角标（号码+得分）供人工点击切换，
     名单缺号注入占位条目 半截篮<号码>（team=半截篮 随 players 注入，不靠前缀推队）；
-    无此参数页面行为与旧版完全一致；spec: docs/photo-roster/spec.md T5）
+    无此参数页面行为与旧版完全一致；spec: docs/photo-roster/spec.md T5）、
+    --track-links（可选 track_links.json，必须与 --scorers 同目录，与 --clusters
+    校验同口径；轨迹传播预填——条目显示"轨迹#N"，立哥逐球归属（非"不算进球"）时
+    同文件同轨迹且无 marks/无号码预填/未手改的球自动写入 marks 并记 propagateAssign
+    provenance（localStorage 独立键），徽标"同轨迹预填"供扫一眼复核；acceptAll/E 键
+    只收号码/照片预填不碰传播预填，导出照旧 marks 全集；无此参数页面行为与现状完全
+    一致；spec: docs/scorer-propagate/spec.md §页面）
 输出：<scorer_candidates.json 同目录>/scorer.html
 依赖：scripts/roster.py（format_key/validate_roster/Player/player_from_dict，
     契约唯一入口）、scripts/pipe_common.py（read_json/run_id 日志）、scripts/errors.py
@@ -82,6 +88,9 @@ _TEAM_PREFIXES: tuple[tuple[str, str], ...] = (
 )
 # team_guess 合法值：crop_scorers 颜色分队产出的是颜色（黑/白/便服），与队名不同命名空间
 TEAM_GUESS_VALUES: tuple[str, ...] = ("黑", "白", "便服")
+# track_links.json 契约版本（与 propagate_scorers.TRACK_LINKS_VERSION 同步；
+# propagate_scorers 反向 import 本模块，直接引用会循环 import，故本地写死）
+TRACK_LINKS_VERSION: str = "track-v1"
 
 _HTML = """<!DOCTYPE html>
 <html lang="zh">
@@ -199,6 +208,12 @@ marks = Object.assign({}, EXISTING, marks);
 // 不动既有 marks 存储格式）
 let touched = {};
 try { touched = JSON.parse(localStorage.getItem(TOUCHKEY) || "{}"); } catch (e) { touched = {}; }
+const PROPKEY = LSKEY + "_propagate";
+// 传播预填 provenance：立哥逐球归属时沿同轨迹自动写入 marks 的 key 集合
+// （"同轨迹预填"徽标判定用；独立 localStorage 键，读回合并写与 touched 同模式）
+let propagateAssign = {};
+try { propagateAssign = JSON.parse(localStorage.getItem(PROPKEY) || "{}"); }
+catch (e) { propagateAssign = {}; }
 const CLSTATE_KEY = LSKEY + "_clusters";
 // 簇合并页面态：merges=被并cid→组id，clAssign=组id→tag（仅作合并预填来源，
 // 显示/折叠判定一律以 marks 为准），collapsed=显式折叠（true/false 都存），
@@ -423,6 +438,11 @@ function save() {
   catch (e) { storedTouched = {}; }
   touched = Object.assign(storedTouched, touched);
   localStorage.setItem(TOUCHKEY, JSON.stringify(touched));
+  let storedProp = {};
+  try { storedProp = JSON.parse(localStorage.getItem(PROPKEY) || "{}"); }
+  catch (e) { storedProp = {}; }
+  propagateAssign = Object.assign(storedProp, propagateAssign);
+  localStorage.setItem(PROPKEY, JSON.stringify(propagateAssign));
 }
 function teamOfTag(tag) {
   // 与 Python 端 team_of_tag 同规则：标签前缀定队，黑/蓝→对手队（OPP），其余便服
@@ -787,6 +807,8 @@ function show(i) {
   }
   info += ` | 已归属 ${nDone()}/${ITEMS.length} | ${it.file} t=${it.anchor_time}s`;
   if (it.cluster_id) info += ` | 簇#${groupIdOf(it.cluster_id)}`;
+  // 轨迹号按文件内编号（track_links 契约；无 --track-links 时条目 track_id 全 null 不显示）
+  if (it.track_id !== null && it.track_id !== undefined) info += " | 轨迹#" + it.track_id;
   // 预填优先级：号码匹配（K3 读号）> 照片库识别 > 印名匹配 > 颜色 team_guess；歧义不预填
   const ab = document.getElementById("accept");
   if (it.status === "SKIP") info += " | 无法定位";
@@ -797,6 +819,9 @@ function show(i) {
   else if (it.team_guess) info += ` | 颜色预填:${it.team_guess}`;
   const ng = it.number_guess;
   if (ng && ng.number) info += ` (读号:${ng.color || ""}${ng.number})`;
+  // 传播预填徽标（判定式 spec §页面写死）：marks 有值 + 在 propagateAssign + 未手改；
+  // 立哥逐球改归即 touched，徽标消失（手改是终裁，高于传播预填）
+  if (marks[it.key] && propagateAssign[it.key] && !touched[it.key]) info += " | 同轨迹预填";
   if (it.prefill_tag) {
     ab.textContent = `采用 ${it.prefill_tag} (E)`;
     ab.style.display = "inline-block";
@@ -825,11 +850,28 @@ function show(i) {
   renderClusters();
   renderReviewBar();
 }
+function propagateFrom(srcKey, tag) {
+  // 轨迹传播（spec: docs/scorer-propagate/spec.md §页面写死）：立哥逐球归属时，
+  // 同文件同 track_id 且无 marks/无号码预填（prefill_tag）/未 touched 的球自动
+  // 写入 marks 并记 propagateAssign provenance；"不算进球"哨兵绝不传播；
+  // 轨迹不跨文件（file 同判，track_id 只是文件内编号）
+  if (tag === NOGOAL) return;
+  const src = ITEMS.find(x => x.key === srcKey);
+  if (!src || src.track_id === null || src.track_id === undefined) return;
+  for (const it of ITEMS) {
+    if (it.key === srcKey) continue;
+    if (it.file !== src.file || it.track_id !== src.track_id) continue;
+    if (marks[it.key] || it.prefill_tag || touched[it.key]) continue;
+    marks[it.key] = tag;
+    propagateAssign[it.key] = true;
+  }
+}
 function assign(tag) {
   const vis = visible();
   if (!vis.length) return;
   marks[vis[cur].key] = tag;
   touched[vis[cur].key] = true;
+  propagateFrom(vis[cur].key, tag);
   save();
   if (review.target !== "") {
     // 按人/未归属模式：改归后球离集，落原索引位置的新当前项（[i] 即下一个），到尾停末尾
@@ -1467,6 +1509,99 @@ def build_page_clusters(
     return page
 
 
+def _validate_track_links(data: Any, path: str) -> dict[str, Any]:  # noqa: ANN401
+    """校验 track_links.json 结构（propagate_scorers 输出契约 track-v1；rules.md §0.2）。
+
+    只查本页用到的字段：顶层 version/per_file、每文件 tracks/unlinked、每条 track 的
+    track_id/keys/mixed/span。track 里引用本页 confirmed 球之外的 key 不在此炸
+    （跨批次 key 是常态，build_track_map 记 INFO 跳过）。
+
+    Args:
+        data: read_json 读出的原始 JSON。
+        path: 文件路径（仅用于错误信息）。
+
+    Returns:
+        per_file 段（fid → {tracks, unlinked}，保留原始 dict）。
+
+    Raises:
+        SchemaError: 顶层非对象 / version 不符 / 缺 per_file / track 结构坏或类型错。
+    """
+    if not isinstance(data, dict):
+        raise SchemaError(f"{path}: 顶层必须是对象，实际 {type(data).__name__}")
+    if data.get("version") != TRACK_LINKS_VERSION:
+        raise SchemaError(
+            f"{path}: version 须为 {TRACK_LINKS_VERSION}，实际 {data.get('version')!r}"
+        )
+    per_file: Any = data.get("per_file")
+    if not isinstance(per_file, dict):
+        raise SchemaError(f"{path}: 缺 per_file 对象或类型错误")
+    for fid, fr in per_file.items():
+        if not isinstance(fr, dict):
+            raise SchemaError(f"{path}: per_file[{fid!r}] 不是对象")
+        tracks: Any = fr.get("tracks")
+        if not isinstance(tracks, list):
+            raise SchemaError(f"{path}: per_file[{fid!r}] 缺 tracks 列表或类型错误")
+        for i, t in enumerate(tracks):
+            if not isinstance(t, dict):
+                raise SchemaError(f"{path}: per_file[{fid!r}] 第{i}条轨迹不是对象")
+            tid: Any = t.get("track_id")
+            if isinstance(tid, bool) or not isinstance(tid, int):
+                raise SchemaError(f"{path}: per_file[{fid!r}] 第{i}条轨迹 track_id 缺失或非 int")
+            keys: Any = t.get("keys")
+            if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+                raise SchemaError(f"{path}: per_file[{fid!r}] 第{i}条轨迹 keys 缺失或非 str 列表")
+            if not isinstance(t.get("mixed"), bool):
+                raise SchemaError(f"{path}: per_file[{fid!r}] 第{i}条轨迹 mixed 缺失或非 bool")
+            span: Any = t.get("span")
+            if (
+                not isinstance(span, list)
+                or len(span) != 2
+                or any(isinstance(x, bool) or not isinstance(x, int) for x in span)
+            ):
+                raise SchemaError(
+                    f"{path}: per_file[{fid!r}] 第{i}条轨迹 span 缺失或不是二元 int 列表"
+                )
+        unlinked: Any = fr.get("unlinked")
+        if not isinstance(unlinked, list) or not all(isinstance(k, str) for k in unlinked):
+            raise SchemaError(f"{path}: per_file[{fid!r}] unlinked 缺失或非 str 列表")
+    return per_file
+
+
+def build_track_map(per_file: dict[str, Any], page_keys: set[str]) -> dict[str, int]:
+    """track_links → key 反查 track_id 映射（页面条目注入与"轨迹#N"显示用）。
+
+    track 里引用本页 confirmed 球之外的 key 记 INFO 跳过（跨批次 key 是常态——
+    track_links 含同 scorers 目录其他批次的球）；同一 key 挂多条轨迹（契约本应
+    互斥）取首个并记 WARNING，容忍不炸。unlinked 不进映射（归不上轨迹的球页面
+    track_id=None，不显示也不参与传播）。轨迹号按文件内编号，页面按
+    file+track_id 判同轨（轨迹不跨文件，spec 写死）。
+
+    Args:
+        per_file: _validate_track_links 校验后的 per_file 段。
+        page_keys: 本页 confirmed 球的 key 集合。
+
+    Returns:
+        key → track_id（只含本页 key）。
+    """
+    mapping: dict[str, int] = {}
+    for fid, fr in per_file.items():
+        for t in fr["tracks"]:
+            tid: int = t["track_id"]
+            for key in t["keys"]:
+                if key not in page_keys:
+                    logger.info(
+                        "轨迹#%d(%s) 引用的 key 不在本页 confirmed 球里，跳过: %s", tid, fid, key
+                    )
+                    continue
+                if key in mapping:
+                    logger.warning(
+                        "key 同时挂轨迹#%d 与轨迹#%d(%s)，取前者: %s", mapping[key], tid, fid, key
+                    )
+                    continue
+                mapping[key] = tid
+    return mapping
+
+
 def build_entries(
     confirmed: list[dict[str, Any]],
     candidates: list[dict[str, Any]],
@@ -1476,6 +1611,7 @@ def build_entries(
     players: list[Player] | None = None,
     cluster_map: dict[str, int] | None = None,
     photo_guesses: dict[str, PhotoGuess] | None = None,
+    track_map: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """组装页面条目：每条 = 一个 confirmed 球（按 file+anchor 排序）。
 
@@ -1488,7 +1624,8 @@ def build_entries(
     （prefill_note="ambiguous"），照片候选仍随条目 photo_guess 上页供角标切换；
     颜色 team_guess 仅作页面展示不参与 prefill_tag。给了 cluster_map 则每条追加
     cluster_id（不在任何簇/unclustered → None）；给了 photo_guesses 则每条追加
-    photo_guess（无命中 → None，页面不出角标）。
+    photo_guess（无命中 → None，页面不出角标）；给了 track_map 则每条追加
+    track_id（不在任何轨迹/unlinked → None，页面不显示"轨迹#N"也不参与传播）。
 
     Args:
         confirmed: goals.json 的 confirmed 记录。
@@ -1501,14 +1638,17 @@ def build_entries(
             --clusters，条目 cluster_id 全为 None（页面不渲染簇区）。
         photo_guesses: key → PhotoGuess（resolve_photo_guesses 产物）；None 表示
             无 --photo-matches，条目 photo_guess 全为 None（页面行为与旧版一致）。
+        track_map: key → track_id（build_track_map 产物，文件内编号）；None 表示
+            无 --track-links，条目 track_id 全为 None（页面行为与现状完全一致）。
 
     Returns:
         页面条目列表（key/file/anchor_time/status/reason/crop/team_guess/clip/
-        number_guess/prefill_tag/prefill_note/cluster_id/photo_guess）。
+        number_guess/prefill_tag/prefill_note/cluster_id/photo_guess/track_id）。
     """
     players = players or []
     cluster_map = cluster_map or {}
     photo_guesses = photo_guesses or {}
+    track_map = track_map or {}
     by_key: dict[str, dict[str, Any]] = {c["key"]: c for c in candidates}
     entries: list[dict[str, Any]] = []
     ordered = sorted(confirmed, key=lambda g: (g["file"], float(g["anchor_time"])))
@@ -1573,6 +1713,7 @@ def build_entries(
                     if pg is not None
                     else None
                 ),
+                "track_id": track_map.get(key),
             }
         )
     return entries
@@ -1652,6 +1793,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="photo_matches.json 路径（可选，照片库识别预填；必须与 --scorers 同目录）",
     )
+    parser.add_argument(
+        "--track-links",
+        type=Path,
+        default=None,
+        help="track_links.json 路径（可选，轨迹传播预填；必须与 --scorers 同目录）",
+    )
     ns = parser.parse_args(argv)
     if ns.players and ns.players_file is not None:
         parser.error("--players 与 --players-file 互斥：名单只给一个来源（防双源不一致）")
@@ -1661,6 +1808,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ns.photo_matches.resolve().parent != ns.scorers.resolve().parent
     ):
         parser.error("--photo-matches 必须与 --scorers 同目录（与 --clusters 校验同口径）")
+    if ns.track_links is not None and (
+        ns.track_links.resolve().parent != ns.scorers.resolve().parent
+    ):
+        parser.error("--track-links 必须与 --scorers 同目录（与 --clusters 校验同口径）")
     return ns
 
 
@@ -1745,6 +1896,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             logger.info("照片预填: %d 球命中 ← %s", len(photo_guesses), args.photo_matches)
 
+        track_map: dict[str, int] | None = None
+        if args.track_links is not None:
+            tl_data: Any = read_json(args.track_links, what="track_links.json")
+            per_file: dict[str, Any] = _validate_track_links(tl_data, str(args.track_links))
+            # 页面条目全集 = confirmed 球（spec §页面：跨批次 key 跳过不炸）
+            page_keys: set[str] = {
+                format_key(g["file"], float(g["anchor_time"])) for g in confirmed
+            }
+            track_map = build_track_map(per_file, page_keys)
+            logger.info("轨迹传播: %d 球挂上轨迹 ← %s", len(track_map), args.track_links)
+
         entries: list[dict[str, Any]] = build_entries(
             confirmed,
             candidates,
@@ -1754,6 +1916,7 @@ def main(argv: list[str] | None = None) -> int:
             players,
             cluster_map=cluster_map,
             photo_guesses=photo_guesses,
+            track_map=track_map,
         )
 
         page_clusters: list[dict[str, Any]] | None = None

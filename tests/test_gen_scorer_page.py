@@ -9,7 +9,11 @@ build_page_clusters 过滤、簇区渲染与 node --check JS 语法校验；
 --players-file 名单文件注入（docs/scorer-reid/spec.md Phase D）：合法名单解析、
 坏 JSON/坏结构/非法队名 SchemaError、与 --players 互斥、号码预填链路命中；
 --photo-matches 照片库预填（docs/photo-roster/spec.md T5）：优先级 读号>照片>印名、
-冲突角标、名单缺号占位注入、同目录校验、坏 schema 退出 1、无参数零变化。
+冲突角标、名单缺号占位注入、同目录校验、坏 schema 退出 1、无参数零变化；
+--track-links 轨迹传播预填（docs/scorer-propagate/spec.md §页面）：track_links
+schema 校验、build_track_map 跨批 key 跳过、track_id 注入与同目录校验、
+页面 JS（轨迹#N/同轨迹预填徽标/provenance 键/NOGOAL 不传播/acceptAll 隔离）、
+node --check JS 语法校验。
 """
 
 from __future__ import annotations
@@ -27,10 +31,12 @@ from errors import BasketballPipelineError, SchemaError
 from gen_scorer_page import (
     PhotoGuess,
     _validate_clusters,
+    _validate_track_links,
     build_cluster_map,
     build_entries,
     build_html,
     build_page_clusters,
+    build_track_map,
     load_players_file,
     main,
     match_clip,
@@ -1791,3 +1797,302 @@ class TestPhotoMatchesCli:
         html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
         assert '"photo_guess": null' in html
         assert "半截篮9" not in html
+
+
+# ---- --track-links 轨迹传播预填（docs/scorer-propagate/spec.md §页面） ----
+
+
+def _track_payload(per_file: dict) -> dict:
+    """构造合法 track_links.json 载荷（propagate_scorers track-v1 契约）。"""
+    return {"version": "track-v1", "per_file": per_file}
+
+
+def _file_tracks(tracks: list[dict], unlinked: list[str] | None = None) -> dict:
+    """构造单文件段：tracks=[{track_id, keys, mixed, span}], unlinked=[keys]。"""
+    return {"tracks": tracks, "unlinked": unlinked or []}
+
+
+def _track(track_id: int, keys: list[str], mixed: bool = False) -> dict:
+    """构造单条轨迹记录。"""
+    return {"track_id": track_id, "keys": keys, "mixed": mixed, "span": [0, 100]}
+
+
+class TestValidateTrackLinks:
+    """track_links.json schema 校验（rules.md §0.2：结构坏显式失败）。"""
+
+    def test_valid_payload(self) -> None:
+        # Arrange / Act
+        per_file = _validate_track_links(
+            _track_payload({"a": _file_tracks([_track(1, ["a.mp4#4.1"])])}), "t.json"
+        )
+        # Assert
+        assert per_file["a"]["tracks"] == [_track(1, ["a.mp4#4.1"])]
+
+    def test_top_level_not_dict(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="顶层"):
+            _validate_track_links([], "t.json")
+
+    def test_bad_version(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="version"):
+            _validate_track_links({"version": "bogus", "per_file": {}}, "t.json")
+
+    def test_missing_per_file(self) -> None:
+        # Arrange / Act / Assert
+        with pytest.raises(SchemaError, match="per_file"):
+            _validate_track_links({"version": "track-v1"}, "t.json")
+
+    def test_track_missing_keys(self) -> None:
+        # Arrange：轨迹缺 keys 字段
+        bad = _track_payload({"a": _file_tracks([{"track_id": 1, "mixed": False, "span": [0, 1]}])})
+        # Act / Assert
+        with pytest.raises(SchemaError, match="keys"):
+            _validate_track_links(bad, "t.json")
+
+    def test_track_bad_span(self) -> None:
+        # Arrange：span 不是二元 int 列表
+        bad = _track_payload(
+            {"a": _file_tracks([{"track_id": 1, "keys": [], "mixed": False, "span": [0]}])}
+        )
+        # Act / Assert
+        with pytest.raises(SchemaError, match="span"):
+            _validate_track_links(bad, "t.json")
+
+    def test_bad_unlinked(self) -> None:
+        # Arrange：unlinked 非 str 列表
+        bad = _track_payload({"a": {"tracks": [], "unlinked": [1]}})
+        # Act / Assert
+        with pytest.raises(SchemaError, match="unlinked"):
+            _validate_track_links(bad, "t.json")
+
+
+class TestBuildTrackMap:
+    """key 反查 track_id：本页 key 映射、跨批 key 跳过、重复 key 取首个。"""
+
+    def test_page_keys_mapped(self) -> None:
+        # Arrange / Act
+        m = build_track_map(
+            {"a": _file_tracks([_track(3, ["a.mp4#4.1", "a.mp4#6.0"])])},
+            {"a.mp4#4.1", "a.mp4#6.0"},
+        )
+        # Assert
+        assert m == {"a.mp4#4.1": 3, "a.mp4#6.0": 3}
+
+    def test_cross_batch_keys_skipped(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Arrange：轨迹含其他批次的 key（常态，不炸）
+        per_file = {"a": _file_tracks([_track(1, ["a.mp4#4.1", "other.mp4#9.9"])])}
+        # Act
+        with caplog.at_level(logging.INFO):
+            m = build_track_map(per_file, {"a.mp4#4.1"})
+        # Assert：跨批 key 跳过记 INFO，本页 key 照常映射
+        assert m == {"a.mp4#4.1": 1}
+        assert any("不在本页" in r.message for r in caplog.records)
+
+    def test_duplicate_key_first_wins(self, caplog: pytest.LogCaptureFixture) -> None:
+        # Arrange：同一 key 挂两条轨迹（契约本应互斥，容忍不炸取首个）
+        per_file = {"a": _file_tracks([_track(1, ["a.mp4#4.1"]), _track(2, ["a.mp4#4.1"])])}
+        # Act
+        with caplog.at_level(logging.WARNING):
+            m = build_track_map(per_file, {"a.mp4#4.1"})
+        # Assert
+        assert m == {"a.mp4#4.1": 1}
+        assert any("取前者" in r.message for r in caplog.records)
+
+    def test_unlinked_not_mapped(self) -> None:
+        # Arrange / Act：unlinked 球不进映射（页面 track_id=None）
+        m = build_track_map({"a": _file_tracks([], unlinked=["a.mp4#4.1"])}, {"a.mp4#4.1"})
+        # Assert
+        assert m == {}
+
+
+class TestBuildEntriesTrackId:
+    """build_entries track 注入：映射命中出 track_id；未命中/无映射 → None。"""
+
+    def test_track_id_injected(self) -> None:
+        # Arrange / Act
+        entries = build_entries(
+            [_goal(), _goal("a.mp4", 6.0)],
+            [_candidate(), _candidate("a.mp4", 6.0, crop="a_t6.jpg")],
+            None,
+            "",
+            "",
+            track_map={"a.mp4#4.1": 2, "a.mp4#6.0": 2},
+        )
+        # Assert
+        assert [e["track_id"] for e in entries] == [2, 2]
+
+    def test_unmapped_goal_track_id_none(self) -> None:
+        # Arrange / Act：部分球归不上轨迹
+        entries = build_entries(
+            [_goal()], [_candidate()], None, "", "", track_map={"other.mp4#1.0": 5}
+        )
+        # Assert
+        assert entries[0]["track_id"] is None
+
+    def test_no_track_map_zero_change(self) -> None:
+        # Arrange / Act：不传 track_map（无 --track-links 兼容口径）
+        entries = build_entries([_goal()], [_candidate()], None, "", "")
+        # Assert
+        assert entries[0]["track_id"] is None
+
+
+class TestTrackLinksCli:
+    """--track-links CLI 层：同目录校验、坏 schema 退出 1、端到端生成页面。"""
+
+    def _write_inputs(
+        self, tmp_path: pathlib.Path, per_file: dict
+    ) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+        """造 scorers/goals/track_links 三个输入文件，返回路径。"""
+        scorers_dir = tmp_path / "scorers"
+        scorers_dir.mkdir()
+        scorers = scorers_dir / "scorer_candidates.json"
+        scorers.write_text(
+            json.dumps({"session": "s", "candidates": [_candidate()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps({"session": "s", "goals": [_goal()]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        track_links = scorers_dir / "track_links.json"
+        track_links.write_text(
+            json.dumps(_track_payload(per_file), ensure_ascii=False), encoding="utf-8"
+        )
+        return scorers, goals, track_links
+
+    def test_end_to_end_with_track_links(self, tmp_path: pathlib.Path) -> None:
+        # Arrange
+        scorers, goals, tl = self._write_inputs(
+            tmp_path, {"a": _file_tracks([_track(7, ["a.mp4#4.1"])])}
+        )
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--track-links", str(tl)])
+        # Assert
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"track_id": 7' in html
+
+    def test_cross_batch_keys_tolerated(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：track_links 含其他批次的 key（常态，不炸不退出）
+        scorers, goals, tl = self._write_inputs(
+            tmp_path,
+            {"a": _file_tracks([_track(1, ["a.mp4#4.1", "other.mp4#9.9"])], ["x.mp4#1.0"])},
+        )
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--track-links", str(tl)])
+        # Assert
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"track_id": 1' in html
+        assert "other.mp4#9.9" not in html
+
+    def test_track_links_different_dir_rejected(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：track_links 与 scorers 不同目录（与 --clusters 校验同口径）
+        scorers, goals, _ = self._write_inputs(tmp_path, {})
+        other = tmp_path / "other" / "track_links.json"
+        other.parent.mkdir()
+        other.write_text(json.dumps(_track_payload({})), encoding="utf-8")
+        # Act / Assert：parser.error 显式拒绝（SystemExit 2）
+        with pytest.raises(SystemExit):
+            main(["--scorers", str(scorers), "--goals", str(goals), "--track-links", str(other)])
+
+    def test_bad_track_links_schema_exit_1(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：缺 per_file → SchemaError 显式失败
+        scorers, goals, tl = self._write_inputs(tmp_path, {})
+        tl.write_text(json.dumps({"version": "track-v1"}), encoding="utf-8")
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals), "--track-links", str(tl)])
+        # Assert
+        assert rc == 1
+
+    def test_no_track_links_zero_change(self, tmp_path: pathlib.Path) -> None:
+        # Arrange：同目录有 track_links.json 但不传参（只认显式 --track-links）
+        scorers, goals, _ = self._write_inputs(
+            tmp_path, {"a": _file_tracks([_track(7, ["a.mp4#4.1"])])}
+        )
+        # Act
+        rc = main(["--scorers", str(scorers), "--goals", str(goals)])
+        # Assert：track_id 全 null（兼容性承诺锁定）
+        assert rc == 0
+        html = (scorers.parent / "scorer.html").read_text(encoding="utf-8")
+        assert '"track_id": null' in html
+
+
+class TestTrackPropagatePageJs:
+    """页面 JS 契约（spec §页面写死）：轨迹#N、传播触发条件、徽标判定式、
+    acceptAll/E 键隔离、provenance 独立键。"""
+
+    def _html(self) -> str:
+        entries = build_entries([_goal()], [_candidate()], None, "", "", track_map={"a.mp4#4.1": 3})
+        return build_html(entries, [], "s", {}, {}, "地平线")
+
+    def test_track_label_and_badge_rendered(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert：条目显示"轨迹#N"；徽标判定式 spec 写死（marks 有值 + provenance + 未手改）
+        assert '"track_id": 3' in html
+        assert '" | 轨迹#" + it.track_id' in html
+        assert "同轨迹预填" in html
+        assert "marks[it.key] && propagateAssign[it.key] && !touched[it.key]" in html
+
+    def test_provenance_key_pattern(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        # Assert：provenance 独立 localStorage 键（沿用 touched 键管理模式）
+        assert 'const PROPKEY = LSKEY + "_propagate";' in html
+        assert "localStorage.setItem(PROPKEY, JSON.stringify(propagateAssign))" in html
+
+    def test_propagate_from_guards(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        start = html.index("function propagateFrom")
+        body = html[start : html.index("function assign(", start)]
+        # Assert：NOGOAL 不传播；只写无 marks/无 prefill_tag/未 touched 的同文件同轨迹球；
+        # 写 marks 并记 provenance
+        assert "if (tag === NOGOAL) return;" in body
+        assert "it.file !== src.file || it.track_id !== src.track_id" in body
+        assert "marks[it.key] || it.prefill_tag || touched[it.key]" in body
+        assert "marks[it.key] = tag;" in body
+        assert "propagateAssign[it.key] = true;" in body
+
+    def test_assign_triggers_propagation(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        start = html.index("function assign(tag)")
+        body = html[start : html.index("function skip(", start)]
+        # Assert：逐球归属（含 E 键/球员按钮共用的 assign）触发传播
+        assert "propagateFrom(vis[cur].key, tag);" in body
+
+    def test_acceptall_isolated_from_propagation(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        start = html.index("function acceptAllPrefills")
+        body = html[start : html.index("document.getElementById", start)]
+        # Assert：acceptAll 只收 prefill_tag，不碰传播预填 provenance
+        assert "propagateAssign" not in body
+        assert "if (!it.prefill_tag) continue;" in body
+
+    def test_export_unchanged_uses_marks(self) -> None:
+        # Arrange / Act
+        html = self._html()
+        start = html.index("function exportRoster")
+        body = html[start : html.index("function acceptAllPrefills", start)]
+        # Assert：导出照旧 marks 全集（传播预填随 marks 进 assignments，无需特判）
+        assert "Object.entries(marks)" in body
+        assert "propagateAssign" not in body
+
+    def test_track_js_syntax_node_check(self, tmp_path: pathlib.Path) -> None:
+        # node 不在 PATH 则跳过（沿用现有同款模式，防模板改动引入 JS 语法错——7e9967c 前科）
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node 不在 PATH")
+        html = self._html()
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        js_path = tmp_path / "page.js"
+        js_path.write_text(script, encoding="utf-8")
+        proc = subprocess.run(  # noqa: S603 node 路径来自 shutil.which，可信
+            [node, "--check", str(js_path)], capture_output=True, text=True, check=False
+        )
+        assert proc.returncode == 0, proc.stderr
