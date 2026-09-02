@@ -1,9 +1,10 @@
 """统一入口 CLI：score / people / build / photo 四条高频链路的 subprocess 薄封装。
 
 输入：命令行参数（素材目录 / 场次 ID / 批次 / 过滤项）。
-输出：透传调用 run_session / crop_scorers / cluster_scorers / face_match_scorers /
-    gen_scorer_page / auto_roster / build_highlight / rank_photos / gen_photo_page
-    九个底层脚本（photo_match_scorers 已随 T12 退出 people 链，证伪留档）；
+输出：透传调用 run_session / crop_scorers / propagate_scorers / cluster_scorers /
+    face_match_scorers / gen_scorer_page / auto_roster / build_highlight /
+    rank_photos / gen_photo_page 十个底层脚本（photo_match_scorers 已随 T12 退出
+    people 链，证伪留档）；
     build 按 roster 状态分两路（认人可选化 2026-08-22，docs/build-auto-scorer/）：
     confirmed=true 走现状合成、收尾追加 in-process 调 goal_heatmap.heat_session
     出热图双风格（v4.2 集成；懒 import，附属产物失败不阻塞主链），
@@ -129,6 +130,11 @@ class Batch:
     def photo_matches(self) -> Path:
         """②.5 照片匹配产出的 photo_matches.json（与 candidates 同目录硬约束）。"""
         return self.scorers_dir / "photo_matches.json"
+
+    @property
+    def track_links(self) -> Path:
+        """①.5 轨迹传播产出的 track_links.json（与 candidates 同目录硬约束）。"""
+        return self.scorers_dir / "track_links.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -556,22 +562,42 @@ def build_people_steps(
     rawdir: Path,
     session_dir: Path,
 ) -> list[Step]:
-    """拼装单批次 people 链：裁图 → 聚类 →（②.5 照片匹配）→ 确认页（spec §people）。
+    """拼装单批次 people 链：裁图 → 传播 → 聚类 →（②.5 照片匹配）→ 确认页（spec §people）。
 
     --read-numbers 带上时 --max-reads 缺省 = 该批 confirmed 球数 ×3；
     --index / --roster-existing 文件存在才传；--skip-cluster 跳过聚类段且确认页
-    不传 --clusters。②.5 照片匹配（docs/photo-roster/spec.md T6 串法，T12 起执行体
-    换 face_match_scorers.py 人脸单路 L1）：**默认关**（2026-08-29 立哥定纯人工，
-    review05 评测不达标），--photo-match 显式开 + photos/ 库存在且非
-    --skip-cluster 才安排（face_cache 幂等缓存落该批 candidates 同目录，
-    产物落本批 photo_matches.json），缺库 INFO 跳过不阻塞；安排后确认页预传
-    --photo-matches，执行时探测产物缺失会剥掉该旗标（②.5 失败降级为无预填，
-    见 _cmd_people）。
+    不传 --clusters（①.5 传播不受 --skip-cluster 影响，恒在链中——传播只消费 ① 落的
+    seed_* 字段，与聚类无关，docs/scorer-propagate/spec.md §Commands）。②.5 照片匹配
+    （docs/photo-roster/spec.md T6 串法，T12 起执行体换 face_match_scorers.py 人脸
+    单路 L1）：**默认关**（2026-08-29 立哥定纯人工，review05 评测不达标），
+    --photo-match 显式开 + photos/ 库存在且非 --skip-cluster 才安排（face_cache 幂等
+    缓存落该批 candidates 同目录，产物落本批 photo_matches.json），缺库 INFO 跳过
+    不阻塞；安排后确认页预传 --photo-matches，执行时探测产物缺失会剥掉该旗标
+    （②.5 失败降级为无预填，见 _cmd_people）。确认页 --track-links 同口径预传：
+    ①.5 非零即停（不降级），页面能跑到即产物已在；执行时仍探测剥旗标兜底。
     """
     crop_argv: list[str] = build_crop_argv(
         batch, rawdir, read_numbers=args.read_numbers, max_reads=args.max_reads
     )
     steps: list[Step] = [Step(f"批次{batch.batch}①裁图", tuple(crop_argv))]
+
+    # ①.5 轨迹传播（docs/scorer-propagate/spec.md）：只消费 ① 落的 seed_* 字段，
+    # 产 track_links.json 落本批 scorers 目录；detectdir/framesdir 取值同 ① 裁图段
+    steps.append(
+        Step(
+            f"批次{batch.batch}①.5传播",
+            (
+                sys.executable,
+                str(SCRIPT_DIR / "propagate_scorers.py"),
+                "--candidates",
+                str(batch.scorer_candidates),
+                "--detectdir",
+                str(Path("work/detect")),
+                "--framesdir",
+                str(Path("work/frames")),
+            ),
+        )
+    )
 
     # ②.5 人脸匹配默认关（2026-08-29 立哥定纯人工：review05 全场评测采纳误指认
     # 100% 不达标，错人框是一阶根因；--photo-match 显式开保留可恢复）
@@ -635,6 +661,9 @@ def build_people_steps(
         page_argv.extend(["--index", str(batch.events_index)])
     if not args.skip_cluster:
         page_argv.extend(["--clusters", str(batch.scorer_clusters)])
+    # 预传 --track-links（①.5 产物，与 --clusters 同为链内前步产物）；执行时探测
+    # 产物缺失会剥掉该旗标（与 --photo-matches 同口径，确认页照出、无传播预填）
+    page_argv.extend(["--track-links", str(batch.track_links)])
     if photo_enabled:
         # 预传 --photo-matches；产物缺失（②.5 失败/降级）在执行时剥掉，确认页照出
         page_argv.extend(["--photo-matches", str(batch.photo_matches)])
@@ -653,7 +682,7 @@ def build_people_steps(
 
 
 def _strip_flag(argv: list[str], flag: str) -> list[str]:
-    """从命令中移除 flag 及其值各一项（②.5 降级时确认页剥 --photo-matches）。"""
+    """从命令中移除 flag 及其值各一项（确认页剥 --photo-matches / --track-links 用）。"""
     if flag not in argv:
         return argv
     i: int = argv.index(flag)
@@ -707,12 +736,14 @@ def _cmd_score(args: argparse.Namespace) -> int:
 
 
 def _cmd_people(args: argparse.Namespace) -> int:
-    """people：逐批次链（裁图 → 聚类 → ②.5 照片匹配 → 确认页），批次间独立。
+    """people：逐批次链（裁图 → 传播 → 聚类 → ②.5 照片匹配 → 确认页），批次间独立。
 
-    失败语义：①②③ 任一步失败中断整链（StepFailedError 上抛转退出 1）；仅 ②.5
+    失败语义：①①.5②③ 任一步失败中断整链（StepFailedError 上抛转退出 1）；仅 ②.5
     照片匹配允许失败降级——ERROR 留痕后继续，确认页照出（产物缺失剥
     --photo-matches，降级为无预填；docs/photo-roster/spec.md T6 串法、T12 换人脸
-    matcher 后语义不变）。
+    matcher 后语义不变）。确认页 --track-links 预传后执行时探测：track_links.json
+    缺失剥旗标（与 --photo-matches 同口径；①.5 非零即停，正常链路跑到确认页时
+    产物必在，剥离仅为兜底）。
 
     --session 缺省读当前场次指针（docs/default-session/spec.md）。
     """
@@ -743,6 +774,9 @@ def _cmd_people(args: argparse.Namespace) -> int:
                 if "--photo-matches" in argv and not batch.photo_matches.is_file():
                     # 存在性探测在执行时（②.5 之后）：产物缺失 → 剥旗标，无预填照出
                     argv = _strip_flag(argv, "--photo-matches")
+                if "--track-links" in argv and not batch.track_links.is_file():
+                    # 存在性探测在执行时（①.5 之后）：产物缺失 → 剥旗标，无传播预填照出
+                    argv = _strip_flag(argv, "--track-links")
                 try:
                     run_step(argv, step.env_extra)
                 except StepFailedError as exc:

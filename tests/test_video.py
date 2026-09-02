@@ -249,7 +249,8 @@ class TestDiscoverBatches:
 
 
 class TestPeople:
-    """people：三段链命令拼装、max-reads 换算、--index/--clusters 条件传递。"""
+    """people：四段链（裁图→传播→聚类→确认页）命令拼装、max-reads 换算、
+    --index/--clusters 条件传递。"""
 
     def _setup_batch(self, session_dir: pathlib.Path, *, events_index: bool = True) -> pathlib.Path:
         """备好现行布局批次 2 的全部前置产物，返回 rawdir。"""
@@ -261,19 +262,19 @@ class TestPeople:
         rawdir.mkdir()
         return rawdir
 
-    def test_three_steps_verbatim(
+    def test_four_steps_verbatim(
         self,
         session_dir: pathlib.Path,
         run_recorder: list[tuple[list[str], dict[str, str]]],
     ) -> None:
         rawdir = self._setup_batch(session_dir)
         # --no-read-numbers：读号默认关（photo-roster T12 起，v2.1 零 token 定案），
-        # 本用例锁定三段链的裸骨架，显式关掉读号保持断言面最小
+        # 本用例锁定四段链的裸骨架，显式关掉读号保持断言面最小
         rc = video.main(
             ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
         )
         assert rc == 0
-        assert len(run_recorder) == 3
+        assert len(run_recorder) == 4
         # ① 裁图（--no-read-numbers 时一个读号旗标都不带）
         assert run_recorder[0][0] == [
             sys.executable,
@@ -291,8 +292,19 @@ class TestPeople:
             "--rawdir",
             str(rawdir),
         ]
-        # ② 聚类：显式定档 --linkage complete --threshold 0.15，clusters 落本批目录
+        # ①.5 传播：消费 ① 的 scorer_candidates.json，detectdir/framesdir 取值同 ①
         assert run_recorder[1][0] == [
+            sys.executable,
+            str(SCRIPT_DIR / "propagate_scorers.py"),
+            "--candidates",
+            str(REL / "scorers_b2" / "scorer_candidates.json"),
+            "--detectdir",
+            str(pathlib.Path("work/detect")),
+            "--framesdir",
+            str(pathlib.Path("work/frames")),
+        ]
+        # ② 聚类：显式定档 --linkage complete --threshold 0.15，clusters 落本批目录
+        assert run_recorder[2][0] == [
             sys.executable,
             str(SCRIPT_DIR / "cluster_scorers.py"),
             "--candidates",
@@ -304,10 +316,11 @@ class TestPeople:
             "--threshold",
             "0.15",
         ]
-        assert run_recorder[1][1]["HTTPS_PROXY"] == "http://127.0.0.1:7897"
-        assert run_recorder[1][1]["PYTHONIOENCODING"] == "utf-8"
-        # ③ 确认页：--index 存在才传、--clusters 同目录
-        assert run_recorder[2][0] == [
+        assert run_recorder[2][1]["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+        assert run_recorder[2][1]["PYTHONIOENCODING"] == "utf-8"
+        # ③ 确认页：--index 存在才传、--clusters 同目录；track_links.json 缺失
+        # （mock 子进程不产真文件）→ 执行时剥掉 --track-links
+        assert run_recorder[3][0] == [
             sys.executable,
             str(SCRIPT_DIR / "gen_scorer_page.py"),
             "--scorers",
@@ -334,12 +347,12 @@ class TestPeople:
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
         base_keys = set(os.environ) | {"PYTHONIOENCODING"}
-        # ①③ 非聚类段：相对 os.environ 无额外键（锁定 HTTPS_PROXY 仅聚类段叠加）
-        for idx in (0, 2):
+        # ①①.5③ 非聚类段：相对 os.environ 无额外键（锁定 HTTPS_PROXY 仅聚类段叠加）
+        for idx in (0, 1, 3):
             assert set(run_recorder[idx][1]) - base_keys == set()
         # ② 聚类段：恰好只多 HTTPS_PROXY
-        assert set(run_recorder[1][1]) - base_keys == {"HTTPS_PROXY"}
-        assert run_recorder[1][1]["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+        assert set(run_recorder[2][1]) - base_keys == {"HTTPS_PROXY"}
+        assert run_recorder[2][1]["HTTPS_PROXY"] == "http://127.0.0.1:7897"
 
     def test_read_numbers_max_reads_default(
         self,
@@ -410,7 +423,7 @@ class TestPeople:
         rawdir = self._setup_batch(session_dir, events_index=False)
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
-        assert "--index" not in run_recorder[2][0]
+        assert "--index" not in run_recorder[3][0]
 
     def test_skip_cluster(
         self,
@@ -420,10 +433,11 @@ class TestPeople:
         rawdir = self._setup_batch(session_dir)
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir), "--skip-cluster"])
         assert rc == 0
-        # 只跑 ①③ 两段，③ 不传 --clusters
-        assert len(run_recorder) == 2
-        assert "cluster_scorers.py" not in run_recorder[1][0][1]
-        assert "--clusters" not in run_recorder[1][0]
+        # 只跑 ①①.5③ 三段：--skip-cluster 不影响传播步骤，③ 不传 --clusters
+        assert len(run_recorder) == 3
+        assert "propagate_scorers.py" in run_recorder[1][0][1]
+        assert all("cluster_scorers.py" not in cmd[1] for cmd, _ in run_recorder)
+        assert "--clusters" not in run_recorder[2][0]
 
     def test_roster_existing_and_players_file(
         self,
@@ -449,7 +463,7 @@ class TestPeople:
             ]
         )
         assert rc == 0
-        page_cmd = run_recorder[2][0]
+        page_cmd = run_recorder[3][0]
         assert "--roster-existing" in page_cmd
         assert page_cmd[page_cmd.index("--roster-existing") + 1] == str(REL / "roster.json")
         assert "--players-file" in page_cmd
@@ -464,8 +478,8 @@ class TestPeople:
         _write_json(session_dir / "candidates_batch3.json", [])
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir), "--batch", "3"])
         assert rc == 0
-        # 只跑批次 3（3 段），批次 2 不跑
-        assert len(run_recorder) == 3
+        # 只跑批次 3（4 段），批次 2 不跑
+        assert len(run_recorder) == 4
         assert any("goals_batch3.json" in item for item in run_recorder[0][0])
 
     def test_batch_not_found(self, session_dir: pathlib.Path) -> None:
@@ -486,7 +500,7 @@ class TestPeople:
         rawdir.mkdir()
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
         assert rc == 0
-        assert len(run_recorder) == 3
+        assert len(run_recorder) == 4
         assert any("goals_batch3.json" in item for item in run_recorder[0][0])
 
     def test_rawdir_from_state(
@@ -517,9 +531,9 @@ class TestPeople:
         self, session_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rawdir = self._setup_batch(session_dir)
-        calls = _fail_recorder(monkeypatch, fail_at=1)  # 聚类段失败
+        calls = _fail_recorder(monkeypatch, fail_at=1)  # ①.5 传播段失败
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
-        # 非零即停：只跑了 ①② 两步，③ 未执行
+        # 非零即停：只跑了 ①①.5 两步，②③ 未执行
         assert rc == 1
         assert len(calls) == 2
 
@@ -591,10 +605,15 @@ class TestPeoplePhotoMatch:
         batch = video.discover_batches(REL)[0]
         # Act
         steps = video.build_people_steps(self._args(photo_match=False), batch, rawdir, session_dir)
-        # Assert：无 ②.5、确认页不带 --photo-matches，聚类照跑
-        assert [s.title for s in steps] == ["批次2①裁图", "批次2②聚类", "批次2③确认页"]
+        # Assert：无 ②.5、确认页不带 --photo-matches，传播/聚类照跑
+        assert [s.title for s in steps] == [
+            "批次2①裁图",
+            "批次2①.5传播",
+            "批次2②聚类",
+            "批次2③确认页",
+        ]
         assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
-        assert "--photo-matches" not in steps[2].argv
+        assert "--photo-matches" not in steps[3].argv
 
     def test_default_off_main_level(
         self,
@@ -607,11 +626,11 @@ class TestPeoplePhotoMatch:
         rc = video.main(
             ["people", "--session", SESSION, "--rawdir", str(rawdir), "--no-read-numbers"]
         )
-        # Assert：三段链、无人脸匹配调用、确认页无 --photo-matches
+        # Assert：四段链、无人脸匹配调用、确认页无 --photo-matches
         assert rc == 0
-        assert len(run_recorder) == 3
+        assert len(run_recorder) == 4
         assert all("face_match_scorers.py" not in cmd[1] for cmd, _ in run_recorder)
-        assert "--photo-matches" not in run_recorder[2][0]
+        assert "--photo-matches" not in run_recorder[3][0]
 
     def test_photo_step_and_page_flag(self, session_dir: pathlib.Path) -> None:
         # Arrange
@@ -622,11 +641,12 @@ class TestPeoplePhotoMatch:
         # Assert：② 后插 ②.5，逐字断言匹配命令（人脸 matcher：无 --cache，产物同目录）
         assert [s.title for s in steps] == [
             "批次2①裁图",
+            "批次2①.5传播",
             "批次2②聚类",
             "批次2②.5照片匹配",
             "批次2③确认页",
         ]
-        assert list(steps[2].argv) == [
+        assert list(steps[3].argv) == [
             sys.executable,
             str(SCRIPT_DIR / "face_match_scorers.py"),
             "--photos",
@@ -636,12 +656,13 @@ class TestPeoplePhotoMatch:
             "--out",
             str(REL / "scorers_b2" / "photo_matches.json"),
         ]
-        assert steps[2].env_extra == {"HTTPS_PROXY": "http://127.0.0.1:7897"}
-        assert steps[2].allow_fail is True  # 仅 ②.5 允许失败降级
+        assert steps[3].env_extra == {"HTTPS_PROXY": "http://127.0.0.1:7897"}
+        assert steps[3].allow_fail is True  # 仅 ②.5 允许失败降级
         assert steps[0].allow_fail is False
         assert steps[1].allow_fail is False
-        assert steps[3].allow_fail is False
-        page = list(steps[3].argv)
+        assert steps[2].allow_fail is False
+        assert steps[4].allow_fail is False
+        page = list(steps[4].argv)
         assert page[page.index("--photo-matches") + 1] == str(
             REL / "scorers_b2" / "photo_matches.json"
         )
@@ -653,10 +674,10 @@ class TestPeoplePhotoMatch:
         # Act
         steps = video.build_people_steps(self._args(), batch, rawdir, session_dir)
         # Assert
-        assert len(steps) == 3
+        assert len(steps) == 4
         assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
         assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
-        assert "--photo-matches" not in steps[2].argv
+        assert "--photo-matches" not in steps[3].argv
 
     def test_skip_cluster_no_photo_step(self, session_dir: pathlib.Path) -> None:
         # Arrange：photos/ 存在但 --skip-cluster（无聚类段，②.5 同口径跳过）
@@ -665,10 +686,10 @@ class TestPeoplePhotoMatch:
         # Act
         steps = video.build_people_steps(self._args(skip_cluster=True), batch, rawdir, session_dir)
         # Assert
-        assert len(steps) == 2
+        assert len(steps) == 3
         assert all("face_match_scorers.py" not in s.argv[1] for s in steps)
         assert all("photo_match_scorers.py" not in s.argv[1] for s in steps)
-        assert "--photo-matches" not in steps[1].argv
+        assert "--photo-matches" not in steps[2].argv
 
     def test_photo_step_failure_degrades(
         self,
@@ -676,9 +697,9 @@ class TestPeoplePhotoMatch:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        # Arrange：②.5 失败（0 起第 2 次调用）
+        # Arrange：②.5 失败（0 起第 3 次调用）
         rawdir = self._setup_batch(session_dir)
-        calls = _fail_recorder(monkeypatch, fail_at=2)
+        calls = _fail_recorder(monkeypatch, fail_at=3)
         # Act
         with caplog.at_level(logging.ERROR):
             rc = video.main(
@@ -694,9 +715,9 @@ class TestPeoplePhotoMatch:
             )
         # Assert：ERROR 留痕、不中断整链、③ 确认页照出且剥掉 --photo-matches（无预填）
         assert rc == 0
-        assert len(calls) == 4
-        assert "face_match_scorers.py" in calls[2][1]
-        assert "--photo-matches" not in calls[3]
+        assert len(calls) == 5
+        assert "face_match_scorers.py" in calls[3][1]
+        assert "--photo-matches" not in calls[4]
         assert any("降级" in r.message for r in caplog.records)
 
     def test_page_flag_kept_when_output_exists(
@@ -721,8 +742,8 @@ class TestPeoplePhotoMatch:
         )
         # Assert
         assert rc == 0
-        assert len(run_recorder) == 4
-        page_cmd = run_recorder[3][0]
+        assert len(run_recorder) == 5
+        page_cmd = run_recorder[4][0]
         assert page_cmd[page_cmd.index("--photo-matches") + 1] == str(
             REL / "scorers_b2" / "photo_matches.json"
         )
@@ -732,12 +753,85 @@ class TestPeoplePhotoMatch:
     ) -> None:
         # Arrange：② 聚类失败（photos 存在 + --photo-match 开，链含 ②.5）
         rawdir = self._setup_batch(session_dir)
-        calls = _fail_recorder(monkeypatch, fail_at=1)
+        calls = _fail_recorder(monkeypatch, fail_at=2)
         # Act
         rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir), "--photo-match"])
-        # Assert：①②③ 失败语义不变——非零即停，②.5/③ 未执行
+        # Assert：①①.5②③ 失败语义不变——非零即停，②.5/③ 未执行
         assert rc == 1
-        assert len(calls) == 2
+        assert len(calls) == 3
+
+
+class TestPeoplePropagate:
+    """people ①.5 轨迹传播接线（docs/scorer-propagate/spec.md §Commands，Task 6）。
+
+    链序：裁图 → 传播 → 聚类 → 确认页；传播恒在链中（--skip-cluster 不影响，
+    失败语义同 ①②③ 非零即停）；确认页 --track-links 预传 + 执行时探测——
+    track_links.json 存在才传（mock 子进程不产真文件时剥旗标），与
+    --photo-matches 同口径。
+    """
+
+    def _setup_batch(self, session_dir: pathlib.Path) -> pathlib.Path:
+        """备好现行布局批次 2 的全部前置产物，返回 rawdir。"""
+        _write_json(session_dir / "goals_batch2.json", _goals_payload(2))
+        _write_json(session_dir / "candidates_batch2.json", [])
+        _write_json(session_dir / "review_batch2" / "events_index.json", {"events": []})
+        rawdir = session_dir.parent.parent / "raw"
+        rawdir.mkdir()
+        return rawdir
+
+    def test_track_links_absent_stripped(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：mock 子进程不产真文件 → 执行时探测 track_links.json 缺失
+        rawdir = self._setup_batch(session_dir)
+        # Act
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        # Assert：确认页剥掉 --track-links（无传播预填照出）
+        assert rc == 0
+        assert len(run_recorder) == 4
+        assert "propagate_scorers.py" in run_recorder[1][0][1]
+        assert "--track-links" not in run_recorder[3][0]
+
+    def test_track_links_present_kept(
+        self,
+        session_dir: pathlib.Path,
+        run_recorder: list[tuple[list[str], dict[str, str]]],
+    ) -> None:
+        # Arrange：track_links.json 已存在（断点续跑/上轮产物）→ 探测通过保留旗标
+        rawdir = self._setup_batch(session_dir)
+        _write_json(session_dir / "scorers_b2" / "track_links.json", {"version": "track-v1"})
+        # Act
+        rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir)])
+        # Assert
+        assert rc == 0
+        page_cmd = run_recorder[3][0]
+        assert page_cmd[page_cmd.index("--track-links") + 1] == str(
+            REL / "scorers_b2" / "track_links.json"
+        )
+
+    def test_dry_run_includes_propagate_step(
+        self,
+        session_dir: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange
+        rawdir = self._setup_batch(session_dir)
+
+        def forbidden(*a: object, **kw: object) -> None:
+            raise AssertionError("dry-run 不得启动子进程")
+
+        monkeypatch.setattr(video.subprocess, "run", forbidden)
+        # Act
+        with caplog.at_level(logging.INFO):
+            rc = video.main(["people", "--session", SESSION, "--rawdir", str(rawdir), "--dry-run"])
+        # Assert：DRY-RUN 打印含 ①.5 传播步骤（命令逐字含脚本与三必填参数）
+        assert rc == 0
+        assert any(
+            "①.5传播" in r.message and "propagate_scorers.py" in r.message for r in caplog.records
+        )
 
 
 class TestNamesPlayers:
