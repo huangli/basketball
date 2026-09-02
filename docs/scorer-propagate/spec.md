@@ -70,7 +70,8 @@
   （唯一）或 roster 归属"的 tag；**被预填球自身不算源**；多个源冲突 →
   不预填，note="conflict"；源 tag = NOGOAL 哨兵永远不作源
 - 输出 `<scorers 目录>/track_links.json`（candidates 文件只读不改）：
-  `{version, per_file: {fid: {tracks: [{track_id, keys, mixed, span}]}}}`，
+  `{version, per_file: {fid: {tracks: [{track_id, keys, mixed, span}], unlinked: [keys]}}}`
+  （unlinked = 归不上轨迹的进球 key，不参与传播），
   页面按 key 反查 track_id，entry 不回写
 
 ### --evaluate 协议（写死，防自证清白）

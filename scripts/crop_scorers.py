@@ -7,7 +7,8 @@
     裁图同球同时刻，不再引用 events_index 的事件片段，长事件开头是另一回合）。
 输出：<out>/ 下每个 confirmed 球一张投篮者裁图 + scorer_candidates.json
     （含 key=format_key、裁图路径、status OK/SKIP、team_guess、clip 预览片段
-    相对路径）；--rawdir 给定时另有 <out>/clips/<fid>_t<anchor:.1f>.mp4。
+    相对路径；OK 球另含轨迹传播种子 seed_frame/seed_box/seed_team，
+    scorer-propagate spec）；--rawdir 给定时另有 <out>/clips/<fid>_t<anchor:.1f>.mp4。
 依赖：scripts/roster.py（format_key / fid_of）、scripts/geom.py（Box/iou）、
     scripts/pipe_common.py（read_json / atomic_write_json / run_ffmpeg / run_id 日志）、
     PIL + numpy。
@@ -1043,15 +1044,22 @@ def _gate_view(img: Image.Image, box: Box) -> Image.Image:
     return crop
 
 
-def crop_and_save(img_path: Path, box: Box, out_path: Path) -> None:
+def crop_and_save(
+    img_path: Path, box: Box, out_path: Path, *, img: Image.Image | None = None
+) -> None:
     """裁出投篮者：外扩 20%，短边不足 400px 等比放大到 400px，存 JPEG。
 
     Args:
         img_path: 代表帧图片路径。
         box: 代表帧上的胜出人框（与图片同坐标系）。
         out_path: 裁图输出路径（父目录自动创建）。
+        img: 已打开的 RGB 帧图（必须与 img_path 同帧）；给定时复用不重复解码
+            （_process_goal 种子帧：seed_team 判定与裁图共用一次打开）。
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if img is not None:
+        _gate_view(img, box).save(out_path, "JPEG", quality=JPEG_QUALITY)
+        return
     with Image.open(img_path) as im:
         rgb = im.convert("RGB")
         crop = _gate_view(rgb, box)
@@ -1553,6 +1561,9 @@ def _process_goal(
     reason=quality_gate（预览片段保留、不落 crops/crop_scores）。
     entry 落 crops（质量降序文件名）与 crop_scores，crop = crops[0] 保持向后兼容；
     crops/crop_scores 只在 status=OK 时存在，SKIP 条目不含这两个字段。
+    OK 条目另落轨迹传播种子三字段（scorer-propagate spec §crop_scorers 小改）：
+    seed_frame（定位帧索引）、seed_box（[x1,y1,x2,y2] 定位帧人框）、seed_team
+    （种子帧 team_of_box 结果，与种子帧裁图复用同一次解码）；SKIP 球不落。
 
     Args:
         goal: confirmed 记录。
@@ -1618,6 +1629,14 @@ def _process_goal(
         logger.error("代表帧缺失，跳过: %s (%s)", frame_path, entry["key"])
         entry["reason"] = "missing_frame"
         return entry, True
+    # 种子帧图只开一次：seed_team 判定与种子帧裁图复用同一次解码
+    try:
+        with Image.open(frame_path) as im:
+            seed_rgb: Image.Image = im.convert("RGB")
+    except (OSError, ValueError) as exc:
+        logger.error("代表帧解码失败，跳过: %s (%s): %s", frame_path, entry["key"], exc)
+        entry["reason"] = "decode_failed"
+        return entry, True
 
     # 轨迹选帧多裁：定位帧人框为种子链同一人框，按质量分取 top best_crops（≥0.5s 去重）；
     # 选帧循环内过质量闸（宽高比先行、框内人物复检殿后），废帧丢弃取次优帧补位
@@ -1636,7 +1655,12 @@ def _process_goal(
     crop_scores: list[float] = []
     for rank, (fi, box, score, _team) in enumerate(picked, start=1):
         name: str = _crop_name_ranked(fid, anchor, rank)
-        crop_and_save(_frame_path(framesdir, fid, fi), box, outdir / name)
+        crop_and_save(
+            _frame_path(framesdir, fid, fi),
+            box,
+            outdir / name,
+            img=seed_rgb if fi == result.frame_idx else None,
+        )
         crops.append(name)
         crop_scores.append(round(score, 4))
     team: str = classify_team(outdir / crops[0])
@@ -1645,6 +1669,11 @@ def _process_goal(
     entry["crops"] = crops
     entry["crop_scores"] = crop_scores
     entry["team_guess"] = team
+    # 轨迹传播种子（scorer-propagate spec §crop_scorers 小改）：propagate_scorers
+    # 只消费这三字段，不重跑 locate_scorer；SKIP 球不落（与 crops 口径一致）
+    entry["seed_frame"] = result.frame_idx
+    entry["seed_box"] = [result.box.x1, result.box.y1, result.box.x2, result.box.y2]
+    entry["seed_team"] = team_of_box(seed_rgb, result.box)
     logger.info(
         "定位 OK: %s 帧=%d 轨长=%d/%d %steam=%s 多裁=%d/%d",
         entry["key"],

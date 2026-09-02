@@ -7,7 +7,8 @@ candidates 锚点索引匹配、裁图外扩 20% 且短边 ≥400px、颜色三�
 轨迹选帧多裁（人框 IoU 链 链上/链断/多人/越界、质量分排序、≥0.5s 去重、
 crops/crop_scores 契约与 SKIP 无多裁字段）、读号多帧投票（规则全路径）、
 number_cache md5 重键迁移（幂等/查不到保留/裁图缺失 WARNING）、跳票模式零调用、
-全量模式 --max-reads 闸（按裁图张数计）。
+全量模式 --max-reads 闸（按裁图张数计）、
+轨迹传播种子字段（OK 落 seed_frame/seed_box/seed_team，SKIP 不落）。
 """
 
 from __future__ import annotations
@@ -2033,3 +2034,109 @@ class TestQualityGateSkip:
         # 帧 0 拦截留痕：帧时刻 + 原因
         assert "t=0.0s" in caplog.text
         assert "person" in caplog.text
+
+
+class TestSeedFields:
+    """轨迹传播种子字段（scorer-propagate spec §crop_scorers 小改）：OK 球落
+    seed_frame/seed_box/seed_team 三字段，SKIP 球不落（与 crops 口径一致）。"""
+
+    def _setup(self, tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+        """搭一套临时 goals/detect/frames/out。
+
+        a_video@2.0：球全程静止在 A 框 [0,0,100,100] 内 → 轨迹法 OK（定位帧 =
+        窗口末帧 8）；b_video@1.0：空缓存 → no_track SKIP。帧图近黑 → 队伍 "黑"。
+        """
+        goals = tmp_path / "goals.json"
+        goals.write_text(
+            json.dumps(
+                {
+                    "session": "test",
+                    "goals": [
+                        {"file": "a_video.mp4", "anchor_time": 2.0, "status": "confirmed"},
+                        {"file": "b_video.mp4", "anchor_time": 1.0, "status": "confirmed"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        detectdir = tmp_path / "detect"
+        detectdir.mkdir()
+        persons = [[[0, 0, 100, 100], [500, 0, 600, 100]]] * 9
+        balls = [
+            [
+                {
+                    "conf": 0.9,
+                    "box": [40, 40, 60, 60],
+                    "cx": 50,
+                    "cy": 50,
+                    "sec": i / 5,
+                    "frame_idx": i,
+                }
+            ]
+            for i in range(9)
+        ]
+        (detectdir / "a_video_mot_cache.json").write_text(
+            json.dumps({"frames": 9, "balls": balls, "persons": persons}), encoding="utf-8"
+        )
+        (detectdir / "b_video_mot_cache.json").write_text(
+            json.dumps({"frames": 9, "balls": [[]] * 9, "persons": [[]] * 9}),
+            encoding="utf-8",
+        )
+        framesdir = tmp_path / "frames"
+        (framesdir / "a_video").mkdir(parents=True)
+        for i in range(9):
+            Image.new("RGB", (1000, 800), (20, 20, 20)).save(
+                framesdir / "a_video" / f"f_{i + 1:05d}.jpg"
+            )
+        out = tmp_path / "out"
+        return goals, detectdir, framesdir, out
+
+    def test_ok_entry_has_seed_fields(self, tmp_path: Path) -> None:
+        # Arrange
+        goals, detectdir, framesdir, out = self._setup(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+            ]
+        )
+        # Assert
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        ok = payload["candidates"][0]
+        assert ok["status"] == "OK"
+        assert ok["seed_frame"] == 8  # 持球点回放：窗口末帧（缓存共 9 帧）
+        assert ok["seed_box"] == [0, 0, 100, 100]  # 定位帧投篮者人框 = A 框
+        assert ok["seed_team"] == "黑"  # 帧图近黑
+
+    def test_skip_entry_has_no_seed_fields(self, tmp_path: Path) -> None:
+        # Arrange
+        goals, detectdir, framesdir, out = self._setup(tmp_path)
+        # Act
+        rc = main(
+            [
+                "--goals",
+                str(goals),
+                "--detectdir",
+                str(detectdir),
+                "--framesdir",
+                str(framesdir),
+                "--out",
+                str(out),
+            ]
+        )
+        # Assert：SKIP 球不落三字段
+        assert rc == 0
+        payload = json.loads((out / "scorer_candidates.json").read_text(encoding="utf-8"))
+        skip = payload["candidates"][1]
+        assert skip["status"] == "SKIP"
+        assert "seed_frame" not in skip
+        assert "seed_box" not in skip
+        assert "seed_team" not in skip
