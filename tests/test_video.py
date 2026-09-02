@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import pathlib
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -1913,6 +1914,21 @@ class TestClean:
         assert video.REPO_ROOT.is_dir()
         assert not list((tmp_path / "output").iterdir())
         assert "守卫拒删" in caplog.text
+
+    def test_readonly_files_removed(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Arrange：work/s1 内放只读文件（模拟 .git pack，WinError 5 来源）
+        self._tree(tmp_path, monkeypatch)
+        ro = tmp_path / "work" / "s1" / "pack.idx"
+        ro.write_bytes(b"0")
+        ro.chmod(stat.S_IREAD)
+        self._yes(monkeypatch)
+        # Act
+        rc = video.main(["clean"])
+        # Assert：只读文件连同父目录一并清掉
+        assert rc == 0
+        assert not (tmp_path / "work" / "s1").exists()
 
     def test_non_tty_refuses(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Arrange：非交互 stdin 且非 dry-run

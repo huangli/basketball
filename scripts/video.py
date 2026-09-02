@@ -30,8 +30,10 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -1404,6 +1406,18 @@ def _fmt_gb(n: int) -> str:
     return f"{n / (1024**3):.2f}GB"
 
 
+def _rmtree_force(path: Path) -> None:
+    """删目录树，容忍只读文件（git pack / 检出物在 Windows 上带只读位，
+    直接 rmtree 会 WinError 5）：onexc 回调去掉只读位后重试同一操作。
+    """
+
+    def _onexc(func: Callable[[str], object], p: str, exc: BaseException) -> None:
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(path, onexc=_onexc)
+
+
 def _collect_srcdir_targets() -> list[Path]:
     """从各场次 state 收集源视频目录（清 work 之前先读）；逐个过守卫，不合格剔除。
 
@@ -1489,7 +1503,7 @@ def _cmd_clean(args: argparse.Namespace) -> int:
     for p in plan:
         try:
             if p.is_dir() and not p.is_symlink():
-                shutil.rmtree(p)
+                _rmtree_force(p)
             else:
                 p.unlink()
         except OSError as exc:
