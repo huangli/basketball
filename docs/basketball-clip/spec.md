@@ -33,9 +33,9 @@
 | GUI 前端 | 原生 HTML/JS/CSS（无框架） | KISS；标注/认人/照片页复用现有生成器产物 |
 | 进度协议 | runner 解析子进程 logging 行 → 进度事件（SSE） | 日志格式约定在 plan 阶段定死，scripts 侧不加进度改造 |
 | 检测模型 | `abdullahtarek_ball.pt` + `yolov8n.pt`（CPU 推理），随安装包分发 | 见 O1（已定案） |
-| Re-ID | 仅 CLIP 后端（权重 350MB 打进安装包，见 O5）；OSNet/torchreid 在新仓库下线（见 O7） | 减少老旧依赖 |
+| Re-ID | 仅 CLIP 后端（权重随包内置，体积见 O5）；OSNet/torchreid 在新仓库下线（见 O7） | 减少老旧依赖 |
 | VLM 读号 | 开源版默认关闭，GUI 不暴露（见"scripts 豁免清单"） | 普通用户无 Kimi 凭证 |
-| 视频 | **BtbN FFmpeg LGPL build** 随安装包内嵌（许可文本随包附带） | 见 O2（已定案） |
+| 视频 | **BtbN FFmpeg GPL build** 随安装包内嵌（许可文本随包附带） | 见 O2（已定案；2026-09-05 更正：LGPL 版无 libx264 实测不可用） |
 | 打包 | PyInstaller（one-folder）+ Inno Setup 安装器 | 可行性验证见 O6 |
 | 许可证 | MIT | AGPL/LGPL 依赖声明见 O1/O2 |
 
@@ -168,9 +168,9 @@ def load_state(session: str) -> dict[str, Any]:
 | # | 问题 | 背景与选项 | 状态 |
 |---|---|---|---|
 | O1 | 模型与依赖许可 | ultralytics/yolov8n 是 AGPL：**主代码 MIT 完全开源**（立哥定），AGPL 依赖随包并在 README 显式声明，YOLO 权重允许随安装包分发；`abdullahtarek_ball.pt`（Roboflow 来源）许可发布前必须核实，不通过则该模型改首运下载 | **已定案**（2026-08-22 立哥） |
-| O2 | ffmpeg 分发 | gyan.dev 完整版的 nonfree 组件编译在二进制内**无法删除**；定案换 **BtbN FFmpeg LGPL build** 内嵌安装包（功能覆盖转码/缩放/拼接，许可文本随包）。体积口径：torch CPU ~200MB / ffmpeg ~80MB / 双 YOLO ~150MB / CLIP ~350MB | **已定案**（2026-08-22 立哥） |
+| O2 | ffmpeg 分发 | gyan.dev 完整版的 nonfree 组件编译在二进制内**无法删除**；原定 BtbN LGPL build，**2026-09-05 立哥实测更正：LGPL 版编译时 `--disable-libx264`（x264 是 GPL 组件），流水线合成全灭；改用 BtbN GPL build**（含 libx264/x265，无 nonfree，GPL 组件附许可文本即可合法再分发；ffmpeg 独立子进程调用，MIT 主代码不构成衍生作品）。体积口径：torch CPU ~200MB / ffmpeg ~80MB / 双 YOLO ~150MB / CLIP ~605MB（safetensors 实大） | **已定案**（2026-08-22 立哥；2026-09-05 更正 GPL） |
 | O3 | GitHub 仓库归属 | 账号 huangli（ekinasm@gmail.com），目标地址 `github.com/huangli/basketball-clip`，个人公开仓库；协作者/分支保护暂不设，后续需要再加 | **已定案**（2026-08-22 立哥） |
 | O4 | 现工作区与新仓库同步策略 | **立哥定案：现工作区先把在途功能开发完成，随后整体迁移，后期只在新仓库开发**（新仓库是主仓库，非旁支拷贝）；迁移完成前现工作区照常自用 | **已定案**（2026-08-22 立哥） |
-| O5 | CLIP 权重首跑下载 | 普通用户无代理下 HF 必卡；定案 **CLIP 权重（~350MB）打进安装包**，开箱即用 | **已定案**（2026-08-22 立哥） |
+| O5 | CLIP 权重首跑下载 | 普通用户无代理下 HF 必卡；定案 **CLIP 权重打进安装包**（实体 safetensors ~605MB），开箱即用、离线可用（HF_HUB_OFFLINE） | **已定案**（2026-08-22 立哥；体积 2026-09-04 实证更正） |
 | O6 | 打包 Python 版本 | 立哥改问 3.10 可行性——**方向定案：打包环境用 Python 3.10**（PyInstaller/torch/ultralytics 对 3.10 支持成熟；实证：现 scripts/ 无 3.11+ 专属语法，当前兼容）。防护链：新仓库 ruff `target-version=py310` 开发期拦截 + spike 实包验证（已完成） | **已定案，spike 通过**（见 `spike-report.md`：3.10.11 + PyInstaller 6.22 全链 PASS，collect-all 清单留存） |
 | O7 | torchreid/OSNet 去留 | torchreid 0.2.5 老旧，普通用户 pip 安装易翻车；OSNet 本就"备用不推荐"。**定案：新仓库下线 OSNet 后端**，仅保留 CLIP | 已定案，落地依赖豁免清单第 5 类 |
